@@ -3,14 +3,14 @@ const extra = req => (
 );
 
 export function sendNotFound(req, res) {
-  sendFail(req, res, 404, ['Not Found']);
+  sendFail(req, res, 404, 'Not Found');
 }
 
-export function sendFail(req, res, status, errors) {
+export function sendFail(req, res, status, error) {
   res.status(status).send({
     ...extra(req),
     success: false,
-    errors: errors.message ? [errors.message] : errors,
+    error: error.message ? error.message : error,
   });
 }
 

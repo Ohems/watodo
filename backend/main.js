@@ -1,11 +1,11 @@
 import express from 'express';
 import { oneLine } from 'common-tags';
 
-import apiRouter from './api/router';
+import v1Router from './api/v1/router';
 import staticRouter from './static';
 import config from './config';
 
-const { debug, info, warn } = require('./utils/logger')(__filename);
+const { debug, info, error } = require('./utils/logger')(__filename);
 
 const app = express();
 
@@ -20,12 +20,12 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use('/api', apiRouter);
+app.use('/api/v1', v1Router);
 app.use('/', staticRouter);
 
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
-  warn(err.stack);
+  error(err.stack);
   res.status(500).send('Internal Server Error');
 });
 
