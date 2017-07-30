@@ -1,0 +1,21 @@
+@import (less,reference) "styles.less";
+
+.toolbar-button {
+  height: 100%;
+  padding: 0.5em;
+  text-align: center;
+  .unselectable;
+}
+
+.toolbar-button-expand {
+  flex-grow: 1;
+}
+
+
+.toolbar-button:hover {
+  background: @background-grey-light-accent;
+}
+
+.toolbar-button-selected {
+  background: @background-grey-medium;
+}
