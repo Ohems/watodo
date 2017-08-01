@@ -1,7 +1,7 @@
 import express from 'express';
 import { oneLine } from 'common-tags';
 
-import v1Router from './api/v1/router';
+import v1Router from './api/router';
 import staticRouter from './static';
 import config from './config';
 
