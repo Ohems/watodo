@@ -7,6 +7,7 @@ const uglify = require('gulp-uglify');
 const sourcemaps = require('gulp-sourcemaps');
 const less = require('gulp-less');
 const minifyCSS = require('gulp-csso');
+const gulpif = require('gulp-if');
 const source = require('vinyl-source-stream');
 const buffer = require('vinyl-buffer');
 const del = require('del');
@@ -58,7 +59,7 @@ function bundle() {
     .pipe(buffer())
     // loads map from browserify file
     .pipe(sourcemaps.init({ loadMaps: true }))
-    .pipe(uglify())
+    .pipe(gulpif(production, uglify()))
     .pipe(sourcemaps.write('./')) // writes .map file
     .pipe(gulp.dest('./public/build'));
 }

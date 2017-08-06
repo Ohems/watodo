@@ -21,7 +21,7 @@ class ToolbarButton extends React.Component {
 ToolbarButton.propTypes = {
   expand: PropTypes.bool,
   onClick: PropTypes.func.isRequired,
-  children: PropTypes.object.isRequired,
+  children: PropTypes.any.isRequired,
 };
 
 export default ToolbarButton;

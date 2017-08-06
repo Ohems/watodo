@@ -16,13 +16,23 @@ const rayShielding = new RateLimit({
 router.use('/images/', rayShielding);
 router.use('/bundle.js', rayShielding);
 
-router.use(express.static('public/build'));
-router.use(express.static('public/files'));
-router.use(express.static('public/favicons'));
-router.use('/images', express.static('public/images'));
+const staticFiles = [
+  'public/build',
+  'public/files',
+  'public/favicons',
+  { mount: '/images', path: 'public/images' },
 
-router.use(express.static('node_modules/react-big-calendar/lib/css'));
-router.use(express.static('node_modules/react-select/dist/react-select.css'));
+  'node_modules/mdi/css',
+  { mount: '/fonts', path: 'node_modules/mdi/fonts' },
+];
+
+staticFiles.forEach((file) => {
+  if (typeof file === 'string') {
+    router.use(express.static(file));
+  } else {
+    router.use(file.mount, express.static(file.path));
+  }
+});
 
 router.get('/', (req, res) => {
   res.redirect('home');

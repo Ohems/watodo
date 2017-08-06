@@ -5,6 +5,7 @@ import { Switch, Route, withRouter } from 'react-router-dom';
 import Select from 'react-select';
 
 import Home from './Home';
+import Contacts from './Contacts';
 
 import ToolbarButton from '../components/ToolbarButton';
 
@@ -12,6 +13,7 @@ class App extends React.Component {
   render() {
     const routes = [
       { path: '/home', component: Home },
+      { path: '/contacts', component: Contacts },
     //  { path: '/editor', component: Editor, icon: 'mdi-border-color' },
     //  { path: '/debugger', component: Debugger, icon: 'mdi-console' },
     ];
@@ -58,9 +60,10 @@ class App extends React.Component {
 
         <div className="app-content">
           <Switch>
-            {routes.map(route => (
+            {routes.map((route, i) => (
               <Route
                 exact
+                key={i}
                 path={route.path}
                 component={route.component}
               />
