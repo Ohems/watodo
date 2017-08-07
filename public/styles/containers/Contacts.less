@@ -4,3 +4,21 @@
   width: 100%;
   height: 100%;
 }
+
+.contacts-card {
+  display: flex;
+  align-items: center;
+  margin: 0.5em;
+}
+
+
+.contacts-card-add {
+  &:extend(.contacts-card);
+  flex-direction: column;
+  justify-content: center;
+}
+
+.contacts-card-open {
+  &:extend(.contacts-card);
+  flex-direction: column;
+}
