@@ -30,7 +30,7 @@ class App extends React.Component {
     return (
       <div className="app">
         <div className="app-header">
-          <h1>Watodo</h1>
+          <img className="app-logo" src="/images/logo_white.svg" alt="Watodo logo" />
 
           <div className="app-main-actions">
             <div className="app-language-select">

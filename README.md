@@ -1,4 +1,4 @@
-# Watodo [WIP]
+# ![Watodo](./docs/logo.png) [WIP]
 
 Community event and responsibility management tool. Work in progress and currently unusable.
 
