@@ -5,7 +5,8 @@ import { Switch, Route, withRouter } from 'react-router-dom';
 import Select from 'react-select';
 
 import Home from './Home';
-import Contacts from './Contacts';
+import UserList from './UserList';
+import UserProfile from './UserProfile';
 
 import ToolbarButton from '../components/ToolbarButton';
 
@@ -13,9 +14,8 @@ class App extends React.Component {
   render() {
     const routes = [
       { path: '/home', component: Home },
-      { path: '/contacts', component: Contacts },
-    //  { path: '/editor', component: Editor, icon: 'mdi-border-color' },
-    //  { path: '/debugger', component: Debugger, icon: 'mdi-console' },
+      { path: '/users', component: UserList },
+      { path: '/users/:userId', component: UserProfile },
     ];
 
     const languages = [
@@ -23,12 +23,8 @@ class App extends React.Component {
       { value: 'FI', label: 'Suomi' },
     ];
 
-    const openCalendar = () => {
-      this.props.history.push('/home');
-    };
-
-    const openContacts = () => {
-      this.props.history.push('/contacts');
+    const openRoute = route => () => {
+      this.props.history.push(route);
     };
 
     return (
@@ -50,10 +46,10 @@ class App extends React.Component {
         </div>
 
         <div className="app-toolbar">
-          <ToolbarButton expand onClick={openCalendar}>
+          <ToolbarButton expand onClick={openRoute('/home')}>
             Calendar
           </ToolbarButton>
-          <ToolbarButton expand onClick={openContacts}>
+          <ToolbarButton expand onClick={openRoute('/users')}>
             Contacts
           </ToolbarButton>
         </div>
