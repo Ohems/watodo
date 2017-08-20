@@ -1,43 +1,42 @@
-const rp = require('request-promise');
-
-const jsonParams = {
+const rp = require('request-promise').defaults({
   json: true,
   headers: {
     'Content-Type': 'application/json',
   },
-};
+  baseUrl: window.location.origin,
+});
 
 export function get(params) {
-  rp(Object.assign(
-    { method: 'GET', ...jsonParams },
+  return rp(Object.assign(
+    { method: 'GET' },
     params
   ));
 }
 
 export function put(params) {
-  rp(Object.assign(
-    { method: 'PUT', ...jsonParams },
+  return rp(Object.assign(
+    { method: 'PUT' },
     params
   ));
 }
 
 export function post(params) {
-  rp(Object.assign(
-    { method: 'POST', ...jsonParams },
+  return rp(Object.assign(
+    { method: 'POST' },
     params
   ));
 }
 
 export function patch(params) {
-  rp(Object.assign(
-    { method: 'PATCH', ...jsonParams },
+  return rp(Object.assign(
+    { method: 'PATCH' },
     params
   ));
 }
 
 export function del(params) {
-  rp(Object.assign(
-    { method: 'DELETE', ...jsonParams },
+  return rp(Object.assign(
+    { method: 'DELETE' },
     params
   ));
 }

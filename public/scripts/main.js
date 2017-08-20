@@ -3,21 +3,17 @@ import { render } from 'react-dom';
 import { BrowserRouter } from 'react-router-dom';
 import { Provider } from 'react-redux';
 import { createStore, applyMiddleware } from 'redux';
+import { composeWithDevTools } from 'redux-devtools-extension/developmentOnly';
 import thunkMiddleware from 'redux-thunk';
-import { createLogger } from 'redux-logger';
 
 import reducers from './reducers';
 import App from './containers/App';
 
-const loggerMiddleware = createLogger();
-
-const store = createStore(
-  reducers,
+const store = createStore(reducers, composeWithDevTools(
   applyMiddleware(
-    thunkMiddleware, // Lets us dispatch() functions
-    loggerMiddleware // Logs actions
+    thunkMiddleware,
   )
-);
+));
 
 render((
   <BrowserRouter>

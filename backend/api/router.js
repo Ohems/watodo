@@ -6,7 +6,7 @@ import userRoutes from './v1/routes/user-routes';
 
 const router = express.Router();
 
-router.use('/v1/users', userRoutes);
+router.use('/users', userRoutes);
 
 router.get('/', (req, res) => {
   sendNotFound(req, res);

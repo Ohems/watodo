@@ -36,7 +36,7 @@ class UserList extends React.Component {
 
     cards.push(
       <UserCard
-        className="contacts-card-add"
+        className="user-list-card-add"
         onClick={openRoute('/users/new')}
         key={0}
       >
@@ -48,7 +48,7 @@ class UserList extends React.Component {
     (this.props.users || []).forEach((user, i) => {
       cards.push(
         <UserCard
-          className="contacts-card-open"
+          className="user-list-card-open"
           onClick={openUser}
           key={i + 1}
         >
@@ -59,7 +59,7 @@ class UserList extends React.Component {
     });
 
     return (
-      <div className="user-form">
+      <div className="user-list">
         {cards}
       </div>
     );

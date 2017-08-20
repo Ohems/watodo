@@ -10,9 +10,18 @@ import {
   USER_SEND,
   USER_SEND_SUCCESS,
   USER_SEND_FAILURE,
+
+  USER_UPDATE,
+  USER_UPDATE_SUCCESS,
+  USER_UPDATE_FAILURE,
 } from '../actions/user-actions';
 
-const users = (state = {}, action) => {
+const defautlState = {
+  users: [],
+};
+
+const users = (state = defautlState, action) => {
+  console.log(state, action);
   switch (action.type) {
     case USERS_FETCH: {
       return Object.assign(state, {
@@ -40,8 +49,20 @@ const users = (state = {}, action) => {
         userError: undefined,
       });
     }
+    case USER_UPDATE: {
+      return Object.assign(state, {
+        updatingUser: action.user.id,
+        users: state.users.map((user) => {
+          if (user.id === action.user.id) {
+            return action.user;
+          }
+          return user;
+        }),
+        userError: undefined,
+      });
+    }
     case USER_FETCH_SUCCESS:
-    case USER_SEND_SUCCESS: {
+    case USER_UPDATE_SUCCESS: {
       return Object.assign(state, {
         updatingUser: undefined,
         users: state.users.map((user) => {
@@ -52,8 +73,14 @@ const users = (state = {}, action) => {
         }),
       });
     }
+    case USER_SEND_SUCCESS: {
+      return Object.assign(state, {
+        updatingUser: undefined,
+      });
+    }
     case USER_FETCH_FAILURE:
-    case USER_SEND_FAILURE: {
+    case USER_SEND_FAILURE:
+    case USER_UPDATE_FAILURE: {
       return Object.assign(state, {
         updatingUser: false,
         userError: action.error,
