@@ -1,0 +1,61 @@
+{
+  "common": {
+    "edit": "Edit",
+    "cancel": "Cancel",
+    "save": "Save",
+    "none": "None",
+    "notSet": "Not set",
+    "select": "Select...",
+    "name": "Name",
+    "email": "Email",
+    "description": "Description"
+  },
+  "nav": {
+    "calendar": "Calendar",
+    "contacts": "Contacts",
+    "events": "Events",
+    "templates": "Templates",
+    "organization": "Organization",
+    "profile": "Profile",
+    "account": "Account",
+    "logout": "Logout",
+    "openSettings": "Open settings",
+    "navigationMenu": "navigation menu",
+    "userAvatar": "User"
+  },
+  "home": {
+    "title": "Calendar"
+  },
+  "login": {
+    "signInToContinue": "Sign in to continue",
+    "signInWith": "Sign in with {{provider}}",
+    "logoAlt": "Watodo"
+  },
+  "error": {
+    "oops": "Oops!",
+    "unexpected": "An unexpected error has occurred.",
+    "goHome": "Go Home"
+  },
+  "noOrganization": {
+    "title": "No Organization",
+    "message": "You are not a member of any organization yet. Please contact an administrator to be added to one.",
+    "goHome": "Go home"
+  },
+  "users": {
+    "title": "Contacts",
+    "addNew": "Add new user"
+  },
+  "userProfile": {
+    "title": "User Profile",
+    "newUser": "New User",
+    "editUser": "Edit User",
+    "permissions": "Permissions",
+    "state": "State",
+    "stateActive": "Active",
+    "stateInactive": "Inactive",
+    "backToList": "Back to list"
+  },
+  "errors": {
+    "failedToFetchUsers": "Failed to fetch users"
+  }
+}

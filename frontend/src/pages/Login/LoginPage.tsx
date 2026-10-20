@@ -4,6 +4,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Paper from '@mui/material/Paper';
 import Typography from '@mui/material/Typography';
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { authApi } from '../../api/index.js';
 import type { AuthProviderInfo } from '../../types/index.js';
 
@@ -15,6 +16,7 @@ const FALLBACK_PROVIDERS: AuthProviderInfo[] = [
 ];
 
 function LoginPage() {
+  const { t } = useTranslation();
   const [providers, setProviders] = useState<AuthProviderInfo[] | null>(null);
 
   useEffect(() => {
@@ -64,7 +66,7 @@ function LoginPage() {
           <Box
             component="img"
             src="/logo_white.svg"
-            alt="Watodo"
+            alt={t('login.logoAlt')}
             sx={{ display: 'block', width: 200, height: 'auto' }}
           />
         </Box>
@@ -78,7 +80,7 @@ function LoginPage() {
           }}
         >
           <Typography variant="body1" color="text.secondary">
-            Sign in to continue
+            {t('login.signInToContinue')}
           </Typography>
           {providers === null ? (
             <CircularProgress />
@@ -91,7 +93,7 @@ function LoginPage() {
                 variant="outlined"
                 fullWidth
               >
-                Sign in with {provider.name}
+                {t('login.signInWith', { provider: provider.name })}
               </Button>
             ))
           )}

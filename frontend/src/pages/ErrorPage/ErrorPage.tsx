@@ -1,11 +1,13 @@
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
+import { useTranslation } from 'react-i18next';
 import { isRouteErrorResponse, Link as RouterLink, useRouteError } from 'react-router-dom';
 
 export default function ErrorPage() {
+  const { t } = useTranslation();
   const error = useRouteError();
-  let errorMessage = 'An unexpected error has occurred.';
+  let errorMessage = t('error.unexpected');
   if (isRouteErrorResponse(error)) {
     errorMessage = error.statusText || `${error.status}`;
   } else if (error instanceof Error) {
@@ -23,11 +25,11 @@ export default function ErrorPage() {
       }}
     >
       <Typography variant="h1" component="h1">
-        Oops!
+        {t('error.oops')}
       </Typography>
       <Typography variant="body1">{errorMessage}</Typography>
       <Button component={RouterLink} to="/" variant="contained">
-        Go Home
+        {t('error.goHome')}
       </Button>
     </Box>
   );

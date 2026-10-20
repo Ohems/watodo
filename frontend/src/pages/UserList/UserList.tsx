@@ -3,12 +3,14 @@ import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
 import { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import UserCard from '../../components/UserCard/UserCard.js';
 import { useAppDispatch, useAppSelector } from '../../hooks/redux.js';
 import { fetchUsers } from '../../store/user-slice.js';
 
 function UserList() {
+  const { t } = useTranslation();
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const { users, loading, error } = useAppSelector(state => state.user);
@@ -36,12 +38,12 @@ function UserList() {
   return (
     <Box sx={{ p: 2 }}>
       <Typography variant="h4" gutterBottom>
-        Contacts
+        {t('users.title')}
       </Typography>
       <Box sx={{ display: 'flex', flexWrap: 'wrap' }}>
         <UserCard onClick={() => navigate('/users/new')}>
           <PersonAddIcon sx={{ fontSize: 36, mb: 1 }} />
-          <Typography variant="body2">Add new user</Typography>
+          <Typography variant="body2">{t('users.addNew')}</Typography>
         </UserCard>
         {users.map(user => (
           <UserCard key={user.id} onClick={() => navigate(`/users/${user.id}`)}>

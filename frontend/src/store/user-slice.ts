@@ -1,5 +1,6 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import { authApi, clearToken, usersApi } from '../api/index.js';
+import i18n from '../i18n/index.js';
 import type { User, UserListItem, UserPush } from '../types/index.js';
 
 export type AuthStatus = 'idle' | 'loading' | 'authenticated' | 'unauthenticated';
@@ -81,7 +82,7 @@ const userSlice = createSlice({
       })
       .addCase(fetchUsers.rejected, (state, action) => {
         state.loading = false;
-        state.error = action.error.message ?? 'Failed to fetch users';
+        state.error = action.error.message ?? i18n.t('errors.failedToFetchUsers');
       })
       .addCase(fetchUserList.fulfilled, (state, action) => {
         state.userList = action.payload;

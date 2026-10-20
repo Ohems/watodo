@@ -5,6 +5,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Paper from '@mui/material/Paper';
 import Typography from '@mui/material/Typography';
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import EditField from '../../components/EditField/EditField.js';
 import { useAppDispatch, useAppSelector } from '../../hooks/redux.js';
@@ -12,6 +13,7 @@ import { clearError, fetchUsers, updateUser } from '../../store/user-slice.js';
 import type { UserPush } from '../../types/index.js';
 
 function UserProfile() {
+  const { t } = useTranslation();
   const { userId } = useParams<{ userId: string }>();
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
@@ -59,13 +61,17 @@ function UserProfile() {
       <Paper sx={{ p: 3 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
           <Typography variant="h4">
-            {isNew ? 'New User' : editing ? 'Edit User' : (user?.name ?? 'User Profile')}
+            {isNew
+              ? t('userProfile.newUser')
+              : editing
+                ? t('userProfile.editUser')
+                : (user?.name ?? t('userProfile.title'))}
           </Typography>
           {!isNew && (
             <Box>
               {!editing ? (
                 <Button variant="contained" onClick={() => setEditing(true)}>
-                  Edit
+                  {t('common.edit')}
                 </Button>
               ) : (
                 <>
@@ -83,10 +89,10 @@ function UserProfile() {
                     }}
                     sx={{ mr: 1 }}
                   >
-                    Cancel
+                    {t('common.cancel')}
                   </Button>
                   <Button variant="contained" onClick={handleSave}>
-                    Save
+                    {t('common.save')}
                   </Button>
                 </>
               )}
@@ -103,56 +109,56 @@ function UserProfile() {
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <Box>
             <Typography variant="subtitle2" color="text.secondary">
-              Name
+              {t('common.name')}
             </Typography>
             <EditField
               value={editData.name ?? user?.name ?? ''}
               editing={editing || isNew}
-              label="Name"
+              label={t('common.name')}
               onChange={v => setEditData(p => ({ ...p, name: v }))}
             />
           </Box>
           <Box>
             <Typography variant="subtitle2" color="text.secondary">
-              Email
+              {t('common.email')}
             </Typography>
             <EditField
               value={editData.email ?? user?.email ?? ''}
               editing={editing || isNew}
-              label="Email"
+              label={t('common.email')}
               onChange={v => setEditData(p => ({ ...p, email: v }))}
             />
           </Box>
           <Box>
             <Typography variant="subtitle2" color="text.secondary">
-              Description
+              {t('common.description')}
             </Typography>
             <EditField
               value={editData.description ?? user?.description ?? ''}
               editing={editing || isNew}
-              label="Description"
+              label={t('common.description')}
               onChange={v => setEditData(p => ({ ...p, description: v }))}
             />
           </Box>
           <Box>
             <Typography variant="subtitle2" color="text.secondary">
-              Permissions
+              {t('userProfile.permissions')}
             </Typography>
             <Typography variant="body1">
-              {user?.permissions?.length ? user.permissions.join(', ') : 'None'}
+              {user?.permissions?.length ? user.permissions.join(', ') : t('common.none')}
             </Typography>
           </Box>
           <Box>
             <Typography variant="subtitle2" color="text.secondary">
-              State
+              {t('userProfile.state')}
             </Typography>
             <EditField
               value={editData.state ?? user?.state ?? 'active'}
               editing={editing || isNew}
-              label="State"
+              label={t('userProfile.state')}
               options={[
-                { value: 'active', label: 'Active' },
-                { value: 'inactive', label: 'Inactive' },
+                { value: 'active', label: t('userProfile.stateActive') },
+                { value: 'inactive', label: t('userProfile.stateInactive') },
               ]}
               onChange={v => setEditData(p => ({ ...p, state: v as 'active' | 'inactive' }))}
             />
@@ -162,7 +168,7 @@ function UserProfile() {
         {!isNew && (
           <Box sx={{ mt: 3 }}>
             <Button variant="text" onClick={() => navigate('/users')}>
-              Back to list
+              {t('userProfile.backToList')}
             </Button>
           </Box>
         )}

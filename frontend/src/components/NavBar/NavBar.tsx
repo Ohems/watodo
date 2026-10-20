@@ -11,28 +11,34 @@ import Toolbar from '@mui/material/Toolbar';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link as RouterLink } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../hooks/redux.js';
 import { logout } from '../../store/user-slice.js';
 
-const pages = [
-  { label: 'Calendar', path: '/' },
-  { label: 'Contacts', path: '/users' },
-  { label: 'Events', path: '/events' },
-  { label: 'Templates', path: '/templates' },
-  { label: 'Organization', path: '/organization' },
-];
-const settings = ['Profile', 'Account', 'Logout'];
-
 function NavBar() {
+  const { t } = useTranslation();
   const dispatch = useAppDispatch();
   const currentUser = useAppSelector(state => state.user.currentUser);
   const [anchorElNav, setAnchorElNav] = useState<null | HTMLElement>(null);
   const [anchorElUser, setAnchorElUser] = useState<null | HTMLElement>(null);
 
+  const pages = [
+    { label: t('nav.calendar'), path: '/' },
+    { label: t('nav.contacts'), path: '/users' },
+    { label: t('nav.events'), path: '/events' },
+    { label: t('nav.templates'), path: '/templates' },
+    { label: t('nav.organization'), path: '/organization' },
+  ];
+  const settings = [
+    { key: 'profile', label: t('nav.profile') },
+    { key: 'account', label: t('nav.account') },
+    { key: 'logout', label: t('nav.logout') },
+  ];
+
   const handleSettingClick = (setting: string) => {
     setAnchorElUser(null);
-    if (setting === 'Logout') {
+    if (setting === 'logout') {
       dispatch(logout());
     }
   };
@@ -62,7 +68,7 @@ function NavBar() {
           <Box sx={{ flexGrow: 1, display: { xs: 'flex', md: 'none' } }}>
             <IconButton
               size="large"
-              aria-label="navigation menu"
+              aria-label={t('nav.navigationMenu')}
               aria-controls="menu-appbar"
               aria-haspopup="true"
               onClick={e => setAnchorElNav(e.currentTarget)}
@@ -123,9 +129,9 @@ function NavBar() {
             <Typography sx={{ mr: 1, display: { xs: 'none', md: 'block' } }}>
               {currentUser?.name}
             </Typography>
-            <Tooltip title="Open settings">
+            <Tooltip title={t('nav.openSettings')}>
               <IconButton onClick={e => setAnchorElUser(e.currentTarget)} sx={{ p: 0 }}>
-                <Avatar alt={currentUser?.name ?? 'User'} />
+                <Avatar alt={currentUser?.name ?? t('nav.userAvatar')} />
               </IconButton>
             </Tooltip>
             <Menu
@@ -139,8 +145,8 @@ function NavBar() {
               onClose={() => setAnchorElUser(null)}
             >
               {settings.map(setting => (
-                <MenuItem key={setting} onClick={() => handleSettingClick(setting)}>
-                  <Typography textAlign="center">{setting}</Typography>
+                <MenuItem key={setting.key} onClick={() => handleSettingClick(setting.key)}>
+                  <Typography textAlign="center">{setting.label}</Typography>
                 </MenuItem>
               ))}
             </Menu>
