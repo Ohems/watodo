@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { User } from '../types/index.js';
 import userReducer, {
   clearError,
+  fetchCurrentUser,
   fetchUserList,
   fetchUsers,
+  logout,
   setCurrentUser,
 } from './user-slice.js';
 
@@ -27,13 +29,21 @@ describe('userSlice', () => {
     expect(state.users).toEqual([]);
     expect(state.userList).toEqual([]);
     expect(state.currentUser).toBeNull();
+    expect(state.authStatus).toBe('idle');
     expect(state.loading).toBe(false);
     expect(state.error).toBeNull();
   });
 
   it('should clear error', () => {
     const state = userReducer(
-      { users: [], userList: [], currentUser: null, loading: false, error: 'Some error' },
+      {
+        users: [],
+        userList: [],
+        currentUser: null,
+        authStatus: 'idle',
+        loading: false,
+        error: 'Some error',
+      },
       clearError(),
     );
     expect(state.error).toBeNull();
@@ -41,7 +51,14 @@ describe('userSlice', () => {
 
   it('should set current user', () => {
     const state = userReducer(
-      { users: [], userList: [], currentUser: null, loading: false, error: null },
+      {
+        users: [],
+        userList: [],
+        currentUser: null,
+        authStatus: 'idle',
+        loading: false,
+        error: null,
+      },
       setCurrentUser(mockUser),
     );
     expect(state.currentUser).toEqual(mockUser);
@@ -61,5 +78,41 @@ describe('userSlice', () => {
   it('should handle fetchUserList.fulfilled', () => {
     const state = userReducer(undefined, fetchUserList.fulfilled([{ id: '1', name: 'Test' }], ''));
     expect(state.userList).toEqual([{ id: '1', name: 'Test' }]);
+  });
+
+  it('should mark auth as loading while the current user is being fetched', () => {
+    const state = userReducer(undefined, fetchCurrentUser.pending('', undefined));
+    expect(state.authStatus).toBe('loading');
+  });
+
+  it('should mark auth as authenticated when the current user loads', () => {
+    const state = userReducer(undefined, fetchCurrentUser.fulfilled(mockUser, '', undefined));
+    expect(state.authStatus).toBe('authenticated');
+    expect(state.currentUser).toEqual(mockUser);
+  });
+
+  it('should mark auth as unauthenticated when the current user request is rejected', () => {
+    const state = userReducer(
+      undefined,
+      fetchCurrentUser.rejected(new Error('401'), '', undefined),
+    );
+    expect(state.authStatus).toBe('unauthenticated');
+    expect(state.currentUser).toBeNull();
+  });
+
+  it('should clear the session on logout', () => {
+    const state = userReducer(
+      {
+        users: [],
+        userList: [],
+        currentUser: mockUser,
+        authStatus: 'authenticated',
+        loading: false,
+        error: null,
+      },
+      logout.fulfilled(undefined, '', undefined),
+    );
+    expect(state.authStatus).toBe('unauthenticated');
+    expect(state.currentUser).toBeNull();
   });
 });

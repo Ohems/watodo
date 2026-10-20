@@ -100,6 +100,22 @@ describe('Auth API', () => {
 
     expect(response.statusCode).toBe(401);
   });
+
+  it('should list the supported auth providers', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/auth/providers',
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    const ids = body.providers.map((provider: { id: string }) => provider.id).sort();
+    expect(ids).toEqual(['discord', 'google', 'microsoft']);
+    for (const provider of body.providers) {
+      expect(provider.name).toBeTruthy();
+      expect(typeof provider.configured).toBe('boolean');
+    }
+  });
 });
 
 describe('Users API', () => {

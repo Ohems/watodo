@@ -1,4 +1,7 @@
 import type { MigrationBuilder } from 'node-pg-migrate';
+// The .ts extension is required: node-pg-migrate loads migrations with a
+// native import(), which does not map .js specifiers to .ts files.
+import { PERMISSION_DEFINITIONS } from '../src/permissions.ts';
 
 export async function up(pgm: MigrationBuilder): Promise<void> {
   // Users
@@ -65,17 +68,14 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
 
-  // Initial permission set. New permissions are added here (or in a later
-  // migration) together with new features, and registered in
-  // backend/src/permissions.ts for use in code.
+  // Initial permission set, generated from the registry in
+  // backend/src/permissions.ts so the migration and the `seed:permissions`
+  // script always agree.
+  const permissionValues = PERMISSION_DEFINITIONS.map(
+    definition => `('${definition.code}', '${definition.description.replaceAll("'", "''")}')`,
+  ).join(',\n    ');
   pgm.sql(`INSERT INTO permissions (code, description) VALUES
-    ('admin', 'Full administrative access. Bypasses all permission checks.'),
-    ('user-management:read', 'View users.'),
-    ('user-management:write', 'Create, update and delete users.'),
-    ('role-management:read', 'View roles and role assignments.'),
-    ('role-management:write', 'Create, update and delete roles, and assign them to users.'),
-    ('operations:read', 'View operations.'),
-    ('operations:write', 'Create, update and delete operations.')
+    ${permissionValues}
     ON CONFLICT (code) DO NOTHING`);
 
   // Organizations

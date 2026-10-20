@@ -6,6 +6,12 @@ import type { AuthProviderDefinition } from './types.js';
 
 export const SUPPORTED_PROVIDERS: readonly AuthProvider[] = ['discord', 'google', 'microsoft'];
 
+export const PROVIDER_NAMES: Record<AuthProvider, string> = {
+  discord: 'Discord',
+  google: 'Google',
+  microsoft: 'Microsoft',
+};
+
 // Adding a provider means adding a file in this directory and registering it
 // here. The Record key set is checked against the AuthProvider union at compile
 // time, and the auth_accounts CHECK constraint in the migration must match.

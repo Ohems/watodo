@@ -12,6 +12,8 @@ import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import { useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
+import { useAppDispatch, useAppSelector } from '../../hooks/redux.js';
+import { logout } from '../../store/user-slice.js';
 
 const pages = [
   { label: 'Calendar', path: '/' },
@@ -23,8 +25,17 @@ const pages = [
 const settings = ['Profile', 'Account', 'Logout'];
 
 function NavBar() {
+  const dispatch = useAppDispatch();
+  const currentUser = useAppSelector(state => state.user.currentUser);
   const [anchorElNav, setAnchorElNav] = useState<null | HTMLElement>(null);
   const [anchorElUser, setAnchorElUser] = useState<null | HTMLElement>(null);
+
+  const handleSettingClick = (setting: string) => {
+    setAnchorElUser(null);
+    if (setting === 'Logout') {
+      dispatch(logout());
+    }
+  };
 
   return (
     <AppBar position="static">
@@ -108,10 +119,13 @@ function NavBar() {
             ))}
           </Box>
 
-          <Box sx={{ flexGrow: 0 }}>
+          <Box sx={{ flexGrow: 0, display: 'flex', alignItems: 'center' }}>
+            <Typography sx={{ mr: 1, display: { xs: 'none', md: 'block' } }}>
+              {currentUser?.name}
+            </Typography>
             <Tooltip title="Open settings">
               <IconButton onClick={e => setAnchorElUser(e.currentTarget)} sx={{ p: 0 }}>
-                <Avatar alt="User" />
+                <Avatar alt={currentUser?.name ?? 'User'} />
               </IconButton>
             </Tooltip>
             <Menu
@@ -125,7 +139,7 @@ function NavBar() {
               onClose={() => setAnchorElUser(null)}
             >
               {settings.map(setting => (
-                <MenuItem key={setting} onClick={() => setAnchorElUser(null)}>
+                <MenuItem key={setting} onClick={() => handleSettingClick(setting)}>
                   <Typography textAlign="center">{setting}</Typography>
                 </MenuItem>
               ))}

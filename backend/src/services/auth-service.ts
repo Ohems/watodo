@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import { sql, type Transaction } from 'kysely';
 import { db } from '../database.js';
-import type { AuthProvider, User } from '../db/types.js';
+import type { AuthProvider, Database, User } from '../db/types.js';
 import { createLogger } from '../logger.js';
+import { PERMISSIONS } from '../permissions.js';
 import { getRedisClient } from '../redis.js';
 import { getProvider } from './auth-providers/index.js';
 import { getEffectivePermissions } from './permission-service.js';
@@ -43,6 +45,47 @@ async function retrieveLoginSessionState(stateId: string): Promise<{
   return JSON.parse(stateStr as string);
 }
 
+// The very first user of the system gets an organization of their own and
+// full admin rights over it.
+async function bootstrapFirstUser(tx: Transaction<Database>, userId: string): Promise<void> {
+  logger.info(`Bootstrapping first user ${userId} with an organization and admin role`);
+
+  const organization = await tx
+    .insertInto('organizations')
+    .values({ name: 'Default Organization' })
+    .returningAll()
+    .executeTakeFirstOrThrow();
+
+  await tx
+    .insertInto('user_organizations')
+    .values({ user_id: userId, organization_id: organization.id })
+    .execute();
+
+  const adminPermission = await tx
+    .selectFrom('permissions')
+    .select('id')
+    .where('code', '=', PERMISSIONS.ADMIN)
+    .executeTakeFirst();
+  if (!adminPermission) {
+    throw new Error(`The '${PERMISSIONS.ADMIN}' permission is not seeded!`);
+  }
+
+  const role = await tx
+    .insertInto('roles')
+    .values({ organization_id: organization.id, name: 'Admin' })
+    .returningAll()
+    .executeTakeFirstOrThrow();
+
+  await tx
+    .insertInto('role_permissions')
+    .values({ role_id: role.id, permission_id: adminPermission.id })
+    .execute();
+
+  await tx.insertInto('user_roles').values({ user_id: userId, role_id: role.id }).execute();
+
+  logger.info(`Created organization ${organization.id} with an admin role for user ${userId}`);
+}
+
 export async function handleNewLogin(
   provider: AuthProvider,
   loginCode: string,
@@ -55,74 +98,89 @@ export async function handleNewLogin(
   const providerToken = await providerDefinition.exchangeCode(loginCode);
   const profile = await providerDefinition.getProfile(providerToken.access_token);
 
-  // Find the user through an existing linked account, or link by email,
-  // or create a new user.
-  const account = await db
-    .selectFrom('auth_accounts')
-    .selectAll()
-    .where('provider', '=', provider)
-    .where('provider_account_id', '=', profile.id)
-    .executeTakeFirst();
-
   const email = profile.email ?? `${profile.id}@${provider}.local`;
 
-  let user: User | undefined;
-  if (account) {
-    user = await db
-      .selectFrom('users')
+  return db.transaction().execute(async tx => {
+    // Serialize concurrent first logins so that only one of them
+    // bootstraps the default organization.
+    await sql`SELECT pg_advisory_xact_lock(hashtext('watodo:first-user-bootstrap'))`.execute(tx);
+
+    // Find the user through an existing linked account, or link by email,
+    // or create a new user.
+    const account = await tx
+      .selectFrom('auth_accounts')
       .selectAll()
-      .where('id', '=', account.user_id)
+      .where('provider', '=', provider)
+      .where('provider_account_id', '=', profile.id)
       .executeTakeFirst();
-  } else {
-    user = await db.selectFrom('users').selectAll().where('email', '=', email).executeTakeFirst();
-  }
 
-  if (!user) {
-    logger.info(`Creating new user: ${profile.name ?? email} (${provider} ID: ${profile.id})`);
-    user = await db
-      .insertInto('users')
-      .values({ name: profile.name ?? email, email })
-      .returningAll()
-      .executeTakeFirstOrThrow();
-  }
+    let user: User | undefined;
+    if (account) {
+      user = await tx
+        .selectFrom('users')
+        .selectAll()
+        .where('id', '=', account.user_id)
+        .executeTakeFirst();
+    } else {
+      user = await tx.selectFrom('users').selectAll().where('email', '=', email).executeTakeFirst();
+    }
 
-  if (account) {
-    await db
-      .updateTable('auth_accounts')
-      .set({
-        access_token: providerToken.access_token,
-        refresh_token: providerToken.refresh_token ?? null,
-        expires_in: providerToken.expires_in,
-        updated_at: new Date(),
-      })
-      .where('id', '=', account.id)
-      .execute();
-  } else {
-    logger.info(`Linking ${provider} account ${profile.id} to user ${user.id}`);
-    await db
-      .insertInto('auth_accounts')
+    if (!user) {
+      const userCount = await tx
+        .selectFrom('users')
+        .select(({ fn }) => fn.countAll().as('count'))
+        .executeTakeFirstOrThrow();
+
+      logger.info(`Creating new user: ${profile.name ?? email} (${provider} ID: ${profile.id})`);
+      user = await tx
+        .insertInto('users')
+        .values({ name: profile.name ?? email, email })
+        .returningAll()
+        .executeTakeFirstOrThrow();
+
+      if (Number(userCount.count) === 0) {
+        await bootstrapFirstUser(tx, user.id);
+      }
+    }
+
+    if (account) {
+      await tx
+        .updateTable('auth_accounts')
+        .set({
+          access_token: providerToken.access_token,
+          refresh_token: providerToken.refresh_token ?? null,
+          expires_in: providerToken.expires_in,
+          updated_at: new Date(),
+        })
+        .where('id', '=', account.id)
+        .execute();
+    } else {
+      logger.info(`Linking ${provider} account ${profile.id} to user ${user.id}`);
+      await tx
+        .insertInto('auth_accounts')
+        .values({
+          user_id: user.id,
+          provider,
+          provider_account_id: profile.id,
+          access_token: providerToken.access_token,
+          refresh_token: providerToken.refresh_token ?? null,
+          expires_in: providerToken.expires_in,
+        })
+        .execute();
+    }
+
+    const accessToken = await tx
+      .insertInto('access_tokens')
       .values({
         user_id: user.id,
-        provider,
-        provider_account_id: profile.id,
-        access_token: providerToken.access_token,
-        refresh_token: providerToken.refresh_token ?? null,
-        expires_in: providerToken.expires_in,
+        token: randomUUID(),
+        user_agent: userAgent,
       })
-      .execute();
-  }
+      .returningAll()
+      .executeTakeFirstOrThrow();
 
-  const accessToken = await db
-    .insertInto('access_tokens')
-    .values({
-      user_id: user.id,
-      token: randomUUID(),
-      user_agent: userAgent,
-    })
-    .returningAll()
-    .executeTakeFirstOrThrow();
-
-  return { token: accessToken.token, returnUrl };
+    return { token: accessToken.token, returnUrl };
+  });
 }
 
 async function refreshExpiringProviderTokens(userId: string): Promise<void> {

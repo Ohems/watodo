@@ -1,23 +1,19 @@
 import { expect, test } from '@playwright/test';
 
 test.describe('Navigation', () => {
-  test('logo links to home', async ({ page }) => {
+  test('login links carry the current page as the return URL', async ({ page }) => {
     await page.goto('/users');
-    await page.getByText('WATODO').first().click();
-    await expect(page).toHaveURL('/');
+    const link = page.getByRole('link', { name: 'Sign in with Discord' });
+    const href = await link.getAttribute('href');
+    expect(href).toBeTruthy();
+    expect(href).toContain('returnUrl=');
+    expect(decodeURIComponent(href as string)).toContain('http://localhost:5173/users');
   });
 
-  test('browser back button works', async ({ page }) => {
-    await page.goto('/');
-    await page.getByRole('link', { name: 'Contacts' }).click();
-    await expect(page).toHaveURL(/\/users/);
-    await page.goBack();
-    await expect(page).toHaveURL('/');
-  });
-
-  test('error page handles unknown routes', async ({ page }) => {
-    await page.goto('/nonexistent-route');
-    await expect(page.getByText('Oops!')).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Go Home' })).toBeVisible();
+  test('the login screen is shown for every route when unauthenticated', async ({ page }) => {
+    for (const route of ['/', '/users', '/organization', '/nonexistent-route']) {
+      await page.goto(route);
+      await expect(page.getByText('Sign in to continue')).toBeVisible();
+    }
   });
 });

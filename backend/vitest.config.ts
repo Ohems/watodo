@@ -5,6 +5,9 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['tests/**/*.test.ts'],
+    // Integration tests share a single database and assert on table
+    // contents, so test files must not run in parallel.
+    fileParallelism: false,
     testTimeout: 10000,
     hookTimeout: 10000,
     coverage: {

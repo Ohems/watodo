@@ -1,14 +1,20 @@
+import Box from '@mui/material/Box';
+import CircularProgress from '@mui/material/CircularProgress';
 import CssBaseline from '@mui/material/CssBaseline';
 import { createTheme, ThemeProvider } from '@mui/material/styles';
+import { useEffect } from 'react';
 import { Provider } from 'react-redux';
 import { Route, Routes } from 'react-router-dom';
 import NavBar from './components/NavBar/NavBar.js';
+import { useAppDispatch, useAppSelector } from './hooks/redux.js';
 import ErrorPage from './pages/ErrorPage/ErrorPage.js';
 import Home from './pages/Home/Home.js';
+import LoginPage from './pages/Login/LoginPage.js';
 import NoOrganizationPage from './pages/NoOrganizationPage/NoOrganizationPage.js';
 import UserList from './pages/UserList/UserList.js';
 import UserProfile from './pages/UserProfile/UserProfile.js';
 import { store } from './store/index.js';
+import { fetchCurrentUser } from './store/user-slice.js';
 
 const theme = createTheme({
   palette: {
@@ -18,19 +24,53 @@ const theme = createTheme({
   },
 });
 
+function AppContent() {
+  const dispatch = useAppDispatch();
+  const authStatus = useAppSelector(state => state.user.authStatus);
+
+  useEffect(() => {
+    dispatch(fetchCurrentUser());
+  }, [dispatch]);
+
+  if (authStatus === 'unauthenticated') {
+    return <LoginPage />;
+  }
+
+  if (authStatus !== 'authenticated') {
+    return (
+      <Box
+        sx={{
+          minHeight: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  return (
+    <>
+      <NavBar />
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/users" element={<UserList />} />
+        <Route path="/users/:userId" element={<UserProfile />} />
+        <Route path="/organization" element={<NoOrganizationPage />} />
+        <Route path="*" element={<ErrorPage />} />
+      </Routes>
+    </>
+  );
+}
+
 function App() {
   return (
     <Provider store={store}>
       <ThemeProvider theme={theme}>
         <CssBaseline />
-        <NavBar />
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/users" element={<UserList />} />
-          <Route path="/users/:userId" element={<UserProfile />} />
-          <Route path="/organization" element={<NoOrganizationPage />} />
-          <Route path="*" element={<ErrorPage />} />
-        </Routes>
+        <AppContent />
       </ThemeProvider>
     </Provider>
   );

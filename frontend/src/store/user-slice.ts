@@ -1,11 +1,14 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from '@reduxjs/toolkit';
-import { usersApi } from '../api/index.js';
+import { authApi, clearToken, usersApi } from '../api/index.js';
 import type { User, UserListItem, UserPush } from '../types/index.js';
+
+export type AuthStatus = 'idle' | 'loading' | 'authenticated' | 'unauthenticated';
 
 interface UserState {
   users: User[];
   userList: UserListItem[];
   currentUser: User | null;
+  authStatus: AuthStatus;
   loading: boolean;
   error: string | null;
 }
@@ -14,6 +17,7 @@ const initialState: UserState = {
   users: [],
   userList: [],
   currentUser: null,
+  authStatus: 'idle',
   loading: false,
   error: null,
 };
@@ -31,6 +35,15 @@ export const fetchUserList = createAsyncThunk('user/fetchUserList', async () => 
 
 export const fetchCurrentUser = createAsyncThunk('user/fetchCurrentUser', async () => {
   return usersApi.getCurrentUser();
+});
+
+export const logout = createAsyncThunk('user/logout', async () => {
+  try {
+    await authApi.logout();
+  } catch {
+    // Log out locally even when the server call fails.
+  }
+  clearToken();
 });
 
 export const updateUser = createAsyncThunk(
@@ -73,8 +86,20 @@ const userSlice = createSlice({
       .addCase(fetchUserList.fulfilled, (state, action) => {
         state.userList = action.payload;
       })
+      .addCase(fetchCurrentUser.pending, state => {
+        state.authStatus = 'loading';
+      })
       .addCase(fetchCurrentUser.fulfilled, (state, action) => {
         state.currentUser = action.payload;
+        state.authStatus = 'authenticated';
+      })
+      .addCase(fetchCurrentUser.rejected, state => {
+        state.currentUser = null;
+        state.authStatus = 'unauthenticated';
+      })
+      .addCase(logout.fulfilled, state => {
+        state.currentUser = null;
+        state.authStatus = 'unauthenticated';
       })
       .addCase(updateUser.fulfilled, (state, action) => {
         const index = state.users.findIndex(u => u.id === action.payload.id);

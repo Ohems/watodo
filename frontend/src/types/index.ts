@@ -24,6 +24,12 @@ export interface UserListItem {
   name: string;
 }
 
+export interface AuthProviderInfo {
+  id: string;
+  name: string;
+  configured: boolean;
+}
+
 export interface OpAssignment {
   id: number;
   operationId: number;

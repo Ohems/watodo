@@ -1,7 +1,23 @@
 import { db } from '../database.js';
 import { createLogger } from '../logger.js';
+import { PERMISSION_DEFINITIONS } from '../permissions.js';
 
 const logger = createLogger('permission-service');
+
+// Inserts every permission from the registry, skipping ones that already
+// exist. Returns the number of newly inserted permissions.
+export async function seedPermissions(): Promise<number> {
+  logger.trace('permissionService.seedPermissions');
+
+  const inserted = await db
+    .insertInto('permissions')
+    .values(PERMISSION_DEFINITIONS)
+    .onConflict(oc => oc.column('code').doNothing())
+    .returning('code')
+    .execute();
+
+  return inserted.length;
+}
 
 // Effective permissions of a single user: the union of the permissions granted
 // by all roles the user holds in organizations the user belongs to. Role

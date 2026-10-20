@@ -1,47 +1,36 @@
 import { expect, test } from '@playwright/test';
 
 test.describe('Watodo App', () => {
-  test('homepage loads and shows the navigation bar', async ({ page }) => {
+  test('greets an unauthorized user with the login screen', async ({ page }) => {
     await page.goto('/');
-    await expect(page.getByRole('banner')).toBeVisible();
-    // WATODO title appears in the navbar (desktop and mobile)
     await expect(page.getByText('WATODO').first()).toBeVisible();
+    await expect(page.getByText('Sign in to continue')).toBeVisible();
   });
 
-  test('navigation links are visible', async ({ page }) => {
+  test('does not show the navigation bar when not authenticated', async ({ page }) => {
     await page.goto('/');
-    await expect(page.getByRole('link', { name: 'Calendar' })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Contacts' })).toBeVisible();
+    await expect(page.getByText('Sign in to continue')).toBeVisible();
+    await expect(page.getByRole('banner')).toHaveCount(0);
   });
 
-  test('can navigate to Contacts page', async ({ page }) => {
+  test('offers a login link for every supported provider', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('link', { name: 'Contacts' }).click();
-    await expect(page).toHaveURL(/\/users/);
-    await expect(page.getByRole('heading', { name: 'Contacts' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Sign in with Discord' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Sign in with Google' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Sign in with Microsoft' })).toBeVisible();
   });
 
-  test('can navigate to Organization page', async ({ page }) => {
+  test('provider links point at the backend login endpoints', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('link', { name: 'Organization' }).click();
-    await expect(page).toHaveURL(/\/organization/);
-    await expect(page.getByRole('heading', { name: 'No Organization' })).toBeVisible();
+    const discord = page.getByRole('link', { name: 'Sign in with Discord' });
+    await expect(discord).toHaveAttribute('href', /\/api\/v1\/auth\/discord\/login\?/);
   });
 
-  test('unknown route shows error page', async ({ page }) => {
+  test('shows the login screen on other routes too', async ({ page }) => {
+    await page.goto('/users');
+    await expect(page.getByText('Sign in to continue')).toBeVisible();
+
     await page.goto('/nonexistent-route');
-    await expect(page.getByText('Oops!')).toBeVisible();
-  });
-
-  test('user menu opens on avatar click', async ({ page }) => {
-    await page.goto('/');
-    await page.getByRole('button', { name: 'Open settings' }).click();
-    await expect(page.getByText('Profile')).toBeVisible();
-    await expect(page.getByText('Logout')).toBeVisible();
-  });
-
-  test('homepage shows calendar heading', async ({ page }) => {
-    await page.goto('/');
-    await expect(page.getByRole('heading', { name: 'Calendar' })).toBeVisible();
+    await expect(page.getByText('Sign in to continue')).toBeVisible();
   });
 });

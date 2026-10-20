@@ -49,6 +49,7 @@ export const api = {
 };
 
 import type {
+  AuthProviderInfo,
   OpAssignment,
   Operation,
   OperationInput,
@@ -58,11 +59,12 @@ import type {
 } from '../types/index.js';
 
 export const authApi = {
-  loginUrl: (state?: string, returnUrl?: string) => {
+  getProviders: () => api.get<{ providers: AuthProviderInfo[] }>('/api/v1/auth/providers'),
+  loginUrl: (provider: string, state?: string, returnUrl?: string) => {
     const params = new URLSearchParams();
     if (state) params.set('state', state);
     if (returnUrl) params.set('returnUrl', returnUrl);
-    return `/api/v1/auth/discord/login?${params.toString()}`;
+    return `/api/v1/auth/${provider}/login?${params.toString()}`;
   },
   logout: () => api.get('/api/v1/auth/logout'),
 };

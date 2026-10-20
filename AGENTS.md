@@ -61,6 +61,7 @@ Run from `backend/`:
 | `npm run migrate:create -- <name>` | Create a new migration file |
 | `npm run migrate:status` | Show migration status |
 | `npm run migrate:redo` | Revert and re-apply the latest migration |
+| `npm run seed:permissions` | Seed the permissions table from the registry (idempotent) |
 
 Run from `frontend/`:
 
@@ -141,6 +142,9 @@ backend/src/
         └── microsoft.ts  # Microsoft OAuth provider
 ```
 
+`backend/scripts/` holds one-off CLI scripts run with tsx (e.g. `seed-permissions.ts`,
+run via `npm run seed:permissions`).
+
 ### Key patterns
 
 - **Database queries**: All queries go through the Kysely `db` instance from `database.ts`.
@@ -152,20 +156,23 @@ backend/src/
 - **Auth**: Routes use `requirePermissions(...)` as a `preHandler`. The middleware reads the
   `x-token` header (or the `token` cookie), resolves the user and their effective permissions,
   and attaches them to the request as `request.auth` (`{ token, user, permissions }`).
-  Permissions are defined by the system (see `permissions.ts`, seeded in the migration table
-  `permissions`), granted to organization-specific roles (`roles` + `role_permissions`), and
+  Permissions are defined by the system (see `permissions.ts`; the initial migration
+  and `npm run seed:permissions` seed the `permissions` table from it), granted to organization-specific roles (`roles` + `role_permissions`), and
   assigned to users (`user_roles`, optionally scoped to a team and/or an event type). A user's
   effective permissions are the union of the permissions of all roles they hold in organizations
   they belong to. The `admin` permission bypasses all checks. Users can have multiple linked
   authentication accounts (`auth_accounts`) from Discord, Google or Microsoft; the OAuth logic
   for each provider lives in its own file under `services/auth-providers/` and is wired together
-  by the registry in `services/auth-providers/index.ts`.
+  by the registry in `services/auth-providers/index.ts`. When the first user ever logs in (the
+  `users` table was empty), `handleNewLogin` creates a default organization and makes that user
+  an admin of it (an `Admin` role with the `admin` permission, assigned in the same transaction).
 - **Logging**: Use `createLogger('name')` from `logger.ts` to get a child logger.
   Available levels: `fatal`, `error`, `warn`, `info`, `debug`, `trace` (NOT `silly`; pino uses `trace`).
 
 ### API Endpoints
 
 - `GET /api/health` - Health check (no auth)
+- `GET /api/v1/auth/providers` - List supported auth providers (no auth)
 - `GET /api/v1/auth/:provider/login` - Start OAuth flow (discord, google, microsoft)
 - `GET /api/v1/auth/:provider/callback` - OAuth callback
 - `GET /api/v1/auth/logout` - Logout
@@ -217,6 +224,7 @@ frontend/src/
     ├── UserList/         # User list (Contacts)
     ├── UserProfile/      # User profile detail
     ├── ErrorPage/        # Error page (uses useRouteError)
+    ├── Login/            # Login screen (shown when unauthenticated)
     └── NoOrganizationPage/ # Shown when user has no organization
 ```
 
@@ -224,6 +232,10 @@ frontend/src/
 
 - **State management**: Redux Toolkit with async thunks. Use `useAppDispatch` and
   `useAppSelector` from `hooks/redux.ts` (typed wrappers).
+- **Authentication gate**: `App.tsx` fetches the current user on load. While the
+  check is pending a spinner is shown; unauthenticated users are greeted with the
+  `Login` page (provider buttons linking to `/api/v1/auth/:provider/login`) instead
+  of the app. `user-slice.ts` tracks this as `authStatus`.
 - **API calls**: All API calls go through the client in `api/index.ts`. The client
   reads the auth token from localStorage and sends it as the `x-token` header.
 - **Routing**: React Router v7 with `createBrowserRouter`. Routes are defined in `App.tsx`.

@@ -2,12 +2,31 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { createLogger } from '../logger.js';
 import { callbackQuerySchema, loginQuerySchema, providerSchema } from '../schemas/index.js';
-import { getProvider } from '../services/auth-providers/index.js';
+import {
+  getProvider,
+  PROVIDER_NAMES,
+  SUPPORTED_PROVIDERS,
+} from '../services/auth-providers/index.js';
 import { handleNewLogin, logout, startLogin } from '../services/auth-service.js';
 
 const logger = createLogger('auth-controller');
 
 type ProviderRequest = FastifyRequest<{ Params: { provider: string } }>;
+
+export async function providersHandler(
+  _request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  logger.trace('authController.providers');
+
+  const providers = SUPPORTED_PROVIDERS.map(id => ({
+    id,
+    name: PROVIDER_NAMES[id],
+    configured: getProvider(id).isConfigured,
+  }));
+
+  return reply.status(200).send({ providers });
+}
 
 export async function login(request: ProviderRequest, reply: FastifyReply): Promise<void> {
   logger.trace('authController.login');
