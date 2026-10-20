@@ -1,0 +1,22 @@
+services:
+  watodo-postgres:
+    image: postgres:17
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_PASSWORD: dbPass123
+      POSTGRES_USER: watodo
+      POSTGRES_DB: watodo
+
+  watodo-redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+
+volumes:
+  postgres_data:
+  redis_data:

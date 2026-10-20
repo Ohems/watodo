@@ -1,0 +1,304 @@
+# Watodo Agent Instructions
+
+Instructions for AI agents working in this repository. Follow them unless the
+user explicitly overrides them.
+
+## Project Overview
+
+Watodo is a community event and responsibility management tool. It is a
+monorepo with two npm workspaces:
+
+- `backend/` - Fastify v5 REST API server (TypeScript, Node.js)
+- `frontend/` - React 19 single-page application (Vite, TypeScript, MUI)
+
+## Tech Stack
+
+- **Backend**: Fastify v5, TypeScript, Kysely + node-pg-migrate, PostgreSQL 17, Redis, pino, Zod v4
+- **Frontend**: React 19, Vite 7, TypeScript, Material-UI v7, React Router v7, Redux Toolkit
+- **Tooling**: Biome (lint + format), Vitest (unit/component tests), Playwright (E2E tests)
+- **Runtime**: Node.js >= 24.21.0 (see `.nvmrc`)
+
+## Getting Started
+
+```sh
+docker compose up -d       # start PostgreSQL and Redis
+npm install                # install all workspace dependencies
+cp .env.sample .env       # configure environment
+cp .env.sample backend/.env # backend commands run with cwd=backend/ and load .env from there
+npm run migrate -w backend # apply database migrations
+npm run dev                # start both dev servers
+```
+
+The backend runs on port 3000, the frontend on port 5173 (with API proxy to :3000).
+API docs (Swagger) are available at `http://localhost:3000/docs`.
+
+## Commands
+
+Run from the repository root:
+
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Start both backend and frontend dev servers |
+| `npm run dev:backend` | Start only the backend |
+| `npm run dev:frontend` | Start only the frontend |
+| `npm run build` | Build both workspaces |
+| `npm run build:dev` | Type-check everything (source, tests, tool configs) without emitting |
+| `npm run test` | Run all unit tests (backend + frontend) |
+| `npm run test:backend` | Run backend tests only |
+| `npm run test:frontend` | Run frontend unit tests only |
+| `npm run lint` | Lint all code with Biome |
+| `npm run lint:fix` | Lint with auto-fix |
+| `npm run check` | Biome check (lint + format) |
+| `npm run check:fix` | Biome check with auto-fix |
+| `npm run format:write` | Format all code |
+
+Run from `backend/`:
+
+| Command | Description |
+|---------|-------------|
+| `npm run migrate` | Apply pending migrations (node-pg-migrate up) |
+| `npm run migrate:down` | Revert the latest migration |
+| `npm run migrate:create -- <name>` | Create a new migration file |
+| `npm run migrate:status` | Show migration status |
+| `npm run migrate:redo` | Revert and re-apply the latest migration |
+
+Run from `frontend/`:
+
+| Command | Description |
+|---------|-------------|
+| `npm run test:e2e` | Run Playwright E2E tests |
+| `npm run test:e2e:headed` | Run E2E tests in headed mode |
+| `npm run test:e2e:ui` | Run E2E tests with Playwright UI |
+| `npm run test:all` | Run unit tests + E2E tests |
+| `npm run playwright:install` | Install Playwright browsers |
+
+## Code Conventions
+
+### TypeScript
+
+- **Backend**: `module: NodeNext`, `moduleResolution: NodeNext`, target `ES2023`, strict mode.
+  All imports use the `.js` extension (e.g. `import { db } from '../database.js'`).
+- **Frontend**: `module: ESNext`, `moduleResolution: bundler`, target `ES2022`, strict mode.
+  Imports also use the `.js` extension for consistency.
+- Both workspaces have `noUnusedLocals` and `noUnusedParameters` enabled.
+- Use `import type` for type-only imports.
+- Each workspace has two TypeScript configs:
+  - `tsconfig.json` - production build (`npm run build`). Covers only the deployable
+    source and emits build files (backend: `src/` to `dist/`; frontend: `src/` to
+    `build/`, then Vite bundles to `dist/`). Test files are excluded.
+  - `tsconfig.dev.json` - development build (`npm run build:dev`). Covers everything
+    (source, tests, migrations, tool configs such as `vitest.config.ts`) with
+    `noEmit`, so it never produces build files. `npm test` runs this first in each
+    workspace.
+
+### Biome (Formatting & Linting)
+
+- Single quotes, semicolons always, 2-space indentation, trailing commas, 100 character line width.
+- `useConst` and `useTemplate` are errors. `noExplicitAny` is a warning.
+- `noUnusedVariables` and `noUnusedImports` are errors.
+- The root `biome.json` is the base config. Each workspace's `biome.json` extends it via `"extends": "//"`.
+- Always run `npm run check:fix` before finishing work.
+
+### General
+
+- Do not use the em dash character in code comments or markdown files. Use the basic hyphen (`-`) instead.
+- Prefer `const` over `let`. Use template literals over string concatenation.
+- Handle errors explicitly. Do not silently swallow exceptions.
+
+## Backend Architecture
+
+The backend follows a layered architecture: routes, controllers, services, database.
+
+```
+backend/src/
+├── index.ts              # Entry point: connects DB/Redis, starts server
+├── app.ts                # Fastify app builder (plugins, error handlers, routes)
+├── config.ts             # Environment configuration (dotenv)
+├── logger.ts             # pino logger with pino-pretty in dev
+├── database.ts           # Kysely instance (PostgresDialect + pg.Pool)
+├── redis.ts              # ioredis client (lazy connect)
+├── permissions.ts        # Registry of system-defined permissions (codes like 'admin')
+├── db/
+│   └── types.ts          # Kysely Database interface (all tables, snake_case)
+├── schemas/
+│   └── index.ts          # Zod v4 validation schemas + inferred types
+├── middleware/
+│   └── auth.ts           # authenticate, requirePermissions (x-token header or cookie)
+├── routes/
+│   ├── index.ts          # Route registration + health check
+│   ├── auth.ts           # OAuth login/callback routes per provider + logout
+│   ├── users.ts          # User CRUD routes
+│   ├── operations.ts     # Operations + assignments routes
+│   └── roles.ts          # Role + role assignment routes (organization scoped)
+├── controllers/          # Request handlers (parse input, call services, send response)
+└── services/             # Business logic (database queries via Kysely)
+    └── auth-providers/   # OAuth provider logic, one file per provider
+        ├── index.ts      # Provider registry + lookup (SUPPORTED_PROVIDERS, getProvider)
+        ├── types.ts      # AuthProviderDefinition interface
+        ├── shared.ts     # Shared OAuth HTTP helpers (token exchange, profile fetch)
+        ├── discord.ts    # Discord OAuth provider
+        ├── google.ts     # Google OAuth provider
+        └── microsoft.ts  # Microsoft OAuth provider
+```
+
+### Key patterns
+
+- **Database queries**: All queries go through the Kysely `db` instance from `database.ts`.
+  Table types are in `db/types.ts` using snake_case column names. Use `db.selectFrom()`,
+  `db.insertInto()`, `db.updateTable()`, `db.deleteFrom()` with `.returningAll()` where needed.
+- **Transactions**: Use `db.transaction().execute(async tx => { ... })` for multi-step operations.
+- **Validation**: Controllers parse request bodies/queries with Zod schemas from `schemas/index.ts`.
+  Zod errors are caught by the global error handler and return 400.
+- **Auth**: Routes use `requirePermissions(...)` as a `preHandler`. The middleware reads the
+  `x-token` header (or the `token` cookie), resolves the user and their effective permissions,
+  and attaches them to the request as `request.auth` (`{ token, user, permissions }`).
+  Permissions are defined by the system (see `permissions.ts`, seeded in the migration table
+  `permissions`), granted to organization-specific roles (`roles` + `role_permissions`), and
+  assigned to users (`user_roles`, optionally scoped to a team and/or an event type). A user's
+  effective permissions are the union of the permissions of all roles they hold in organizations
+  they belong to. The `admin` permission bypasses all checks. Users can have multiple linked
+  authentication accounts (`auth_accounts`) from Discord, Google or Microsoft; the OAuth logic
+  for each provider lives in its own file under `services/auth-providers/` and is wired together
+  by the registry in `services/auth-providers/index.ts`.
+- **Logging**: Use `createLogger('name')` from `logger.ts` to get a child logger.
+  Available levels: `fatal`, `error`, `warn`, `info`, `debug`, `trace` (NOT `silly`; pino uses `trace`).
+
+### API Endpoints
+
+- `GET /api/health` - Health check (no auth)
+- `GET /api/v1/auth/:provider/login` - Start OAuth flow (discord, google, microsoft)
+- `GET /api/v1/auth/:provider/callback` - OAuth callback
+- `GET /api/v1/auth/logout` - Logout
+- `GET /api/v1/users` - List users with permissions (paginated, `user-management:read`)
+- `GET /api/v1/users/list` - Simple user list (id + name, no auth)
+- `GET /api/v1/users/@me` - Current user with permissions (auth required)
+- `GET /api/v1/users/:userId` - Get user with permissions (`user-management:read`)
+- `PATCH /api/v1/users/:userId` - Update user (`user-management:write`)
+- `DELETE /api/v1/users/:userId` - Delete user (`user-management:write`)
+- `GET /api/v1/operations` - List operations with assignments (`operations:read`)
+- `GET /api/v1/operations/:id` - Get operation (`operations:read`)
+- `POST /api/v1/operations` - Create/update operation (`operations:write`)
+- `DELETE /api/v1/operations/:id` - Delete operation (`operations:write`)
+- `POST /api/v1/operations/:id/assignments` - Add assignment (`operations:write`)
+- `PATCH /api/v1/operations/:id/assignments/:aid` - Update assignment (`operations:write`)
+- `DELETE /api/v1/operations/:id/assignments/:aid` - Delete assignment (`operations:write`)
+- `GET /api/v1/organizations/:organizationId/roles` - List roles with permissions (`role-management:read`)
+- `POST /api/v1/organizations/:organizationId/roles` - Create role (`role-management:write`)
+- `PATCH /api/v1/organizations/:organizationId/roles/:roleId` - Update role (`role-management:write`)
+- `DELETE /api/v1/organizations/:organizationId/roles/:roleId` - Delete role (`role-management:write`)
+- `GET /api/v1/organizations/:organizationId/roles/:roleId/assignments` - List role assignments (`role-management:read`)
+- `POST /api/v1/organizations/:organizationId/roles/:roleId/assignments` - Assign role to user, optionally scoped to a team/event type (`role-management:write`)
+- `DELETE /api/v1/organizations/:organizationId/roles/:roleId/assignments/:assignmentId` - Remove role assignment (`role-management:write`)
+
+## Frontend Architecture
+
+```
+frontend/src/
+├── main.tsx              # Entry point (Redux Provider + Router)
+├── App.tsx               # Route definitions
+├── api/
+│   └── index.ts          # API client (fetch wrapper with token auth)
+├── types/
+│   └── index.ts          # TypeScript types (User, Operation, etc.)
+├── store/
+│   ├── index.ts          # Redux store configuration
+│   └── user-slice.ts     # User state (async thunks for API calls)
+├── hooks/
+│   └── redux.ts          # Typed useAppDispatch / useAppSelector
+├── components/
+│   ├── NavBar/           # Top navigation bar
+│   ├── Calendar/         # react-big-calendar wrapper
+│   ├── EditField/        # Inline edit field
+│   ├── UserCard/         # User card component
+│   ├── ToolbarButton/    # Toolbar button
+│   └── NavigationButton/ # Navigation button
+└── pages/
+    ├── Home/             # Calendar view (default route)
+    ├── UserList/         # User list (Contacts)
+    ├── UserProfile/      # User profile detail
+    ├── ErrorPage/        # Error page (uses useRouteError)
+    └── NoOrganizationPage/ # Shown when user has no organization
+```
+
+### Key patterns
+
+- **State management**: Redux Toolkit with async thunks. Use `useAppDispatch` and
+  `useAppSelector` from `hooks/redux.ts` (typed wrappers).
+- **API calls**: All API calls go through the client in `api/index.ts`. The client
+  reads the auth token from localStorage and sends it as the `x-token` header.
+- **Routing**: React Router v7 with `createBrowserRouter`. Routes are defined in `App.tsx`.
+- **UI**: Material-UI v7 components. Use `sx` prop for styling.
+- **Components**: Each component lives in its own folder with an `index.ts` barrel export.
+
+## Database
+
+- **ORM**: Kysely (type-safe SQL query builder). No Prisma.
+- **Migrations**: node-pg-migrate. Migration files live in `backend/migrations/`.
+- **Schema**: tables covering users, authentication accounts (multi-provider),
+  access tokens, records, permissions, roles, role permissions, user roles,
+  organizations, teams, calendars, event types, jobs, events, responsibilities,
+  assignments, operations, and operation assignments.
+- **Auth tables**: `permissions` holds the system-defined permission codes;
+  `auth_accounts` links users to provider accounts (discord, google, microsoft);
+  `roles` belong to an organization and are granted permissions via
+  `role_permissions`; `user_roles` assigns roles to users and can be scoped to
+  a team and/or an event type.
+- **Table types**: Defined in `backend/src/db/types.ts` using snake_case column names
+  (e.g. `provider_account_id`, `created_at`). Use `Generated<T>` for auto-generated columns.
+
+### Migration workflow
+
+1. Create a migration: `npm run migrate:create -w backend -- <name>`
+2. Edit the migration file in `backend/migrations/`
+3. Apply it: `npm run migrate -w backend`
+4. Never edit or delete existing migration files.
+
+## Testing
+
+### Backend (Vitest)
+
+- Tests live in `backend/tests/`.
+- API tests use Fastify's `app.inject()` for HTTP testing without a running server.
+- Run: `npm run test -w backend`
+- Tests that need Redis or a database accept both success and infrastructure-error
+  status codes (e.g. 302 or 500 for login without Redis).
+
+### Frontend Unit/Component (Vitest)
+
+- Tests live next to sources as `*.test.ts` or `*.test.tsx`.
+- Uses jsdom environment with `@testing-library/react`.
+- Run: `npm run test -w frontend` (or `npm run test:unit -w frontend`)
+- Setup file: `frontend/src/test/setup.ts` (imports `@testing-library/jest-dom`)
+
+### Frontend E2E (Playwright)
+
+- Tests live in `frontend/e2e/`.
+- Config: `frontend/playwright.config.ts` (3 browsers: chromium, firefox, webkit).
+- The dev server starts automatically before tests (port 5173).
+- Run: `npm run test:e2e -w frontend`
+- Install browsers first: `npm run playwright:install -w frontend`
+
+## Environment Variables
+
+See `.env.sample` for all variables. Key ones:
+
+- `DATABASE_URL` - PostgreSQL connection string
+- `REDIS_URL` - Redis connection string
+- `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` - Discord OAuth credentials
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` - Google OAuth credentials
+- `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` - Microsoft OAuth credentials
+- `BASE_URL` - Public URL of the backend (used for OAuth redirect)
+- `PORT` / `HOST` - Server bind address (default: 3000 / 0.0.0.0)
+- `NODE_ENV` - Environment (development / production / test)
+
+## Rules and Constraints
+
+- Always run `npm run check:fix` and `npm run test` before finishing work.
+- Never change the database schema directly. Always create a migration.
+- Never rename or renumber existing migration files.
+- Do not introduce new dependencies without good reason. The project uses specific
+  modern versions of all libraries.
+- Do not use `any` types. If a type is truly unknown, use `unknown` and narrow it.
+- Backend imports must use `.js` extensions (NodeNext module resolution).
+- The frontend uses `.js` extensions in imports too (for consistency with the backend).
+- Do not use `logger.silly()`; pino uses `logger.trace()` for the most verbose level.

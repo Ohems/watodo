@@ -1,0 +1,40 @@
+{
+  "name": "watodo",
+  "version": "1.0.0",
+  "description": "Community event and responsibility management tool",
+  "author": "Daniel Saarimäki (Ohems)",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24.21.0" },
+  "workspaces": ["backend", "frontend"],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "dev:backend": "npm run dev -w backend",
+    "dev:frontend": "npm run dev -w frontend",
+    "build": "npm run build --workspaces --if-present",
+    "build:dev": "npm run build:dev --workspaces --if-present",
+    "build:backend": "npm run build -w backend",
+    "build:frontend": "npm run build -w frontend",
+    "test": "npm run test --workspaces --if-present",
+    "test:backend": "npm run test -w backend",
+    "test:frontend": "npm run test -w frontend",
+    "test:frontend:unit": "npm run test:unit -w frontend",
+    "test:frontend:e2e": "npm run test:e2e -w frontend",
+    "test:all": "npm run test --workspaces --if-present && npm run test:e2e -w frontend",
+    "lint": "npm run lint --workspaces --if-present",
+    "lint:fix": "npm run lint:fix --workspaces --if-present",
+    "format": "npm run format --workspaces --if-present",
+    "format:write": "npm run format:write --workspaces --if-present",
+    "check": "npm run check --workspaces --if-present",
+    "check:fix": "npm run check:fix --workspaces --if-present",
+    "clean": "rm -rf backend/node_modules backend/dist frontend/node_modules frontend/dist node_modules",
+    "playwright:install": "npm run playwright:install -w frontend",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.2.5",
+    "typescript": "^5.9.3"
+  }
+}

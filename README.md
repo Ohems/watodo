@@ -1,27 +1,70 @@
-# ![Watodo](./docs/logo.png) [WIP]
+# Watodo
 
-Community event and responsibility management tool. Work in progress and currently unusable.
+Community event and responsibility management tool.
+
+## Tech Stack
+
+- **Backend**: Fastify v5, TypeScript, Kysely + node-pg-migrate, PostgreSQL, Redis
+- **Frontend**: React 19, Vite 7, TypeScript, Material-UI v7, React Router v7
+- **Tooling**: Biome (lint + format), Vitest (unit tests), Playwright (E2E tests), Node.js 24
 
 ## Getting Started
 
-These instructions will get you a copy of the project up and running on your local machine for development and testing purposes. See deployment for notes on how to deploy the project on a live system.
+### Prerequisites
 
-## Contributing
+- Node.js >= 24.21.0
+- Docker (for PostgreSQL and Redis)
 
-Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct, and the process for submitting pull requests to us.
+### Setup
 
-**NOTE:** Project is currently in its earliest stages and actively developed all around without clear organization. Contributing at this stage isn't recommended.
+```bash
+# Start databases
+npm run docker:up
 
-## Versioning
+# Install dependencies
+npm install
 
-We use [SemVer](http://semver.org/) for versioning. For the versions available, see the [tags on this repository](https://github.com/Ohems/mlc/releases).
+# Set up environment
+cp .env.sample .env
 
-## Authors
+# Run database migrations
+npm run migrate -w backend
 
-* [Ohems](https://github.com/Ohems) - *Initial work*
+# Start development servers
+npm run dev
+```
 
-See also the list of [contributors](https://github.com/Ohems/mlc/graphs/contributors) who participated in this project.
+### Scripts
 
-## License
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Start both backend and frontend dev servers |
+| `npm run build` | Build both backend and frontend |
+| `npm run test` | Run all tests |
+| `npm run lint` | Lint all code with Biome |
+| `npm run format:write` | Format all code with Biome |
+| `npm run check:fix` | Lint + format fix all code |
 
-This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details
+## Project Structure
+
+```
+watodo/
+├── backend/          # Fastify API server
+│   ├── migrations/   # node-pg-migrate database migrations
+│   ├── src/
+│   │   ├── db/       # Kysely database types
+│   │   ├── routes/   # API routes
+│   │   ├── services/ # Business logic
+│   │   ├── controllers/ # Request handlers
+│   │   └── schemas/  # Zod validation schemas
+│   └── tests/        # Vitest tests
+├── frontend/         # React SPA
+│   ├── e2e/          # Playwright E2E tests
+│   ├── src/
+│   │   ├── components/ # Reusable UI components
+│   │   ├── pages/    # Page components
+│   │   ├── store/    # Redux state management
+│   │   └── api/      # API client
+│   └── public/       # Static assets
+└── docker-compose.yml
+```
