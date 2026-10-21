@@ -1,5 +1,7 @@
 # Watodo
 
+> ⚠️ This project is under development! Not currently usable in any real use case!
+
 Community event and responsibility management tool.
 
 ## Tech Stack
