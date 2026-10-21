@@ -97,14 +97,14 @@ describe('App', () => {
     expect(screen.getByRole('link', { name: 'Sign in with Microsoft' })).toBeInTheDocument();
   });
 
-  it('renders the NavBar with WATODO title once the user is authenticated', async () => {
+  it('renders the NavBar with WATODO logo once the user is authenticated', async () => {
     mockedUsersApi.getCurrentUser.mockResolvedValue(mockUser);
 
     renderWithProviders(<App />);
 
     expect(await screen.findByRole('banner')).toBeInTheDocument();
-    const titles = screen.getAllByText('WATODO');
-    expect(titles.length).toBeGreaterThan(0);
+    const logos = screen.getAllByAltText('WATODO');
+    expect(logos.length).toBeGreaterThan(0);
   });
 
   it('renders navigation links once the user is authenticated', async () => {

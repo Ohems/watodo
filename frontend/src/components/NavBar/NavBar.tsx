@@ -49,19 +49,12 @@ function NavBar() {
         <Toolbar disableGutters>
           <Box sx={{ mr: 1, display: { xs: 'none', md: 'block' } }}>
             <RouterLink to="/">
-              <Typography
-                variant="h6"
-                noWrap
-                sx={{
-                  fontFamily: 'monospace',
-                  fontWeight: 700,
-                  letterSpacing: '.2rem',
-                  color: 'inherit',
-                  textDecoration: 'none',
-                }}
-              >
-                WATODO
-              </Typography>
+              <Box
+                component="img"
+                src="/logo_white.svg"
+                alt="WATODO"
+                sx={{ height: 36, display: 'block' }}
+              />
             </RouterLink>
           </Box>
 
@@ -96,21 +89,13 @@ function NavBar() {
             </Menu>
           </Box>
 
-          <Typography
-            variant="h5"
-            noWrap
-            component="div"
-            sx={{
-              mr: 2,
-              display: { xs: 'flex', md: 'none' },
-              flexGrow: 1,
-              fontFamily: 'monospace',
-              fontWeight: 700,
-              letterSpacing: '.2rem',
-            }}
+          <Box
+            sx={{ mr: 2, display: { xs: 'flex', md: 'none' }, flexGrow: 1, alignItems: 'center' }}
           >
-            WATODO
-          </Typography>
+            <RouterLink to="/">
+              <Box component="img" src="/logo_white.svg" alt="WATODO" sx={{ height: 32 }} />
+            </RouterLink>
+          </Box>
 
           <Box sx={{ flexGrow: 1, display: { xs: 'none', md: 'flex' } }}>
             {pages.map(page => (
