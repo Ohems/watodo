@@ -79,6 +79,7 @@ export interface Organizations {
   id: Generated<string>;
   name: string;
   description: Generated<string>;
+  default_timezone: Generated<string>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }
@@ -127,47 +128,57 @@ export interface EventTypeRoles {
   description: Generated<string>;
 }
 
-export interface Jobs {
-  id: Generated<number>;
-  title: string;
-}
-
-export interface EventSeries {
+export interface EventSeriesTable {
   id: Generated<number>;
   title: string;
   description: string | null;
-  rules: Record<string, unknown>;
-  is_visible: Generated<boolean>;
-  created_at: Generated<Date>;
-  updated_at: Generated<Date>;
   calendar_id: string;
-}
-
-export interface Events {
-  id: Generated<number>;
-  title: string;
-  description: string | null;
-  assignee_id: string | null;
-  event_series_id: number | null;
-  is_all_day: Generated<boolean>;
   start: Date;
-  end: Date;
+  duration_minutes: number;
+  is_all_day: Generated<boolean>;
+  rrule: string | null;
+  timezone: Generated<string>;
   is_visible: Generated<boolean>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }
 
-export interface Responsibilities {
+export interface EventExceptions {
   id: Generated<number>;
-  user_id: string;
-  job_id: number;
+  event_series_id: number;
+  occurrence_start: Date;
+  is_cancelled: Generated<boolean>;
+  override_start: Date | null;
+  override_end: Date | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
 }
 
-export interface Assignments {
+export interface EventJobs {
   id: Generated<number>;
+  event_series_id: number;
+  occurrence_start: Date | null;
+  title: string;
+  description: Generated<string>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface EventJobAssignments {
+  id: Generated<number>;
+  event_job_id: number;
   user_id: string;
-  job_id: number;
-  event_id: number;
+  created_at: Generated<Date>;
+}
+
+export interface EventComments {
+  id: Generated<number>;
+  event_series_id: number;
+  occurrence_start: Date | null;
+  user_id: string;
+  body: string;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
 }
 
 export interface Operations {
@@ -204,11 +215,11 @@ export interface Database {
   calendars: Calendars;
   event_types: EventTypes;
   event_type_roles: EventTypeRoles;
-  jobs: Jobs;
-  event_series: EventSeries;
-  events: Events;
-  responsibilities: Responsibilities;
-  assignments: Assignments;
+  event_series: EventSeriesTable;
+  event_exceptions: EventExceptions;
+  event_jobs: EventJobs;
+  event_job_assignments: EventJobAssignments;
+  event_comments: EventComments;
   operations: Operations;
   op_assignments: OpAssignments;
 }
@@ -239,6 +250,28 @@ export type NewUserRole = Insertable<UserRoles>;
 
 export type Organization = Selectable<Organizations>;
 export type NewOrganization = Insertable<Organizations>;
+
+export type Calendar = Selectable<Calendars>;
+export type NewCalendar = Insertable<Calendars>;
+
+export type EventSeries = Selectable<EventSeriesTable>;
+export type NewEventSeries = Insertable<EventSeriesTable>;
+export type EventSeriesUpdate = Updateable<EventSeriesTable>;
+
+export type EventException = Selectable<EventExceptions>;
+export type NewEventException = Insertable<EventExceptions>;
+export type EventExceptionUpdate = Updateable<EventExceptions>;
+
+export type EventJob = Selectable<EventJobs>;
+export type NewEventJob = Insertable<EventJobs>;
+export type EventJobUpdate = Updateable<EventJobs>;
+
+export type EventJobAssignment = Selectable<EventJobAssignments>;
+export type NewEventJobAssignment = Insertable<EventJobAssignments>;
+
+export type EventComment = Selectable<EventComments>;
+export type NewEventComment = Insertable<EventComments>;
+export type EventCommentUpdate = Updateable<EventComments>;
 
 export type Operation = Selectable<Operations>;
 export type NewOperation = Insertable<Operations>;

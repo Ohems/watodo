@@ -83,6 +83,11 @@ async function bootstrapFirstUser(tx: Transaction<Database>, userId: string): Pr
 
   await tx.insertInto('user_roles').values({ user_id: userId, role_id: role.id }).execute();
 
+  await tx
+    .insertInto('calendars')
+    .values({ name: 'Default Calendar', organization_id: organization.id })
+    .execute();
+
   logger.info(`Created organization ${organization.id} with an admin role for user ${userId}`);
 }
 

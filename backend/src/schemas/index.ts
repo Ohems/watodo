@@ -89,6 +89,104 @@ export const opAssignmentSchema = z.object({
   description: z.string().optional(),
 });
 
+export const calendarPushSchema = z.object({
+  name: z.string().min(1),
+  organizationId: z.uuid(),
+  googleCalendarId: z.string().nullable().optional(),
+});
+
+// ISO 8601 weekday: 1 = Monday .. 7 = Sunday.
+export const isoWeekdaySchema = z.number().int().min(1).max(7);
+
+// Recurrence rule for an event series. The backend serializes this to a
+// canonical RRULE string with the rrule library; `until` is an instant and is
+// stored as the wall-clock time in the series' timezone.
+const recurrenceBaseSchema = {
+  interval: z.number().int().min(1).max(366).optional(),
+  until: z.iso.datetime().optional(),
+  count: z.number().int().min(1).max(100000).optional(),
+};
+
+export const recurrenceSchema = z
+  .discriminatedUnion('freq', [
+    z.strictObject({
+      freq: z.literal('DAILY'),
+      byWeekdays: z.array(isoWeekdaySchema).min(1).max(7).optional(),
+      ...recurrenceBaseSchema,
+    }),
+    z.strictObject({
+      freq: z.literal('WEEKLY'),
+      byWeekdays: z.array(isoWeekdaySchema).min(1).max(7).optional(),
+      ...recurrenceBaseSchema,
+    }),
+    z.strictObject({
+      freq: z.literal('MONTHLY'),
+      byMonthDays: z.array(z.number().int().min(1).max(31)).min(1).max(31).optional(),
+      ...recurrenceBaseSchema,
+    }),
+    z.strictObject({
+      freq: z.literal('YEARLY'),
+      ...recurrenceBaseSchema,
+    }),
+  ])
+  .nullable();
+
+export const eventSeriesPushSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().nullable().optional(),
+  calendarId: z.uuid(),
+  start: z.iso.datetime(),
+  durationMinutes: z.number().int().min(1).max(43200).optional(),
+  isAllDay: z.boolean().optional(),
+  timezone: z.string().min(1).max(64).optional(),
+  isVisible: z.boolean().optional(),
+  recurrence: recurrenceSchema.optional(),
+});
+
+export const eventSeriesUpdateSchema = eventSeriesPushSchema.partial();
+
+export const occurrenceRangeQuerySchema = z.object({
+  start: z.iso.datetime(),
+  end: z.iso.datetime(),
+  calendarId: z.uuid().optional(),
+});
+
+export const occurrenceStartSchema = z.iso.datetime();
+
+export const rescheduleOccurrenceSchema = z.object({
+  start: z.iso.datetime(),
+  end: z.iso.datetime().optional(),
+});
+
+export const eventJobPushSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().optional(),
+  occurrenceStart: z.iso.datetime().nullable().optional(),
+});
+
+export const eventJobUpdateSchema = eventJobPushSchema.partial();
+
+export const eventJobAssignmentSchema = z.object({
+  userId: z.uuid(),
+});
+
+export const eventCommentPushSchema = z.object({
+  body: z.string().min(1),
+  occurrenceStart: z.iso.datetime().nullable().optional(),
+});
+
+export const eventCommentUpdateSchema = z.object({
+  body: z.string().min(1),
+});
+
+export const eventCommentsQuerySchema = z.object({
+  occurrenceStart: z.iso.datetime().optional(),
+});
+
+export const eventJobsQuerySchema = z.object({
+  occurrenceStart: z.iso.datetime().optional(),
+});
+
 export type UserPush = z.infer<typeof userPushSchema>;
 export type UserQuery = z.infer<typeof userQuerySchema>;
 export type AuthProviderParam = z.infer<typeof providerSchema>;
@@ -97,3 +195,16 @@ export type RoleUpdate = z.infer<typeof roleUpdateSchema>;
 export type RoleAssignmentInput = z.infer<typeof roleAssignmentSchema>;
 export type OperationInput = z.infer<typeof operationSchema>;
 export type OpAssignmentInput = z.infer<typeof opAssignmentSchema>;
+export type CalendarPush = z.infer<typeof calendarPushSchema>;
+export type RecurrenceInput = z.infer<typeof recurrenceSchema>;
+export type EventSeriesPush = z.infer<typeof eventSeriesPushSchema>;
+export type EventSeriesUpdate = z.infer<typeof eventSeriesUpdateSchema>;
+export type OccurrenceRangeQuery = z.infer<typeof occurrenceRangeQuerySchema>;
+export type RescheduleOccurrenceInput = z.infer<typeof rescheduleOccurrenceSchema>;
+export type EventJobPush = z.infer<typeof eventJobPushSchema>;
+export type EventJobUpdate = z.infer<typeof eventJobUpdateSchema>;
+export type EventJobAssignmentInput = z.infer<typeof eventJobAssignmentSchema>;
+export type EventCommentPush = z.infer<typeof eventCommentPushSchema>;
+export type EventCommentUpdate = z.infer<typeof eventCommentUpdateSchema>;
+export type EventCommentsQuery = z.infer<typeof eventCommentsQuerySchema>;
+export type EventJobsQuery = z.infer<typeof eventJobsQuerySchema>;

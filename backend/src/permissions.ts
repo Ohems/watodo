@@ -13,6 +13,8 @@ export const PERMISSIONS = {
   ROLE_MANAGEMENT_WRITE: 'role-management:write',
   OPERATIONS_READ: 'operations:read',
   OPERATIONS_WRITE: 'operations:write',
+  EVENTS_READ: 'events:read',
+  EVENTS_WRITE: 'events:write',
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -43,6 +45,12 @@ export const PERMISSION_DEFINITIONS: { code: Permission; description: string }[]
   {
     code: PERMISSIONS.OPERATIONS_WRITE,
     description: 'Create, update and delete operations.',
+  },
+  { code: PERMISSIONS.EVENTS_READ, description: 'View event series and their occurrences.' },
+  {
+    code: PERMISSIONS.EVENTS_WRITE,
+    description:
+      'Create, update and delete event series, and manage occurrences, job slots and comments.',
   },
 ];
 

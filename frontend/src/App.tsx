@@ -8,6 +8,7 @@ import { Route, Routes } from 'react-router-dom';
 import NavBar from './components/NavBar/NavBar.js';
 import { useAppDispatch, useAppSelector } from './hooks/redux.js';
 import ErrorPage from './pages/ErrorPage/ErrorPage.js';
+import Events from './pages/Events/Events.js';
 import Home from './pages/Home/Home.js';
 import LoginPage from './pages/Login/LoginPage.js';
 import NoOrganizationPage from './pages/NoOrganizationPage/NoOrganizationPage.js';
@@ -56,6 +57,7 @@ function AppContent() {
       <NavBar />
       <Routes>
         <Route path="/" element={<Home />} />
+        <Route path="/events" element={<Events />} />
         <Route path="/users" element={<UserList />} />
         <Route path="/users/:userId" element={<UserProfile />} />
         <Route path="/organization" element={<NoOrganizationPage />} />

@@ -83,6 +83,8 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
     name: { type: 'text', notNull: true },
     description: { type: 'text', notNull: true, default: '' },
+    // Default IANA timezone for the organization; new event series inherit it.
+    default_timezone: { type: 'text', notNull: true, default: 'UTC' },
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
@@ -213,63 +215,123 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     description: { type: 'text', notNull: true, default: '' },
   });
 
-  // Jobs (legacy)
-  pgm.createTable('jobs', {
-    id: { type: 'serial', primaryKey: true },
-    title: { type: 'text', notNull: true },
-  });
-
-  // Event series (legacy)
+  // Event series: a single event or an rrule-based recurring series.
+  //
+  // `rrule` holds the canonical RRULE property (e.g. "RRULE:FREQ=WEEKLY;BYDAY=MO")
+  // serialized by the rrule library. NULL means the series is a single,
+  // non-repeating event. Occurrences are expanded on demand from `start`,
+  // `duration_minutes`, `rrule` and `timezone`, so a series can repeat
+  // arbitrarily far into the future (years, indefinitely) without
+  // materializing one row per occurrence.
   pgm.createTable('event_series', {
     id: { type: 'serial', primaryKey: true },
     title: { type: 'text', notNull: true },
     description: { type: 'text' },
-    rules: { type: 'jsonb', notNull: true },
-    is_visible: { type: 'boolean', notNull: true, default: true },
-    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
-    updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     calendar_id: { type: 'uuid', notNull: true, references: 'calendars', onDelete: 'CASCADE' },
-  });
-
-  // Events (legacy)
-  pgm.createTable('events', {
-    id: { type: 'serial', primaryKey: true },
-    title: { type: 'text', notNull: true },
-    description: { type: 'text' },
-    assignee_id: { type: 'uuid', references: 'users', onDelete: 'SET NULL' },
-    event_series_id: { type: 'integer', references: 'event_series', onDelete: 'SET NULL' },
-    is_all_day: { type: 'boolean', notNull: true, default: false },
     start: { type: 'timestamptz', notNull: true },
-    end: { type: 'timestamptz', notNull: true },
+    duration_minutes: { type: 'integer', notNull: true, default: 60 },
+    is_all_day: { type: 'boolean', notNull: true, default: false },
+    rrule: { type: 'text' },
+    timezone: { type: 'text', notNull: true, default: 'UTC' },
     is_visible: { type: 'boolean', notNull: true, default: true },
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
+  pgm.addConstraint(
+    'event_series',
+    'event_series_duration_positive',
+    'CHECK (duration_minutes > 0)',
+  );
+  pgm.createIndex('event_series', 'calendar_id');
+  pgm.createIndex('event_series', 'start');
 
-  // Responsibilities (legacy)
-  pgm.createTable('responsibilities', {
+  // Event exceptions: per-occurrence overrides for a series (cancel an
+  // occurrence, or reschedule it to a different time). `occurrence_start` is
+  // the original occurrence start and acts as the occurrence's identity;
+  // jobs and comments are keyed by it as well. A cancelled occurrence has
+  // `is_cancelled` set; a rescheduled one has `override_start`/`override_end`.
+  pgm.createTable('event_exceptions', {
     id: { type: 'serial', primaryKey: true },
-    user_id: { type: 'uuid', notNull: true, references: 'users', onDelete: 'CASCADE' },
-    job_id: { type: 'integer', notNull: true, references: 'jobs', onDelete: 'CASCADE' },
+    event_series_id: {
+      type: 'integer',
+      notNull: true,
+      references: 'event_series',
+      onDelete: 'CASCADE',
+    },
+    occurrence_start: { type: 'timestamptz', notNull: true },
+    is_cancelled: { type: 'boolean', notNull: true, default: false },
+    override_start: { type: 'timestamptz' },
+    override_end: { type: 'timestamptz' },
+    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+    updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
   pgm.addConstraint(
-    'responsibilities',
-    'responsibilities_user_job_unique',
-    'UNIQUE(user_id, job_id)',
+    'event_exceptions',
+    'event_exceptions_series_occurrence_unique',
+    'UNIQUE(event_series_id, occurrence_start)',
   );
+  pgm.addConstraint(
+    'event_exceptions',
+    'event_exceptions_override_valid',
+    'CHECK (override_end IS NULL OR override_start IS NULL OR override_end > override_start)',
+  );
+  pgm.createIndex('event_exceptions', 'event_series_id');
 
-  // Assignments (legacy)
-  pgm.createTable('assignments', {
+  // Event jobs: job slots that need to be staffed. `occurrence_start` NULL
+  // means the slot applies to every occurrence of the series; a non-NULL
+  // value scopes the slot to that single occurrence.
+  pgm.createTable('event_jobs', {
     id: { type: 'serial', primaryKey: true },
+    event_series_id: {
+      type: 'integer',
+      notNull: true,
+      references: 'event_series',
+      onDelete: 'CASCADE',
+    },
+    occurrence_start: { type: 'timestamptz' },
+    title: { type: 'text', notNull: true },
+    description: { type: 'text', notNull: true, default: '' },
+    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+    updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+  });
+  pgm.createIndex('event_jobs', ['event_series_id', 'occurrence_start']);
+
+  // Event job assignments: users assigned to a job slot.
+  pgm.createTable('event_job_assignments', {
+    id: { type: 'serial', primaryKey: true },
+    event_job_id: {
+      type: 'integer',
+      notNull: true,
+      references: 'event_jobs',
+      onDelete: 'CASCADE',
+    },
     user_id: { type: 'uuid', notNull: true, references: 'users', onDelete: 'CASCADE' },
-    job_id: { type: 'integer', notNull: true, references: 'jobs', onDelete: 'CASCADE' },
-    event_id: { type: 'integer', notNull: true, references: 'events', onDelete: 'CASCADE' },
+    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
   pgm.addConstraint(
-    'assignments',
-    'assignments_user_job_event_unique',
-    'UNIQUE(user_id, job_id, event_id)',
+    'event_job_assignments',
+    'event_job_assignments_job_user_unique',
+    'UNIQUE(event_job_id, user_id)',
   );
+  pgm.createIndex('event_job_assignments', 'user_id');
+
+  // Event comments: comments on a whole series (`occurrence_start` NULL) or
+  // on a single occurrence of it.
+  pgm.createTable('event_comments', {
+    id: { type: 'serial', primaryKey: true },
+    event_series_id: {
+      type: 'integer',
+      notNull: true,
+      references: 'event_series',
+      onDelete: 'CASCADE',
+    },
+    occurrence_start: { type: 'timestamptz' },
+    user_id: { type: 'uuid', notNull: true, references: 'users', onDelete: 'CASCADE' },
+    body: { type: 'text', notNull: true },
+    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+    updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+  });
+  pgm.createIndex('event_comments', ['event_series_id', 'occurrence_start']);
 
   // Operations
   pgm.createTable('operations', {
@@ -295,8 +357,6 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
   // Indexes
   pgm.createIndex('users', 'state');
   pgm.createIndex('access_tokens', 'user_id');
-  pgm.createIndex('events', 'start');
-  pgm.createIndex('events', 'assignee_id');
   pgm.createIndex('operations', 'name');
   pgm.createIndex('op_assignments', 'operation_id');
 }
@@ -304,11 +364,11 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
 export async function down(pgm: MigrationBuilder): Promise<void> {
   pgm.dropTable('op_assignments');
   pgm.dropTable('operations');
-  pgm.dropTable('assignments');
-  pgm.dropTable('responsibilities');
-  pgm.dropTable('events');
+  pgm.dropTable('event_comments');
+  pgm.dropTable('event_job_assignments');
+  pgm.dropTable('event_jobs');
+  pgm.dropTable('event_exceptions');
   pgm.dropTable('event_series');
-  pgm.dropTable('jobs');
   pgm.dropTable('event_type_roles');
   pgm.dropTable('user_roles');
   pgm.dropTable('role_permissions');

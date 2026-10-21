@@ -15,10 +15,26 @@ export interface CalendarEvent {
 interface CalendarProps {
   events?: CalendarEvent[];
   onSelectEvent?: (event: CalendarEvent) => void;
+  onRangeChange?: (range: { start: Date; end: Date }) => void;
   defaultView?: View;
 }
 
-function Calendar({ events = [], onSelectEvent, defaultView = 'month' }: CalendarProps) {
+function Calendar({
+  events = [],
+  onSelectEvent,
+  onRangeChange,
+  defaultView = 'month',
+}: CalendarProps) {
+  const handleRangeChange = (range: Date[] | { start: Date; end: Date }) => {
+    if (!onRangeChange) return;
+    if (Array.isArray(range)) {
+      if (range.length === 0) return;
+      onRangeChange({ start: range[0], end: range[range.length - 1] });
+    } else {
+      onRangeChange(range);
+    }
+  };
+
   return (
     <div style={{ height: 'calc(100vh - 200px)', minHeight: 400 }}>
       <BigCalendar
@@ -29,6 +45,7 @@ function Calendar({ events = [], onSelectEvent, defaultView = 'month' }: Calenda
         defaultView={defaultView}
         views={['month', 'week', 'day', 'agenda']}
         onSelectEvent={onSelectEvent}
+        onRangeChange={handleRangeChange}
         style={{ height: '100%' }}
       />
     </div>

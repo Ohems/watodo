@@ -45,6 +45,10 @@ npm run dev
 | `npm run format:write` | Format all code with Biome |
 | `npm run check:fix` | Lint + format fix all code |
 
+## Documentation
+
+- [Events](docs/Events.md) - Recurring event series (rrule), occurrences, exceptions, job slots, and comments
+
 ## Project Structure
 
 ```
@@ -66,5 +70,6 @@ watodo/
 │   │   ├── store/    # Redux state management
 │   │   └── api/      # API client
 │   └── public/       # Static assets
+├── docs/             # Documentation
 └── docker-compose.yml
 ```

@@ -1,9 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
+  eventCommentPushSchema,
+  eventCommentUpdateSchema,
+  eventJobPushSchema,
+  eventJobUpdateSchema,
+  eventSeriesPushSchema,
+  eventSeriesUpdateSchema,
   incrementalSchema,
+  occurrenceRangeQuerySchema,
   opAssignmentSchema,
   operationSchema,
   providerSchema,
+  recurrenceSchema,
+  rescheduleOccurrenceSchema,
   roleAssignmentSchema,
   rolePushSchema,
   roleUpdateSchema,
@@ -144,6 +153,173 @@ describe('Schemas', () => {
 
     it('should reject negative numbers', () => {
       expect(incrementalSchema.safeParse(-1).success).toBe(false);
+    });
+  });
+
+  describe('recurrenceSchema', () => {
+    it('should accept all frequencies', () => {
+      for (const freq of ['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY']) {
+        expect(recurrenceSchema.safeParse({ freq }).success).toBe(true);
+      }
+    });
+
+    it('should accept null (non-repeating)', () => {
+      expect(recurrenceSchema.safeParse(null).success).toBe(true);
+    });
+
+    it('should reject unknown frequencies', () => {
+      expect(recurrenceSchema.safeParse({ freq: 'HOURLY' }).success).toBe(false);
+    });
+
+    it('should accept weekdays as ISO numbers 1-7', () => {
+      expect(recurrenceSchema.safeParse({ freq: 'WEEKLY', byWeekdays: [1, 7] }).success).toBe(true);
+    });
+
+    it('should reject weekdays outside 1-7', () => {
+      expect(recurrenceSchema.safeParse({ freq: 'WEEKLY', byWeekdays: [0] }).success).toBe(false);
+      expect(recurrenceSchema.safeParse({ freq: 'WEEKLY', byWeekdays: [8] }).success).toBe(false);
+    });
+
+    it('should reject fields that do not apply to the frequency', () => {
+      expect(recurrenceSchema.safeParse({ freq: 'MONTHLY', byWeekdays: [1] }).success).toBe(false);
+      expect(recurrenceSchema.safeParse({ freq: 'YEARLY', byMonthDays: [1] }).success).toBe(false);
+    });
+
+    it('should accept interval, until and count', () => {
+      const result = recurrenceSchema.safeParse({
+        freq: 'DAILY',
+        interval: 2,
+        until: '2026-12-31T23:00:00.000Z',
+        count: 10,
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('should reject invalid until and count', () => {
+      expect(recurrenceSchema.safeParse({ freq: 'DAILY', until: 'not-a-date' }).success).toBe(
+        false,
+      );
+      expect(recurrenceSchema.safeParse({ freq: 'DAILY', count: 0 }).success).toBe(false);
+    });
+  });
+
+  describe('eventSeriesPushSchema', () => {
+    it('should accept a full series payload', () => {
+      const result = eventSeriesPushSchema.safeParse({
+        title: 'Weekly sync',
+        description: 'Every Monday',
+        calendarId: '123e4567-e89b-42d3-a456-426614174000',
+        start: '2026-10-21T16:00:00.000Z',
+        durationMinutes: 60,
+        isAllDay: false,
+        timezone: 'Europe/Berlin',
+        isVisible: true,
+        recurrence: { freq: 'WEEKLY', byWeekdays: [1] },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('should accept a minimal payload and a null recurrence', () => {
+      const result = eventSeriesPushSchema.safeParse({
+        title: 'One-off',
+        calendarId: '123e4567-e89b-42d3-a456-426614174000',
+        start: '2026-10-21T16:00:00.000Z',
+        recurrence: null,
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('should require title, calendar and start', () => {
+      expect(eventSeriesPushSchema.safeParse({}).success).toBe(false);
+      expect(
+        eventSeriesPushSchema.safeParse({
+          calendarId: '123e4567-e89b-42d3-a456-426614174000',
+          start: '2026-10-21T16:00:00.000Z',
+        }).success,
+      ).toBe(false);
+      expect(
+        eventSeriesPushSchema.safeParse({
+          title: 'X',
+          calendarId: '123e4567-e89b-42d3-a456-426614174000',
+          start: 'not-a-date',
+        }).success,
+      ).toBe(false);
+    });
+  });
+
+  describe('eventSeriesUpdateSchema', () => {
+    it('should accept partial updates', () => {
+      expect(eventSeriesUpdateSchema.safeParse({}).success).toBe(true);
+      expect(eventSeriesUpdateSchema.safeParse({ title: 'New title' }).success).toBe(true);
+      expect(eventSeriesUpdateSchema.safeParse({ recurrence: null }).success).toBe(true);
+    });
+  });
+
+  describe('occurrenceRangeQuerySchema', () => {
+    it('should require an ISO start and end', () => {
+      expect(
+        occurrenceRangeQuerySchema.safeParse({
+          start: '2026-10-21T00:00:00.000Z',
+          end: '2026-11-21T00:00:00.000Z',
+        }).success,
+      ).toBe(true);
+      expect(
+        occurrenceRangeQuerySchema.safeParse({ start: '2026-10-21T00:00:00.000Z' }).success,
+      ).toBe(false);
+    });
+  });
+
+  describe('rescheduleOccurrenceSchema', () => {
+    it('should require a start and allow an optional end', () => {
+      expect(
+        rescheduleOccurrenceSchema.safeParse({ start: '2026-11-03T10:00:00.000Z' }).success,
+      ).toBe(true);
+      expect(
+        rescheduleOccurrenceSchema.safeParse({
+          start: '2026-11-03T10:00:00.000Z',
+          end: '2026-11-03T11:00:00.000Z',
+        }).success,
+      ).toBe(true);
+      expect(rescheduleOccurrenceSchema.safeParse({}).success).toBe(false);
+    });
+  });
+
+  describe('eventJobPushSchema and eventJobUpdateSchema', () => {
+    it('should accept a slot with and without an occurrence', () => {
+      expect(eventJobPushSchema.safeParse({ title: 'Setup' }).success).toBe(true);
+      expect(
+        eventJobPushSchema.safeParse({
+          title: 'Setup',
+          description: 'Early',
+          occurrenceStart: '2026-10-21T16:00:00.000Z',
+        }).success,
+      ).toBe(true);
+      expect(eventJobPushSchema.safeParse({ title: 'Setup', occurrenceStart: null }).success).toBe(
+        true,
+      );
+      expect(eventJobPushSchema.safeParse({ description: 'No title' }).success).toBe(false);
+    });
+
+    it('should accept partial updates', () => {
+      expect(eventJobUpdateSchema.safeParse({}).success).toBe(true);
+      expect(eventJobUpdateSchema.safeParse({ title: 'New' }).success).toBe(true);
+      expect(eventJobUpdateSchema.safeParse({ occurrenceStart: null }).success).toBe(true);
+    });
+  });
+
+  describe('eventCommentPushSchema and eventCommentUpdateSchema', () => {
+    it('should require a non-empty body', () => {
+      expect(eventCommentPushSchema.safeParse({ body: 'Hello' }).success).toBe(true);
+      expect(
+        eventCommentPushSchema.safeParse({ body: 'Hello', occurrenceStart: null }).success,
+      ).toBe(true);
+      expect(eventCommentPushSchema.safeParse({ body: '' }).success).toBe(false);
+      expect(eventCommentPushSchema.safeParse({}).success).toBe(false);
+    });
+
+    it('should require a non-empty body on update', () => {
+      expect(eventCommentUpdateSchema.safeParse({ body: 'Edited' }).success).toBe(true);
+      expect(eventCommentUpdateSchema.safeParse({ body: '' }).success).toBe(false);
     });
   });
 });

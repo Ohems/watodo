@@ -1,6 +1,7 @@
 import type { Kysely, Transaction } from 'kysely';
 import { db } from '../database.js';
 import type { Database, Role, UserRole } from '../db/types.js';
+import { httpError, isUniqueViolation } from '../http-error.js';
 import { createLogger } from '../logger.js';
 import type { RoleAssignmentInput, RolePush, RoleUpdate } from '../schemas/index.js';
 
@@ -13,18 +14,6 @@ export interface RoleWithPermissions extends Role {
 export interface RoleAssignmentWithUser extends UserRole {
   user_name: string;
   user_email: string;
-}
-
-function httpError(statusCode: number, message: string): Error {
-  const error = new Error(message) as Error & { statusCode: number };
-  error.statusCode = statusCode;
-  return error;
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  return (
-    typeof error === 'object' && error !== null && (error as { code?: string }).code === '23505'
-  );
 }
 
 async function getOrganizationOrThrow(organizationId: string): Promise<void> {
