@@ -27,7 +27,8 @@
     "migrate:create": "node-pg-migrate create",
     "migrate:redo": "node-pg-migrate redo",
     "migrate:status": "node-pg-migrate status",
-    "seed:permissions": "tsx scripts/seed-permissions.ts"
+    "seed:permissions": "tsx scripts/seed-permissions.ts",
+    "seed:data": "tsx scripts/seed-data.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",

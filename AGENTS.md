@@ -62,6 +62,7 @@ Run from `backend/`:
 | `npm run migrate:status` | Show migration status |
 | `npm run migrate:redo` | Revert and re-apply the latest migration |
 | `npm run seed:permissions` | Seed the permissions table from the registry (idempotent) |
+| `npm run seed:data` | Generate semi-realistic test data (only on a fresh database: exactly one user and one organization) |
 
 Run from `frontend/`:
 
@@ -143,7 +144,7 @@ backend/src/
 ```
 
 `backend/scripts/` holds one-off CLI scripts run with tsx (e.g. `seed-permissions.ts`,
-run via `npm run seed:permissions`).
+run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:data`).
 
 ### Key patterns
 
@@ -306,6 +307,12 @@ See `.env.sample` for all variables. Key ones:
 ## Rules and Constraints
 
 - Always run `npm run check:fix` and `npm run test` before finishing work.
+- When you add a feature that persists data, update `backend/scripts/seed-data.ts` (run with
+  `npm run seed:data -w backend`) so the generated test data covers the new feature. The script
+  generates semi-realistic test data for both organizations, mock users, roles, teams, calendars,
+  event types, event series (previous/current/next month), exceptions, job slots, comments and
+  operations. It must keep refusing to run unless the database has exactly one user and one
+  organization (the state after the first login).
 - Never change the database schema directly. Always create a migration.
 - Never rename or renumber existing migration files.
 - Do not introduce new dependencies without good reason. The project uses specific
