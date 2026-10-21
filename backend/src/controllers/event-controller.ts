@@ -195,9 +195,11 @@ export async function deleteExceptionHandler(
   return reply.status(200).send({ success: true });
 }
 
-// "Edit this and all following": the occurrence begins a new series with the
-// given parameters, the original series is truncated before it, and all
-// exceptions from the occurrence onwards are reset.
+/**
+ * "Edit this and all following": the occurrence begins a new series with the
+ * given parameters, the original series is truncated before it, and all
+ * exceptions from the occurrence onwards are reset.
+ */
 export async function splitEventSeriesHandler(
   request: FastifyRequest<OccurrenceParams>,
   reply: FastifyReply,

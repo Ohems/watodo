@@ -95,12 +95,14 @@ export const calendarPushSchema = z.object({
   googleCalendarId: z.string().nullable().optional(),
 });
 
-// ISO 8601 weekday: 1 = Monday .. 7 = Sunday.
+/** ISO 8601 weekday: 1 = Monday .. 7 = Sunday. */
 export const isoWeekdaySchema = z.number().int().min(1).max(7);
 
-// Recurrence rule for an event series. The backend serializes this to a
-// canonical RRULE string with the rrule library; `until` is an instant and is
-// stored as the wall-clock time in the series' timezone.
+/**
+ * Recurrence rule for an event series. The backend serializes this to a
+ * canonical RRULE string with the rrule library; `until` is an instant and is
+ * stored as the wall-clock time in the series' timezone.
+ */
 const recurrenceBaseSchema = {
   interval: z.number().int().min(1).max(366).optional(),
   until: z.iso.datetime().optional(),

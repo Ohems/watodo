@@ -4,8 +4,11 @@ import { PERMISSION_DEFINITIONS } from '../permissions.js';
 
 const logger = createLogger('permission-service');
 
-// Inserts every permission from the registry, skipping ones that already
-// exist. Returns the number of newly inserted permissions.
+/**
+ * Inserts every permission from the registry, skipping ones that already
+ * exist. Returns the number of newly inserted permissions.
+ * @returns The number of newly inserted permissions.
+ */
 export async function seedPermissions(): Promise<number> {
   logger.trace('permissionService.seedPermissions');
 
@@ -19,11 +22,15 @@ export async function seedPermissions(): Promise<number> {
   return inserted.length;
 }
 
-// Effective permissions of a single user: the union of the permissions granted
-// by all roles the user holds in organizations the user belongs to. Role
-// assignments scoped to a team or event type are stored on the assignment and
-// included in API responses; they do not restrict the permission union because
-// endpoints do not carry a team/event-type context yet.
+/**
+ * Effective permissions of a single user: the union of the permissions granted
+ * by all roles the user holds in organizations the user belongs to. Role
+ * assignments scoped to a team or event type are stored on the assignment and
+ * included in API responses; they do not restrict the permission union because
+ * endpoints do not carry a team/event-type context yet.
+ * @param userId - The ID of the user.
+ * @returns The effective permission codes for the user.
+ */
 export async function getEffectivePermissions(userId: string): Promise<string[]> {
   logger.trace('permissionService.getEffectivePermissions');
 
@@ -44,7 +51,11 @@ export async function getEffectivePermissions(userId: string): Promise<string[]>
   return [...new Set(rows.map(row => row.code))];
 }
 
-// Batched variant of getEffectivePermissions for lists of users.
+/**
+ * Batched variant of getEffectivePermissions for lists of users.
+ * @param userIds - The IDs of the users.
+ * @returns A map from user ID to their effective permission codes.
+ */
 export async function getEffectivePermissionsForUsers(
   userIds: string[],
 ): Promise<Map<string, string[]>> {

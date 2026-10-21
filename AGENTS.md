@@ -106,6 +106,9 @@ Run from `frontend/`:
 - Do not use the em dash character in code comments or markdown files. Use the basic hyphen (`-`) instead.
 - Prefer `const` over `let`. Use template literals over string concatenation.
 - Handle errors explicitly. Do not silently swallow exceptions.
+- When a comment describes the following variable or function, use a JSDoc comment
+  (`/** ... */`) instead of a standard `//` comment. Only add tags like `@param` or
+  `@returns` when the function is not trivial.
 
 ## Backend Architecture
 

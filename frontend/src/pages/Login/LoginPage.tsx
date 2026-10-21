@@ -8,7 +8,7 @@ import { useTranslation } from 'react-i18next';
 import { authApi } from '../../api/index.js';
 import type { AuthProviderInfo } from '../../types/index.js';
 
-// Used when the provider list cannot be fetched from the API.
+/** Used when the provider list cannot be fetched from the API. */
 const FALLBACK_PROVIDERS: AuthProviderInfo[] = [
   { id: 'discord', name: 'Discord', configured: false },
   { id: 'google', name: 'Google', configured: false },

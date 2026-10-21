@@ -12,9 +12,11 @@ export const PROVIDER_NAMES: Record<AuthProvider, string> = {
   microsoft: 'Microsoft',
 };
 
-// Adding a provider means adding a file in this directory and registering it
-// here. The Record key set is checked against the AuthProvider union at compile
-// time, and the auth_accounts CHECK constraint in the migration must match.
+/**
+ * Adding a provider means adding a file in this directory and registering it
+ * here. The Record key set is checked against the AuthProvider union at compile
+ * time, and the auth_accounts CHECK constraint in the migration must match.
+ */
 const providers: Record<AuthProvider, AuthProviderDefinition> = {
   discord: discordProvider,
   google: googleProvider,

@@ -45,8 +45,10 @@ async function retrieveLoginSessionState(stateId: string): Promise<{
   return JSON.parse(stateStr as string);
 }
 
-// The very first user of the system gets an organization of their own and
-// full admin rights over it.
+/**
+ * The very first user of the system gets an organization of their own and
+ * full admin rights over it.
+ */
 async function bootstrapFirstUser(tx: Transaction<Database>, userId: string): Promise<void> {
   logger.info(`Bootstrapping first user ${userId} with an organization and admin role`);
 

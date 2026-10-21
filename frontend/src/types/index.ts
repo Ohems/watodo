@@ -85,7 +85,7 @@ export interface CalendarPush {
   googleCalendarId?: string | null;
 }
 
-// ISO 8601 weekday: 1 = Monday .. 7 = Sunday.
+/** ISO 8601 weekday: 1 = Monday .. 7 = Sunday. */
 export type RecurrenceFreq = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
 
 export interface RecurrenceInput {

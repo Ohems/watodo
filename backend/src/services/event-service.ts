@@ -242,8 +242,10 @@ function validateRange(rangeStart: Date, rangeEnd: Date): void {
   }
 }
 
-// Resolves the timezone for a series: the explicitly given one, or the
-// default timezone of the organization that owns the calendar.
+/**
+ * Resolves the timezone for a series: the explicitly given one, or the
+ * default timezone of the organization that owns the calendar.
+ */
 async function resolveTimezone(calendarId: string, timezone?: string): Promise<string> {
   const calendar = await db
     .selectFrom('calendars')
@@ -432,14 +434,20 @@ export async function deleteEventSeries(seriesId: number): Promise<void> {
   }
 }
 
-// Splits a series at the given occurrence ("edit this and all following"):
-// the edited occurrence begins a new, independent series with the given
-// parameters (fields not provided are inherited from the original series and
-// the start defaults to the split occurrence), the original series is
-// truncated so it ends just before the split occurrence, and all exceptions
-// from the split occurrence onwards are reset. Splitting at the very first
-// occurrence updates the series in place instead, so no empty leftover series
-// is created and series-wide job slots and comments survive.
+/**
+ * Splits a series at the given occurrence ("edit this and all following"):
+ * the edited occurrence begins a new, independent series with the given
+ * parameters (fields not provided are inherited from the original series and
+ * the start defaults to the split occurrence), the original series is
+ * truncated so it ends just before the split occurrence, and all exceptions
+ * from the split occurrence onwards are reset. Splitting at the very first
+ * occurrence updates the series in place instead, so no empty leftover series
+ * is created and series-wide job slots and comments survive.
+ * @param seriesId - The ID of the series to split.
+ * @param occurrenceStart - The occurrence at which to split.
+ * @param data - The updates for the new series.
+ * @returns The newly created series.
+ */
 export async function splitEventSeries(
   seriesId: number,
   occurrenceStart: Date,

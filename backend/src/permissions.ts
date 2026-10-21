@@ -1,10 +1,11 @@
-// Registry of permissions defined by the system. The permissions table in the
-// database is the source of truth; this module mirrors the currently known
-// permissions so they can be referenced in a type-safe way. New permissions are
-// added together with new features: add them to PERMISSION_DEFINITIONS (which
-// seeds the initial migration and `npm run seed:permissions`) and reference
-// them in code through PERMISSIONS.
-
+/**
+ * Registry of permissions defined by the system. The permissions table in the
+ * database is the source of truth; this module mirrors the currently known
+ * permissions so they can be referenced in a type-safe way. New permissions are
+ * added together with new features: add them to PERMISSION_DEFINITIONS (which
+ * seeds the initial migration and `npm run seed:permissions`) and reference
+ * them in code through PERMISSIONS.
+ */
 export const PERMISSIONS = {
   ADMIN: 'admin',
   USER_MANAGEMENT_READ: 'user-management:read',
@@ -21,8 +22,10 @@ export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
 
 export const ALL_PERMISSIONS: readonly Permission[] = Object.values(PERMISSIONS);
 
-// All known permissions with their descriptions. The initial migration and the
-// `seed:permissions` script both insert from this list.
+/**
+ * All known permissions with their descriptions. The initial migration and the
+ * `seed:permissions` script both insert from this list.
+ */
 export const PERMISSION_DEFINITIONS: { code: Permission; description: string }[] = [
   {
     code: PERMISSIONS.ADMIN,
@@ -54,7 +57,7 @@ export const PERMISSION_DEFINITIONS: { code: Permission; description: string }[]
   },
 ];
 
-// The admin permission bypasses all permission checks.
+/** The admin permission bypasses all permission checks. */
 export const ADMIN_PERMISSION = PERMISSIONS.ADMIN;
 
 export function isKnownPermission(code: string): code is Permission {

@@ -9,7 +9,11 @@ export interface OrganizationResponse {
   defaultTimezone: string;
 }
 
-// Lists the organizations a user belongs to.
+/**
+ * Lists the organizations a user belongs to.
+ * @param userId - The ID of the user.
+ * @returns The organizations the user belongs to.
+ */
 export async function listOrganizationsForUser(userId: string): Promise<OrganizationResponse[]> {
   logger.trace('organizationService.listOrganizationsForUser');
   const rows = await db
