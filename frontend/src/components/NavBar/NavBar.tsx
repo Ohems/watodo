@@ -89,7 +89,7 @@ function NavBar() {
               {pages.map(page => (
                 <MenuItem key={page.label} onClick={() => setAnchorElNav(null)}>
                   <RouterLink to={page.path} style={{ textDecoration: 'none', color: 'inherit' }}>
-                    <Typography textAlign="center">{page.label}</Typography>
+                    <Typography sx={{ textAlign: 'center' }}>{page.label}</Typography>
                   </RouterLink>
                 </MenuItem>
               ))}
@@ -141,7 +141,7 @@ function NavBar() {
             >
               {settings.map(setting => (
                 <MenuItem key={setting.key} onClick={() => handleSettingClick(setting.key)}>
-                  <Typography textAlign="center">{setting.label}</Typography>
+                  <Typography sx={{ textAlign: 'center' }}>{setting.label}</Typography>
                 </MenuItem>
               ))}
             </Menu>

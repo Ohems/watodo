@@ -13,6 +13,9 @@
     "backend",
     "frontend"
   ],
+  "overrides": {
+    "vitest": "^5.0.5"
+  },
   "scripts": {
     "dev": "concurrently -n backend,frontend \"npm:dev:backend\" \"npm:dev:frontend\"",
     "dev:backend": "npm run dev -w backend",
@@ -39,8 +42,8 @@
     "docker:down": "docker compose down"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.2.5",
+    "@biomejs/biome": "^2.6.2",
     "concurrently": "^10.0.6",
-    "typescript": "^5.9.3"
+    "typescript": "^7.0.2"
   }
 }

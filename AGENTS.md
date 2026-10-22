@@ -341,6 +341,8 @@ See `.env.sample` for all variables. Key ones:
 - Never rename or renumber existing migration files.
 - Do not introduce new dependencies without good reason. The project uses specific
   modern versions of all libraries.
+- When adding a new dependency, check that the version used is the latest one with
+  `npm view <package-name> version`.
 - Do not use `any` types. If a type is truly unknown, use `unknown` and narrow it.
 - Backend imports must use `.js` extensions (NodeNext module resolution).
 - The frontend uses `.js` extensions in imports too (for consistency with the backend).

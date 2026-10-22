@@ -4,7 +4,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - '5432:5432'
+      - "5432:5432"
     environment:
       POSTGRES_PASSWORD: dbPass123
       POSTGRES_USER: watodo
@@ -16,7 +16,7 @@ services:
     volumes:
       - postgres_test_data:/var/lib/postgresql/data
     ports:
-      - '6432:5432'
+      - "6432:5432"
     environment:
       POSTGRES_PASSWORD: dbPass123
       POSTGRES_USER: watodo
@@ -25,7 +25,7 @@ services:
   watodo-redis:
     image: redis:7-alpine
     ports:
-      - '6379:6379'
+      - "6379:6379"
     volumes:
       - redis_data:/data
 
