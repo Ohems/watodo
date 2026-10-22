@@ -9,7 +9,8 @@ import { useTranslation } from 'react-i18next';
 import EditField from '../../components/EditField/EditField.js';
 import { useAppDispatch, useAppSelector } from '../../hooks/redux.js';
 import { fetchMyOrganizations, updateOrganization } from '../../store/organization-slice.js';
-import type { OrganizationUpdate } from '../../types/index.js';
+import type { FieldErrors, OrganizationUpdate } from '../../types/index.js';
+import { validateOrganizationUpdate } from '../../validation.js';
 import NoOrganizationPage from '../NoOrganizationPage/NoOrganizationPage.js';
 
 /** Users with any of these permissions may edit the organization. */
@@ -25,6 +26,7 @@ function OrganizationPage() {
 
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState<OrganizationUpdate>({});
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   const organization = organizations.find(org => org.id === activeOrganizationId) ?? null;
   const canEdit =
@@ -44,15 +46,39 @@ function OrganizationPage() {
     }
   }, [organization]);
 
+  const updateField = (field: keyof OrganizationUpdate, value: string) => {
+    setEditData(prev => ({ ...prev, [field]: value }));
+    setFieldErrors(prev => {
+      if (!(field in prev)) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+
   const handleSave = async () => {
-    if (organization) {
-      await dispatch(updateOrganization({ organizationId: organization.id, data: editData }));
+    if (!organization) return;
+    const validationErrors = validateOrganizationUpdate(editData, t);
+    if (Object.keys(validationErrors).length > 0) {
+      setFieldErrors(validationErrors);
+      return;
     }
-    setEditing(false);
+    try {
+      await dispatch(
+        updateOrganization({ organizationId: organization.id, data: editData }),
+      ).unwrap();
+      setEditing(false);
+      setFieldErrors({});
+    } catch {
+      // The frontend validation catches invalid fields before the request is
+      // sent; a rejection here is unexpected. The form stays open and the
+      // backend message is shown via the slice's error state.
+    }
   };
 
   const handleCancel = () => {
     setEditing(false);
+    setFieldErrors({});
     if (organization) {
       setEditData({
         name: organization.name,
@@ -84,7 +110,13 @@ function OrganizationPage() {
           {canEdit && (
             <Box>
               {!editing ? (
-                <Button variant="contained" onClick={() => setEditing(true)}>
+                <Button
+                  variant="contained"
+                  onClick={() => {
+                    setFieldErrors({});
+                    setEditing(true);
+                  }}
+                >
                   {t('common.edit')}
                 </Button>
               ) : (
@@ -109,36 +141,45 @@ function OrganizationPage() {
 
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <Box>
-            <Typography variant="subtitle2" color="text.secondary">
+            <Typography variant="subtitle2" color={fieldErrors.name ? 'error' : 'text.secondary'}>
               {t('common.name')}
             </Typography>
             <EditField
               value={editData.name ?? organization.name}
               editing={editing}
               label={t('common.name')}
-              onChange={value => setEditData(prev => ({ ...prev, name: value }))}
+              error={fieldErrors.name}
+              onChange={value => updateField('name', value)}
             />
           </Box>
           <Box>
-            <Typography variant="subtitle2" color="text.secondary">
+            <Typography
+              variant="subtitle2"
+              color={fieldErrors.description ? 'error' : 'text.secondary'}
+            >
               {t('common.description')}
             </Typography>
             <EditField
               value={editData.description ?? organization.description}
               editing={editing}
               label={t('common.description')}
-              onChange={value => setEditData(prev => ({ ...prev, description: value }))}
+              error={fieldErrors.description}
+              onChange={value => updateField('description', value)}
             />
           </Box>
           <Box>
-            <Typography variant="subtitle2" color="text.secondary">
+            <Typography
+              variant="subtitle2"
+              color={fieldErrors.defaultTimezone ? 'error' : 'text.secondary'}
+            >
               {t('organization.defaultTimezone')}
             </Typography>
             <EditField
               value={editData.defaultTimezone ?? organization.defaultTimezone}
               editing={editing}
               label={t('organization.defaultTimezone')}
-              onChange={value => setEditData(prev => ({ ...prev, defaultTimezone: value }))}
+              error={fieldErrors.defaultTimezone}
+              onChange={value => updateField('defaultTimezone', value)}
             />
           </Box>
         </Box>

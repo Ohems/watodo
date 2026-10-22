@@ -1,3 +1,5 @@
+import Box from '@mui/material/Box';
+import FormHelperText from '@mui/material/FormHelperText';
 import TextField from '@mui/material/TextField';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -12,11 +14,14 @@ interface EditFieldProps {
   value: string;
   editing: boolean;
   options?: SelectOption[];
+  /** Accessible name of the input; pages render the visible label themselves. */
   label?: string;
+  /** Validation error: turns the input outline red and shows the message below it. */
+  error?: string;
   onChange?: (value: string) => void;
 }
 
-function EditField({ value, editing, options, label, onChange }: EditFieldProps) {
+function EditField({ value, editing, options, label, error, onChange }: EditFieldProps) {
   const { t } = useTranslation();
   const [localValue, setLocalValue] = useState(value);
 
@@ -35,17 +40,20 @@ function EditField({ value, editing, options, label, onChange }: EditFieldProps)
   if (options) {
     const selected = options.find(o => o.value === localValue) ?? null;
     return (
-      <Select<SelectOption>
-        options={options}
-        value={selected}
-        onChange={(option: SingleValue<SelectOption>) => {
-          const newValue = option?.value ?? '';
-          setLocalValue(newValue);
-          onChange?.(newValue);
-        }}
-        isClearable
-        placeholder={label ?? t('common.select')}
-      />
+      <Box>
+        <Select<SelectOption>
+          options={options}
+          value={selected}
+          onChange={(option: SingleValue<SelectOption>) => {
+            const newValue = option?.value ?? '';
+            setLocalValue(newValue);
+            onChange?.(newValue);
+          }}
+          isClearable
+          placeholder={label ?? t('common.select')}
+        />
+        {error && <FormHelperText error>{error}</FormHelperText>}
+      </Box>
     );
   }
 
@@ -53,7 +61,9 @@ function EditField({ value, editing, options, label, onChange }: EditFieldProps)
     <TextField
       fullWidth
       size="small"
-      label={label}
+      error={Boolean(error)}
+      helperText={error}
+      slotProps={{ htmlInput: { 'aria-label': label } }}
       value={localValue}
       onChange={e => {
         setLocalValue(e.target.value);

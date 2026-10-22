@@ -2,7 +2,7 @@ import { createAsyncThunk, createSlice, type PayloadAction } from '@reduxjs/tool
 import { organizationsApi } from '../api/index.js';
 import i18n from '../i18n/index.js';
 import type { Organization, OrganizationUpdate } from '../types/index.js';
-import { logout } from './user-slice.js';
+import { deleteCurrentUser, logout } from './user-slice.js';
 
 const ACTIVE_ORGANIZATION_KEY = 'watodo_active_organization';
 
@@ -102,7 +102,11 @@ const organizationSlice = createSlice({
         state.loaded = true;
         state.error = action.error.message ?? i18n.t('errors.failedToFetchOrganizations');
       })
+      .addCase(updateOrganization.pending, state => {
+        state.error = null;
+      })
       .addCase(updateOrganization.fulfilled, (state, action) => {
+        state.error = null;
         const index = state.organizations.findIndex(org => org.id === action.payload.id);
         if (index !== -1) {
           state.organizations[index] = action.payload;
@@ -112,6 +116,14 @@ const organizationSlice = createSlice({
         state.error = action.error.message ?? i18n.t('errors.failedToUpdateOrganization');
       })
       .addCase(logout.fulfilled, state => {
+        state.organizations = [];
+        state.activeOrganizationId = null;
+        state.loaded = false;
+        state.loading = false;
+        state.error = null;
+        persistActiveOrganizationId(null);
+      })
+      .addCase(deleteCurrentUser.fulfilled, state => {
         state.organizations = [];
         state.activeOrganizationId = null;
         state.loaded = false;

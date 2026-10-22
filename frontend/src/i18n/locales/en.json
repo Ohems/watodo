@@ -9,6 +9,7 @@
     "select": "Select...",
     "name": "Name",
     "email": "Email",
+    "phoneNumber": "Phone number",
     "description": "Description"
   },
   "nav": {
@@ -61,10 +62,37 @@
     "stateInactive": "Inactive",
     "backToList": "Back to list"
   },
+  "account": {
+    "title": "Account",
+    "personalInfo": "Personal information",
+    "loginMethods": "Login methods",
+    "noProviders": "No login methods are configured on this server.",
+    "connect": "Connect {{provider}}",
+    "connectedAt": "Connected {{date}}",
+    "disconnect": "Disconnect",
+    "cannotDisconnectLast": "You cannot disconnect your last login method.",
+    "dangerZone": "Danger zone",
+    "deleteAccount": "Delete account",
+    "deleteAccountDescription": "Permanently delete your account and all associated data.",
+    "deleteAccountTitle": "Delete account?",
+    "deleteAccountConfirm": "This permanently deletes your account, including your login methods and sessions. This action cannot be undone.",
+    "confirmDelete": "Delete my account",
+    "saveFailed": "Failed to save changes",
+    "connectFailed": "Failed to connect the login method",
+    "disconnectFailed": "Failed to disconnect the login method",
+    "deleteFailed": "Failed to delete the account"
+  },
   "errors": {
     "failedToFetchUsers": "Failed to fetch users",
     "failedToFetchOrganizations": "Failed to fetch organizations",
     "failedToUpdateOrganization": "Failed to update organization"
+  },
+  "validation": {
+    "nameRequired": "Name is required",
+    "emailInvalid": "Enter a valid email address",
+    "phoneNumberInvalid": "Phone number must include the country code (e.g. +358401234567)",
+    "defaultTimezoneRequired": "Default timezone is required",
+    "defaultTimezoneTooLong": "Default timezone must be at most 64 characters"
   },
   "events": {
     "title": "Event Series",

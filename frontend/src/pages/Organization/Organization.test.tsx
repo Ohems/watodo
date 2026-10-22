@@ -35,6 +35,7 @@ function makeUser(permissions: string[]): User {
     name: 'Alice',
     email: 'alice@example.com',
     description: '',
+    phoneNumber: null,
     permissions,
     state: 'active',
     isEmployed: true,
@@ -122,5 +123,33 @@ describe('OrganizationPage', () => {
       });
     });
     expect(await screen.findByRole('heading', { name: 'Renamed Org' })).toBeInTheDocument();
+  });
+
+  it('shows a translatable field error and does not save when validation fails', async () => {
+    vi.mocked(organizationsApi.getMyOrganizations).mockResolvedValue([mockOrganization]);
+    renderPage(['admin']);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText('Name is required')).toBeInTheDocument();
+    expect(screen.getByLabelText('Name')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(organizationsApi.updateOrganization).not.toHaveBeenCalled();
+    // The form stays in editing mode so the field can be corrected.
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+  });
+
+  it('shows a field error for an empty default timezone', async () => {
+    vi.mocked(organizationsApi.getMyOrganizations).mockResolvedValue([mockOrganization]);
+    renderPage(['admin']);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText('Default timezone'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText('Default timezone is required')).toBeInTheDocument();
+    expect(organizationsApi.updateOrganization).not.toHaveBeenCalled();
   });
 });

@@ -43,6 +43,8 @@ interface MockUserSeed {
   name: string;
   email: string;
   description: string;
+  /** E.164 phone number (includes the country code); null when not set. */
+  phoneNumber: string | null;
   isEmployed: boolean;
   isSuspended: boolean;
   isBlocked: boolean;
@@ -55,6 +57,7 @@ const MOCK_USERS_ORG_ONE: MockUserSeed[] = [
   {
     name: 'Anna Korhonen',
     email: 'anna.korhonen@example.com',
+    phoneNumber: '+358401234567',
     description: 'Coordinates the weekly community meetings and keeps the calendar up to date.',
     isEmployed: true,
     isSuspended: false,
@@ -64,6 +67,7 @@ const MOCK_USERS_ORG_ONE: MockUserSeed[] = [
   {
     name: 'Mikko Virtanen',
     email: 'mikko.virtanen@example.com',
+    phoneNumber: '+358441234567',
     description: 'Handles logistics, deliveries and equipment.',
     isEmployed: true,
     isSuspended: false,
@@ -73,6 +77,7 @@ const MOCK_USERS_ORG_ONE: MockUserSeed[] = [
   {
     name: 'Liisa Mäkinen',
     email: 'liisa.makinen@example.com',
+    phoneNumber: null,
     description: 'Runs the community kitchen and the weekly lunch.',
     isEmployed: false,
     isSuspended: false,
@@ -82,6 +87,7 @@ const MOCK_USERS_ORG_ONE: MockUserSeed[] = [
   {
     name: 'Jukka Nieminen',
     email: 'jukka.nieminen@example.com',
+    phoneNumber: '+358451234567',
     description: 'Takes care of the sports grounds and bookings.',
     isEmployed: false,
     isSuspended: false,
@@ -91,6 +97,7 @@ const MOCK_USERS_ORG_ONE: MockUserSeed[] = [
   {
     name: 'Sanna Saarinen',
     email: 'sanna.saarinen@example.com',
+    phoneNumber: '+358501234567',
     description: 'Organizes family and youth events.',
     isEmployed: false,
     isSuspended: true,
@@ -100,6 +107,7 @@ const MOCK_USERS_ORG_ONE: MockUserSeed[] = [
   {
     name: 'Ville Lehtonen',
     email: 'ville.lehtonen@example.com',
+    phoneNumber: '+358401234568',
     description: 'Helps out at events when he has time.',
     isEmployed: false,
     isSuspended: false,
@@ -109,6 +117,7 @@ const MOCK_USERS_ORG_ONE: MockUserSeed[] = [
   {
     name: 'Emilia Järvinen',
     email: 'emilia.jarvinen@example.com',
+    phoneNumber: '+358441234568',
     description: 'Likes to help with setup and cleaning.',
     isEmployed: false,
     isSuspended: false,
@@ -118,6 +127,7 @@ const MOCK_USERS_ORG_ONE: MockUserSeed[] = [
   {
     name: 'Antti Hämäläinen',
     email: 'antti.hamalainen@example.com',
+    phoneNumber: null,
     description: 'Used to volunteer, blocked after repeated no-shows.',
     isEmployed: false,
     isSuspended: false,
@@ -130,6 +140,7 @@ const MOCK_USERS_ORG_TWO: MockUserSeed[] = [
   {
     name: 'Sofia Andersson',
     email: 'sofia.andersson@example.com',
+    phoneNumber: '+46701234567',
     description: 'Coordinates the association events and the calendar.',
     isEmployed: true,
     isSuspended: false,
@@ -139,6 +150,7 @@ const MOCK_USERS_ORG_TWO: MockUserSeed[] = [
   {
     name: 'Erik Lindqvist',
     email: 'erik.lindqvist@example.com',
+    phoneNumber: '+46721234567',
     description: 'Drives the van and handles equipment.',
     isEmployed: true,
     isSuspended: false,
@@ -148,6 +160,7 @@ const MOCK_USERS_ORG_TWO: MockUserSeed[] = [
   {
     name: 'Maria Johansson',
     email: 'maria.johansson@example.com',
+    phoneNumber: '+46731234567',
     description: 'Runs the coffee and the weekly raffle.',
     isEmployed: false,
     isSuspended: false,
@@ -157,6 +170,7 @@ const MOCK_USERS_ORG_TWO: MockUserSeed[] = [
   {
     name: 'Lars Bergström',
     email: 'lars.bergstrom@example.com',
+    phoneNumber: null,
     description: 'Coaches the junior football team.',
     isEmployed: false,
     isSuspended: false,
@@ -166,6 +180,7 @@ const MOCK_USERS_ORG_TWO: MockUserSeed[] = [
   {
     name: 'Ingrid Nilsson',
     email: 'ingrid.nilsson@example.com',
+    phoneNumber: '+46761234567',
     description: 'Organizes the seasonal cleanups.',
     isEmployed: false,
     isSuspended: false,
@@ -175,6 +190,7 @@ const MOCK_USERS_ORG_TWO: MockUserSeed[] = [
   {
     name: 'Oscar Gustafsson',
     email: 'oscar.gustafsson@example.com',
+    phoneNumber: '+46701234568',
     description: 'Takes photos at events.',
     isEmployed: false,
     isSuspended: false,
@@ -184,6 +200,7 @@ const MOCK_USERS_ORG_TWO: MockUserSeed[] = [
   {
     name: 'Elsa Holm',
     email: 'elsa.holm@example.com',
+    phoneNumber: '+46721234568',
     description: 'Keeps the member list up to date.',
     isEmployed: false,
     isSuspended: false,
@@ -193,6 +210,7 @@ const MOCK_USERS_ORG_TWO: MockUserSeed[] = [
   {
     name: 'Johan Söderberg',
     email: 'johan.soderberg@example.com',
+    phoneNumber: '+46731234568',
     description: 'New member, has not volunteered yet.',
     isEmployed: false,
     isSuspended: true,
@@ -389,6 +407,7 @@ async function createMockUsers(tx: Tx, seeds: MockUserSeed[]): Promise<User[]> {
         name: seed.name,
         email: seed.email,
         description: seed.description,
+        phone_number: seed.phoneNumber,
         is_employed: seed.isEmployed,
         is_suspended: seed.isSuspended,
         is_blocked: seed.isBlocked,

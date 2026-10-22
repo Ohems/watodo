@@ -6,6 +6,14 @@ export const updatedAtSchema = z.coerce.date();
 
 export const userStateSchema = z.enum(['active', 'inactive']);
 
+/**
+ * E.164 phone number: a plus sign followed by the country code and the
+ * national number (7-15 digits in total).
+ */
+export const phoneNumberSchema = z
+  .string()
+  .regex(/^\+[1-9]\d{6,14}$/, 'Phone number must include the country code (e.g. +358401234567)');
+
 export const userPushSchema = z.object({
   name: z.string().optional(),
   email: z.email().optional(),
@@ -17,6 +25,22 @@ export const userSchema = userPushSchema.extend({
   id: z.string(),
   createdAt: createdAtSchema,
   updatedAt: updatedAtSchema,
+});
+
+/**
+ * Fields a user may change on their own account. Unlike userPushSchema this
+ * deliberately has no `state` field: account state stays an administrative
+ * concern.
+ */
+export const userSelfUpdateSchema = z.object({
+  name: z.string().min(1).optional(),
+  email: z.email().optional(),
+  description: z.string().nullable().optional(),
+  phoneNumber: phoneNumberSchema.nullable().optional(),
+});
+
+export const linkRequestSchema = z.object({
+  returnUrl: z.string().min(1).optional(),
 });
 
 export const userQuerySchema = z.object({
@@ -196,6 +220,8 @@ export const eventJobsQuerySchema = z.object({
 });
 
 export type UserPush = z.infer<typeof userPushSchema>;
+export type UserSelfUpdate = z.infer<typeof userSelfUpdateSchema>;
+export type LinkRequest = z.infer<typeof linkRequestSchema>;
 export type UserQuery = z.infer<typeof userQuerySchema>;
 export type AuthProviderParam = z.infer<typeof providerSchema>;
 export type RolePush = z.infer<typeof rolePushSchema>;

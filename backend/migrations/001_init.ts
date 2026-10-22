@@ -8,6 +8,8 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
   pgm.createTable('users', {
     id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
     email: { type: 'text', notNull: true, unique: true },
+    // Optional contact number in E.164 format (includes the country code).
+    phone_number: { type: 'text' },
     name: { type: 'text', notNull: true },
     is_employed: { type: 'boolean', notNull: true, default: false },
     is_suspended: { type: 'boolean', notNull: true, default: false },

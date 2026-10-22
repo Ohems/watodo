@@ -21,6 +21,18 @@ describe('EditField', () => {
     render(<EditField value="Test" editing={true} label="Name" />);
     expect(screen.getByLabelText('Name')).toBeInTheDocument();
   });
+
+  it('does not render a visible label (the page renders it above the field)', () => {
+    render(<EditField value="Test" editing={true} label="Name" />);
+    expect(screen.getByLabelText('Name')).toBeInTheDocument();
+    expect(screen.queryByText('Name')).not.toBeInTheDocument();
+  });
+
+  it('shows the validation error below the input and marks it invalid', () => {
+    render(<EditField value="" editing={true} label="Phone number" error="Invalid phone number" />);
+    expect(screen.getByText('Invalid phone number')).toBeInTheDocument();
+    expect(screen.getByLabelText('Phone number')).toHaveAttribute('aria-invalid', 'true');
+  });
 });
 
 describe('UserCard', () => {

@@ -185,10 +185,15 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 - `GET /api/v1/auth/providers` - List supported auth providers (no auth)
 - `GET /api/v1/auth/:provider/login` - Start OAuth flow (discord, google, microsoft)
 - `GET /api/v1/auth/:provider/callback` - OAuth callback
+- `POST /api/v1/auth/:provider/link` - Start an OAuth flow that connects another login method to the current account (auth required)
 - `GET /api/v1/auth/logout` - Logout
 - `GET /api/v1/users` - List users with permissions (paginated, `user-management:read`)
 - `GET /api/v1/users/list` - Simple user list (id + name, no auth)
 - `GET /api/v1/users/@me` - Current user with permissions (auth required)
+- `PATCH /api/v1/users/@me` - Update own personal information (auth required)
+- `DELETE /api/v1/users/@me` - Delete own account (auth required)
+- `GET /api/v1/users/@me/auth-accounts` - List connected login methods (auth required)
+- `DELETE /api/v1/users/@me/auth-accounts/:provider` - Disconnect a login method (auth required)
 - `GET /api/v1/users/:userId` - Get user with permissions (`user-management:read`)
 - `PATCH /api/v1/users/:userId` - Update user (`user-management:write`)
 - `DELETE /api/v1/users/:userId` - Delete user (`user-management:write`)
@@ -236,6 +241,7 @@ frontend/src/
     ├── Home/             # Calendar view (default route)
     ├── UserList/         # User list (Contacts)
     ├── UserProfile/      # User profile detail
+    ├── Account/          # Account page: personal info, login methods, account deletion
     ├── ErrorPage/        # Error page (uses useRouteError)
     ├── Login/            # Login screen (shown when unauthenticated)
     └── NoOrganizationPage/ # Shown when user has no organization

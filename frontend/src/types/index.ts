@@ -3,6 +3,8 @@ export interface User {
   name: string;
   email: string;
   description: string;
+  /** Optional contact number in E.164 format (includes the country code). */
+  phoneNumber: string | null;
   permissions: string[];
   state: 'active' | 'inactive';
   isEmployed: boolean;
@@ -17,6 +19,22 @@ export interface UserPush {
   email?: string;
   description?: string | null;
   state?: 'active' | 'inactive';
+}
+
+/** Fields a user may change on their own account (no `state`). */
+export interface UserSelfUpdate {
+  name?: string;
+  email?: string;
+  description?: string | null;
+  /** E.164 format (includes the country code); null clears the number. */
+  phoneNumber?: string | null;
+}
+
+/** A login method (OAuth provider account) connected to the user's account. */
+export interface AuthAccount {
+  provider: string;
+  providerAccountId: string;
+  createdAt: string;
 }
 
 export interface UserListItem {
@@ -59,10 +77,8 @@ export interface OperationInput {
   assignments?: Array<{ id?: number; name: string; description?: string }>;
 }
 
-export interface ApiError {
-  error: string;
-  statusCode: number;
-}
+/** Maps field names to their validation error messages. */
+export type FieldErrors = Record<string, string>;
 
 export interface Organization {
   id: string;

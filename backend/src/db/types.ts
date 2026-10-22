@@ -5,6 +5,8 @@ export type AuthProvider = 'discord' | 'google' | 'microsoft';
 export interface Users {
   id: Generated<string>;
   email: string;
+  /** Optional contact number in E.164 format (includes the country code). */
+  phone_number: Generated<string | null>;
   name: string;
   is_employed: Generated<boolean>;
   is_suspended: Generated<boolean>;

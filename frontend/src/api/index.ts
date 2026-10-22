@@ -49,6 +49,7 @@ export const api = {
 };
 
 import type {
+  AuthAccount,
   AuthProviderInfo,
   Calendar,
   CalendarPush,
@@ -71,6 +72,7 @@ import type {
   User,
   UserListItem,
   UserPush,
+  UserSelfUpdate,
 } from '../types/index.js';
 
 export const authApi = {
@@ -82,6 +84,9 @@ export const authApi = {
     return `/api/v1/auth/${provider}/login?${params.toString()}`;
   },
   logout: () => api.get('/api/v1/auth/logout'),
+  /** Starts an OAuth flow that connects the provider to the current account. */
+  startLink: (provider: string, returnUrl?: string) =>
+    api.post<{ authorizationUrl: string }>(`/api/v1/auth/${provider}/link`, { returnUrl }),
 };
 
 export const usersApi = {
@@ -98,6 +103,11 @@ export const usersApi = {
   getUserList: () => api.get<UserListItem[]>('/api/v1/users/list'),
   updateUser: (userId: string, data: UserPush) => api.patch<User>(`/api/v1/users/${userId}`, data),
   deleteUser: (userId: string) => api.delete(`/api/v1/users/${userId}`),
+  updateCurrentUser: (data: UserSelfUpdate) => api.patch<User>('/api/v1/users/@me', data),
+  deleteCurrentUser: () => api.delete('/api/v1/users/@me'),
+  getAuthAccounts: () => api.get<AuthAccount[]>('/api/v1/users/@me/auth-accounts'),
+  unlinkAuthAccount: (provider: string) =>
+    api.delete(`/api/v1/users/@me/auth-accounts/${provider}`),
 };
 
 export const operationsApi = {

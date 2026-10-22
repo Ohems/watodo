@@ -12,7 +12,7 @@ import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link as RouterLink } from 'react-router-dom';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../hooks/redux.js';
 import { logout } from '../../store/user-slice.js';
 import OrganizationSelector from '../OrganizationSelector/OrganizationSelector.js';
@@ -20,6 +20,7 @@ import OrganizationSelector from '../OrganizationSelector/OrganizationSelector.j
 function NavBar() {
   const { t } = useTranslation();
   const dispatch = useAppDispatch();
+  const navigate = useNavigate();
   const currentUser = useAppSelector(state => state.user.currentUser);
   const [anchorElNav, setAnchorElNav] = useState<null | HTMLElement>(null);
   const [anchorElUser, setAnchorElUser] = useState<null | HTMLElement>(null);
@@ -41,6 +42,8 @@ function NavBar() {
     setAnchorElUser(null);
     if (setting === 'logout') {
       dispatch(logout());
+    } else if (setting === 'account') {
+      navigate('/account');
     }
   };
 

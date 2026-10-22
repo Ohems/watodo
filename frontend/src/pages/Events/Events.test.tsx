@@ -173,6 +173,7 @@ function makeUser(permissions: string[]): User {
     name: 'Alice',
     email: 'alice@example.com',
     description: '',
+    phoneNumber: null,
     permissions,
     state: 'active',
     isEmployed: true,

@@ -1,7 +1,7 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import { authApi, clearToken, usersApi } from '../api/index.js';
 import i18n from '../i18n/index.js';
-import type { User, UserListItem, UserPush } from '../types/index.js';
+import type { AuthAccount, User, UserListItem, UserPush, UserSelfUpdate } from '../types/index.js';
 
 export type AuthStatus = 'idle' | 'loading' | 'authenticated' | 'unauthenticated';
 
@@ -9,6 +9,7 @@ interface UserState {
   users: User[];
   userList: UserListItem[];
   currentUser: User | null;
+  authAccounts: AuthAccount[];
   authStatus: AuthStatus;
   loading: boolean;
   error: string | null;
@@ -18,6 +19,7 @@ const initialState: UserState = {
   users: [],
   userList: [],
   currentUser: null,
+  authAccounts: [],
   authStatus: 'idle',
   loading: false,
   error: null,
@@ -58,6 +60,30 @@ export const deleteUser = createAsyncThunk('user/deleteUser', async (userId: str
   await usersApi.deleteUser(userId);
   return userId;
 });
+
+export const updateCurrentUser = createAsyncThunk(
+  'user/updateCurrentUser',
+  async (data: UserSelfUpdate) => {
+    return usersApi.updateCurrentUser(data);
+  },
+);
+
+export const deleteCurrentUser = createAsyncThunk('user/deleteCurrentUser', async () => {
+  await usersApi.deleteCurrentUser();
+  clearToken();
+});
+
+export const fetchAuthAccounts = createAsyncThunk('user/fetchAuthAccounts', async () => {
+  return usersApi.getAuthAccounts();
+});
+
+export const unlinkAuthAccount = createAsyncThunk(
+  'user/unlinkAuthAccount',
+  async (provider: string) => {
+    await usersApi.unlinkAuthAccount(provider);
+    return provider;
+  },
+);
 
 const userSlice = createSlice({
   name: 'user',
@@ -100,6 +126,7 @@ const userSlice = createSlice({
       })
       .addCase(logout.fulfilled, state => {
         state.currentUser = null;
+        state.authAccounts = [];
         state.authStatus = 'unauthenticated';
       })
       .addCase(updateUser.fulfilled, (state, action) => {
@@ -113,6 +140,24 @@ const userSlice = createSlice({
       })
       .addCase(deleteUser.fulfilled, (state, action) => {
         state.users = state.users.filter(u => u.id !== action.payload);
+      })
+      .addCase(updateCurrentUser.fulfilled, (state, action) => {
+        if (state.currentUser?.id === action.payload.id) {
+          state.currentUser = action.payload;
+        }
+      })
+      .addCase(deleteCurrentUser.fulfilled, state => {
+        state.currentUser = null;
+        state.authAccounts = [];
+        state.authStatus = 'unauthenticated';
+      })
+      .addCase(fetchAuthAccounts.fulfilled, (state, action) => {
+        state.authAccounts = action.payload;
+      })
+      .addCase(unlinkAuthAccount.fulfilled, (state, action) => {
+        state.authAccounts = state.authAccounts.filter(
+          account => account.provider !== action.payload,
+        );
       });
   },
 });
