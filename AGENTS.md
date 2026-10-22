@@ -21,12 +21,18 @@ monorepo with two npm workspaces:
 ## Getting Started
 
 ```sh
-docker compose up -d       # start PostgreSQL and Redis
+docker compose up -d       # start PostgreSQL, Redis and the test PostgreSQL (port 6432)
 npm install                # install all workspace dependencies
 cp .env.sample .env       # configure environment
 cp .env.sample backend/.env # backend commands run with cwd=backend/ and load .env from there
 npm run migrate -w backend # apply database migrations
 npm run dev                # start both dev servers
+```
+
+The backend test suite runs against the dedicated test database (`watodo-postgres-test`,
+host port 6432) configured by `backend/.env.test` (committed to Git, placeholder values
+only). It needs no setup beyond `docker compose up -d`: `backend/tests/global-setup.ts`
+applies migrations and seeds the permissions table before the test files run.
 ```
 
 The backend runs on port 3000, the frontend on port 5173 (with API proxy to :3000).
@@ -279,8 +285,13 @@ frontend/src/
 - Tests live in `backend/tests/`.
 - API tests use Fastify's `app.inject()` for HTTP testing without a running server.
 - Run: `npm run test -w backend`
-- Tests that need Redis or a database accept both success and infrastructure-error
-  status codes (e.g. 302 or 500 for login without Redis).
+- Integration tests run against the dedicated test database (`watodo-postgres-test`,
+  host port 6432). `backend/.env.test` (committed, placeholder values only) configures
+  the connection: `tests/setup.ts` loads it in every test worker and
+  `tests/global-setup.ts` applies migrations and seeds the permissions table once
+  before the test files run (via the node-pg-migrate programmatic API).
+- Tests that need Redis or a database skip themselves when the test database is not
+  reachable (e.g. 302 or 500 for login without Redis).
 
 ### Frontend Unit/Component (Vitest)
 
@@ -301,7 +312,8 @@ frontend/src/
 
 See `.env.sample` for all variables. Key ones:
 
-- `DATABASE_URL` - PostgreSQL connection string
+- `DATABASE_URL` - PostgreSQL connection string (`backend/.env.test` points it at the
+  test database on port 6432 for the backend test suite)
 - `REDIS_URL` - Redis connection string
 - `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` - Discord OAuth credentials
 - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` - Google OAuth credentials

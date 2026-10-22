@@ -10,6 +10,18 @@ services:
       POSTGRES_USER: watodo
       POSTGRES_DB: watodo
 
+  # Dedicated database for the backend test suite (see backend/.env.test).
+  watodo-postgres-test:
+    image: postgres:17
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    ports:
+      - '6432:5432'
+    environment:
+      POSTGRES_PASSWORD: dbPass123
+      POSTGRES_USER: watodo
+      POSTGRES_DB: watodo_test
+
   watodo-redis:
     image: redis:7-alpine
     ports:
@@ -19,4 +31,5 @@ services:
 
 volumes:
   postgres_data:
+  postgres_test_data:
   redis_data:
