@@ -11,10 +11,11 @@ import ErrorPage from './pages/ErrorPage/ErrorPage.js';
 import Events from './pages/Events/Events.js';
 import Home from './pages/Home/Home.js';
 import LoginPage from './pages/Login/LoginPage.js';
-import NoOrganizationPage from './pages/NoOrganizationPage/NoOrganizationPage.js';
+import OrganizationPage from './pages/Organization/Organization.js';
 import UserList from './pages/UserList/UserList.js';
 import UserProfile from './pages/UserProfile/UserProfile.js';
 import { store } from './store/index.js';
+import { fetchMyOrganizations } from './store/organization-slice.js';
 import { fetchCurrentUser } from './store/user-slice.js';
 
 const theme = createTheme({
@@ -32,6 +33,12 @@ function AppContent() {
   useEffect(() => {
     dispatch(fetchCurrentUser());
   }, [dispatch]);
+
+  useEffect(() => {
+    if (authStatus === 'authenticated') {
+      dispatch(fetchMyOrganizations());
+    }
+  }, [dispatch, authStatus]);
 
   if (authStatus === 'unauthenticated') {
     return <LoginPage />;
@@ -60,7 +67,7 @@ function AppContent() {
         <Route path="/events" element={<Events />} />
         <Route path="/users" element={<UserList />} />
         <Route path="/users/:userId" element={<UserProfile />} />
-        <Route path="/organization" element={<NoOrganizationPage />} />
+        <Route path="/organization" element={<OrganizationPage />} />
         <Route path="*" element={<ErrorPage />} />
       </Routes>
     </>

@@ -4,9 +4,10 @@ import { Provider } from 'react-redux';
 import { BrowserRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.js';
-import { authApi, usersApi } from './api/index.js';
+import { authApi, organizationsApi, usersApi } from './api/index.js';
+import organizationReducer from './store/organization-slice.js';
 import userReducer from './store/user-slice.js';
-import type { User } from './types/index.js';
+import type { Organization, User } from './types/index.js';
 
 vi.mock('./api/index.js', () => ({
   getToken: () => null,
@@ -36,6 +37,8 @@ vi.mock('./api/index.js', () => ({
   },
   organizationsApi: {
     getMyOrganizations: vi.fn().mockResolvedValue([]),
+    getOrganization: vi.fn(),
+    updateOrganization: vi.fn(),
   },
   calendarsApi: {
     getCalendars: vi.fn().mockResolvedValue([]),
@@ -82,12 +85,22 @@ const mockUser: User = {
   updatedAt: '2024-01-01T00:00:00.000Z',
 };
 
+const mockOrganization: Organization = {
+  id: 'org-1',
+  name: 'Community Org',
+  description: 'A community organization',
+  defaultTimezone: 'Europe/Helsinki',
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+};
+
 const mockedUsersApi = vi.mocked(usersApi);
 const mockedAuthApi = vi.mocked(authApi);
+const mockedOrganizationsApi = vi.mocked(organizationsApi);
 
 function renderWithProviders(ui: React.ReactElement) {
   const store = configureStore({
-    reducer: { user: userReducer },
+    reducer: { user: userReducer, organization: organizationReducer },
   });
   return render(
     <Provider store={store}>
@@ -99,6 +112,8 @@ function renderWithProviders(ui: React.ReactElement) {
 describe('App', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
+    window.history.pushState({}, '', '/');
   });
 
   it('greets an unauthorized user with the login screen', async () => {
@@ -155,5 +170,29 @@ describe('App', () => {
     renderWithProviders(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Calendar' })).toBeInTheDocument();
+  });
+
+  it('shows the active organization in the navigation bar once authenticated', async () => {
+    mockedUsersApi.getCurrentUser.mockResolvedValue(mockUser);
+    mockedOrganizationsApi.getMyOrganizations.mockResolvedValue([mockOrganization]);
+
+    renderWithProviders(<App />);
+
+    expect(
+      await screen.findByRole('combobox', { name: 'Select organization' }),
+    ).toBeInTheDocument();
+    expect((await screen.findAllByText('Community Org')).length).toBeGreaterThan(0);
+  });
+
+  it('renders the organization page with the active organization details', async () => {
+    mockedUsersApi.getCurrentUser.mockResolvedValue(mockUser);
+    mockedOrganizationsApi.getMyOrganizations.mockResolvedValue([mockOrganization]);
+    window.history.pushState({}, '', '/organization');
+
+    renderWithProviders(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Community Org' })).toBeInTheDocument();
+    expect(screen.getByText('A community organization')).toBeInTheDocument();
+    expect(screen.getByText('Europe/Helsinki')).toBeInTheDocument();
   });
 });

@@ -22,7 +22,8 @@
     "logout": "Logout",
     "openSettings": "Open settings",
     "navigationMenu": "navigation menu",
-    "userAvatar": "User"
+    "userAvatar": "User",
+    "selectOrganization": "Select organization"
   },
   "home": {
     "title": "Calendar"
@@ -42,6 +43,10 @@
     "message": "You are not a member of any organization yet. Please contact an administrator to be added to one.",
     "goHome": "Go home"
   },
+  "organization": {
+    "editOrganization": "Edit organization",
+    "defaultTimezone": "Default timezone"
+  },
   "users": {
     "title": "Contacts",
     "addNew": "Add new user"
@@ -57,7 +62,9 @@
     "backToList": "Back to list"
   },
   "errors": {
-    "failedToFetchUsers": "Failed to fetch users"
+    "failedToFetchUsers": "Failed to fetch users",
+    "failedToFetchOrganizations": "Failed to fetch organizations",
+    "failedToUpdateOrganization": "Failed to update organization"
   },
   "events": {
     "title": "Event Series",

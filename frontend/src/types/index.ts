@@ -67,7 +67,16 @@ export interface ApiError {
 export interface Organization {
   id: string;
   name: string;
+  description: string;
   defaultTimezone: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OrganizationUpdate {
+  name?: string;
+  description?: string;
+  defaultTimezone?: string;
 }
 
 export interface Calendar {

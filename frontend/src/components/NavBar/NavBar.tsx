@@ -15,6 +15,7 @@ import { useTranslation } from 'react-i18next';
 import { Link as RouterLink } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../hooks/redux.js';
 import { logout } from '../../store/user-slice.js';
+import OrganizationSelector from '../OrganizationSelector/OrganizationSelector.js';
 
 function NavBar() {
   const { t } = useTranslation();
@@ -79,6 +80,9 @@ function NavBar() {
               onClose={() => setAnchorElNav(null)}
               sx={{ display: { xs: 'block', md: 'none' } }}
             >
+              <Box sx={{ px: 2, py: 1, borderBottom: 1, borderColor: 'divider' }}>
+                <OrganizationSelector />
+              </Box>
               {pages.map(page => (
                 <MenuItem key={page.label} onClick={() => setAnchorElNav(null)}>
                   <RouterLink to={page.path} style={{ textDecoration: 'none', color: 'inherit' }}>
@@ -111,6 +115,9 @@ function NavBar() {
           </Box>
 
           <Box sx={{ flexGrow: 0, display: 'flex', alignItems: 'center' }}>
+            <Box sx={{ mr: 2, display: { xs: 'none', md: 'flex' }, alignItems: 'center' }}>
+              <OrganizationSelector onDark />
+            </Box>
             <Typography sx={{ mr: 1, display: { xs: 'none', md: 'block' } }}>
               {currentUser?.name}
             </Typography>

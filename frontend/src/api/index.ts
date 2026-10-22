@@ -67,6 +67,7 @@ import type {
   Operation,
   OperationInput,
   Organization,
+  OrganizationUpdate,
   User,
   UserListItem,
   UserPush,
@@ -118,6 +119,10 @@ export const operationsApi = {
 
 export const organizationsApi = {
   getMyOrganizations: () => api.get<Organization[]>('/api/v1/organizations'),
+  getOrganization: (organizationId: string) =>
+    api.get<Organization>(`/api/v1/organizations/${organizationId}`),
+  updateOrganization: (organizationId: string, data: OrganizationUpdate) =>
+    api.patch<Organization>(`/api/v1/organizations/${organizationId}`, data),
 };
 
 export const calendarsApi = {

@@ -12,6 +12,7 @@ export const PERMISSIONS = {
   USER_MANAGEMENT_WRITE: 'user-management:write',
   ROLE_MANAGEMENT_READ: 'role-management:read',
   ROLE_MANAGEMENT_WRITE: 'role-management:write',
+  ORGANIZATION_WRITE: 'organization:write',
   OPERATIONS_READ: 'operations:read',
   OPERATIONS_WRITE: 'operations:write',
   EVENTS_READ: 'events:read',
@@ -43,6 +44,10 @@ export const PERMISSION_DEFINITIONS: { code: Permission; description: string }[]
   {
     code: PERMISSIONS.ROLE_MANAGEMENT_WRITE,
     description: 'Create, update and delete roles, and assign them to users.',
+  },
+  {
+    code: PERMISSIONS.ORGANIZATION_WRITE,
+    description: 'Edit the details of organizations the user belongs to.',
   },
   { code: PERMISSIONS.OPERATIONS_READ, description: 'View operations.' },
   {

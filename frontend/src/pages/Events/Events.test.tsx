@@ -5,7 +5,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { calendarsApi, eventsApi, organizationsApi, usersApi } from '../../api/index.js';
 import EventOccurrenceDialog from '../../components/EventOccurrenceDialog/EventOccurrenceDialog.js';
 import userReducer, { setCurrentUser } from '../../store/user-slice.js';
-import type { Calendar, EventOccurrenceDetail, EventSeries, User } from '../../types/index.js';
+import type {
+  Calendar,
+  EventOccurrenceDetail,
+  EventSeries,
+  Organization,
+  User,
+} from '../../types/index.js';
 import Events from './Events.js';
 
 vi.mock('../../api/index.js', () => ({
@@ -35,9 +41,18 @@ vi.mock('../../api/index.js', () => ({
     deleteAssignment: vi.fn(),
   },
   organizationsApi: {
-    getMyOrganizations: vi
-      .fn()
-      .mockResolvedValue([{ id: 'org-1', name: 'Org', defaultTimezone: 'Europe/Berlin' }]),
+    getMyOrganizations: vi.fn().mockResolvedValue([
+      {
+        id: 'org-1',
+        name: 'Org',
+        description: '',
+        defaultTimezone: 'Europe/Berlin',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]),
+    getOrganization: vi.fn(),
+    updateOrganization: vi.fn(),
   },
   calendarsApi: {
     getCalendars: vi.fn(),
@@ -69,6 +84,15 @@ vi.mock('../../api/index.js', () => ({
     deleteComment: vi.fn(),
   },
 }));
+
+const mockOrganization: Organization = {
+  id: 'org-1',
+  name: 'Org',
+  description: '',
+  defaultTimezone: 'Europe/Berlin',
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+};
 
 const mockCalendar: Calendar = {
   id: 'cal-1',
@@ -261,9 +285,7 @@ describe('EventOccurrenceDialog', () => {
 
   it('splits the series from an occurrence after showing the warning', async () => {
     vi.mocked(calendarsApi.getCalendars).mockResolvedValue([mockCalendar]);
-    vi.mocked(organizationsApi.getMyOrganizations).mockResolvedValue([
-      { id: 'org-1', name: 'Org', defaultTimezone: 'Europe/Berlin' },
-    ]);
+    vi.mocked(organizationsApi.getMyOrganizations).mockResolvedValue([mockOrganization]);
     vi.mocked(eventsApi.splitEventSeries).mockResolvedValue(mockSeries);
     const onClose = vi.fn();
     const onChanged = vi.fn();

@@ -67,6 +67,12 @@ export const roleAssignmentSchema = z.object({
   eventTypeId: z.number().int().optional(),
 });
 
+export const organizationUpdateSchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().optional(),
+  defaultTimezone: z.string().min(1).max(64).optional(),
+});
+
 export const operationSchema = z.object({
   id: z.number().int().optional(),
   name: z.string(),
@@ -195,6 +201,7 @@ export type AuthProviderParam = z.infer<typeof providerSchema>;
 export type RolePush = z.infer<typeof rolePushSchema>;
 export type RoleUpdate = z.infer<typeof roleUpdateSchema>;
 export type RoleAssignmentInput = z.infer<typeof roleAssignmentSchema>;
+export type OrganizationUpdate = z.infer<typeof organizationUpdateSchema>;
 export type OperationInput = z.infer<typeof operationSchema>;
 export type OpAssignmentInput = z.infer<typeof opAssignmentSchema>;
 export type CalendarPush = z.infer<typeof calendarPushSchema>;

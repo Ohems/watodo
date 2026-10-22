@@ -701,6 +701,7 @@ async function main(): Promise<void> {
         PERMISSIONS.EVENTS_READ,
         PERMISSIONS.EVENTS_WRITE,
         PERMISSIONS.OPERATIONS_READ,
+        PERMISSIONS.ORGANIZATION_WRITE,
       ]);
       const memberPermissions = permissionIdList(permissionIds, [PERMISSIONS.EVENTS_READ]);
 
