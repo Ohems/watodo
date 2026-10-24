@@ -1,13 +1,4 @@
-import Alert from '@mui/material/Alert';
-import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
-import Dialog from '@mui/material/Dialog';
-import DialogActions from '@mui/material/DialogActions';
-import DialogContent from '@mui/material/DialogContent';
-import DialogContentText from '@mui/material/DialogContentText';
-import DialogTitle from '@mui/material/DialogTitle';
-import Paper from '@mui/material/Paper';
-import Typography from '@mui/material/Typography';
+import { Alert, Box, Button, Group, Modal, Paper, Stack, Text, Title } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
@@ -188,46 +179,52 @@ function AccountPage() {
   };
 
   return (
-    <Box sx={{ p: 2, maxWidth: 600, mx: 'auto' }}>
+    <Box p="md" maw={600} mx="auto">
       {linkError && (
-        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setLinkError(null)}>
+        <Alert
+          color="red"
+          variant="light"
+          mb="md"
+          withCloseButton
+          onClose={() => setLinkError(null)}
+        >
           {linkError}
         </Alert>
       )}
 
-      <Paper sx={{ p: 3 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-          <Typography variant="h4">{t('account.title')}</Typography>
+      <Paper shadow="sm" p="lg">
+        <Group justify="space-between" mb="md">
+          <Title order={3}>{t('account.title')}</Title>
           {!editing ? (
-            <Button variant="contained" onClick={startEditing}>
+            <Button variant="filled" onClick={startEditing}>
               {t('common.edit')}
             </Button>
           ) : (
-            <Box>
-              <Button variant="outlined" onClick={handleCancel} sx={{ mr: 1 }}>
+            <Group>
+              <Button variant="default" onClick={handleCancel}>
                 {t('common.cancel')}
               </Button>
-              <Button variant="contained" onClick={handleSave} disabled={saving}>
+              <Button variant="filled" onClick={handleSave} disabled={saving}>
                 {t('common.save')}
               </Button>
-            </Box>
+            </Group>
           )}
-        </Box>
+        </Group>
 
         {profileError && (
-          <Alert severity="error" sx={{ mb: 2 }}>
+          <Alert color="red" variant="light" mb="md">
             {profileError}
           </Alert>
         )}
 
-        <Typography variant="h6" gutterBottom>
+        <Title order={5} mb="md">
           {t('account.personalInfo')}
-        </Typography>
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        </Title>
+        <Stack gap="md">
           <Box>
-            <Typography variant="subtitle2" color={fieldErrors.name ? 'error' : 'text.secondary'}>
+            <Text size="sm" fw={500} c={fieldErrors.name ? 'red' : 'dimmed'} mb={4}>
               {t('common.name')}
-            </Typography>
+            </Text>
             <EditField
               value={editData.name ?? currentUser.name}
               editing={editing}
@@ -237,9 +234,9 @@ function AccountPage() {
             />
           </Box>
           <Box>
-            <Typography variant="subtitle2" color={fieldErrors.email ? 'error' : 'text.secondary'}>
+            <Text size="sm" fw={500} c={fieldErrors.email ? 'red' : 'dimmed'} mb={4}>
               {t('common.email')}
-            </Typography>
+            </Text>
             <EditField
               value={editData.email ?? currentUser.email}
               editing={editing}
@@ -249,12 +246,9 @@ function AccountPage() {
             />
           </Box>
           <Box>
-            <Typography
-              variant="subtitle2"
-              color={fieldErrors.phoneNumber ? 'error' : 'text.secondary'}
-            >
+            <Text size="sm" fw={500} c={fieldErrors.phoneNumber ? 'red' : 'dimmed'} mb={4}>
               {t('common.phoneNumber')}
-            </Typography>
+            </Text>
             <EditField
               value={editData.phoneNumber ?? currentUser.phoneNumber ?? ''}
               editing={editing}
@@ -264,12 +258,9 @@ function AccountPage() {
             />
           </Box>
           <Box>
-            <Typography
-              variant="subtitle2"
-              color={fieldErrors.description ? 'error' : 'text.secondary'}
-            >
+            <Text size="sm" fw={500} c={fieldErrors.description ? 'red' : 'dimmed'} mb={4}>
               {t('common.description')}
-            </Typography>
+            </Text>
             <EditField
               value={editData.description ?? currentUser.description}
               editing={editing}
@@ -278,102 +269,111 @@ function AccountPage() {
               onChange={value => updateField('description', value)}
             />
           </Box>
-        </Box>
+        </Stack>
       </Paper>
 
-      <Paper sx={{ p: 3, mt: 3 }}>
-        <Typography variant="h6" gutterBottom>
+      <Paper shadow="sm" p="lg" mt="lg">
+        <Title order={5} mb="md">
           {t('account.loginMethods')}
-        </Typography>
+        </Title>
 
         {accountsError && (
-          <Alert severity="error" sx={{ mb: 2 }} onClose={() => setAccountsError(null)}>
+          <Alert
+            color="red"
+            variant="light"
+            mb="md"
+            withCloseButton
+            onClose={() => setAccountsError(null)}
+          >
             {accountsError}
           </Alert>
         )}
 
         {configuredProviders.length === 0 ? (
-          <Typography variant="body2" color="text.secondary">
+          <Text size="sm" c="dimmed">
             {t('account.noProviders')}
-          </Typography>
+          </Text>
         ) : (
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <Stack gap="sm">
             {configuredProviders.map(provider => {
               const account = authAccounts.find(a => a.provider === provider.id);
               return (
-                <Box
-                  key={provider.id}
-                  sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 2,
-                  }}
-                >
+                <Group key={provider.id} justify="space-between" gap="md">
                   <Box>
-                    <Typography variant="body1">{provider.name}</Typography>
+                    <Text size="sm" fw={500}>
+                      {provider.name}
+                    </Text>
                     {account && (
-                      <Typography variant="caption" color="text.secondary">
+                      <Text size="xs" c="dimmed">
                         {t('account.connectedAt', {
                           date: new Date(account.createdAt).toLocaleDateString(),
                         })}
-                      </Typography>
+                      </Text>
                     )}
                   </Box>
                   {account ? (
                     <Button
-                      variant="outlined"
+                      variant="outline"
                       onClick={() => handleDisconnect(provider.id)}
                       disabled={!canDisconnect}
                     >
                       {t('account.disconnect')}
                     </Button>
                   ) : (
-                    <Button variant="outlined" onClick={() => handleConnect(provider.id)}>
+                    <Button variant="outline" onClick={() => handleConnect(provider.id)}>
                       {t('account.connect', { provider: provider.name })}
                     </Button>
                   )}
-                </Box>
+                </Group>
               );
             })}
             {!canDisconnect && authAccounts.length > 0 && (
-              <Typography variant="caption" color="text.secondary">
+              <Text size="xs" c="dimmed">
                 {t('account.cannotDisconnectLast')}
-              </Typography>
+              </Text>
             )}
-          </Box>
+          </Stack>
         )}
       </Paper>
 
-      <Paper sx={{ p: 3, mt: 3, border: 1, borderColor: 'error.main' }}>
-        <Typography variant="h6" gutterBottom color="error">
+      <Paper
+        shadow="sm"
+        p="lg"
+        mt="lg"
+        withBorder
+        style={{ borderColor: 'var(--mantine-color-red-6)' }}
+      >
+        <Title order={5} c="red" mb="md">
           {t('account.dangerZone')}
-        </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        </Title>
+        <Text size="sm" c="dimmed" mb="md">
           {t('account.deleteAccountDescription')}
-        </Typography>
-        <Button variant="outlined" color="error" onClick={() => setDeleteDialogOpen(true)}>
+        </Text>
+        <Button variant="outline" color="red" onClick={() => setDeleteDialogOpen(true)}>
           {t('account.deleteAccount')}
         </Button>
       </Paper>
 
-      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
-        <DialogTitle>{t('account.deleteAccountTitle')}</DialogTitle>
-        <DialogContent>
-          {deleteError && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {deleteError}
-            </Alert>
-          )}
-          <DialogContentText>{t('account.deleteAccountConfirm')}</DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDeleteDialogOpen(false)}>{t('common.cancel')}</Button>
-          <Button variant="contained" color="error" onClick={handleDelete} disabled={deleting}>
+      <Modal
+        opened={deleteDialogOpen}
+        onClose={() => setDeleteDialogOpen(false)}
+        title={t('account.deleteAccountTitle')}
+      >
+        {deleteError && (
+          <Alert color="red" variant="light" mb="md">
+            {deleteError}
+          </Alert>
+        )}
+        <Text size="sm">{t('account.deleteAccountConfirm')}</Text>
+        <Group justify="flex-end" mt="md">
+          <Button variant="default" onClick={() => setDeleteDialogOpen(false)}>
+            {t('common.cancel')}
+          </Button>
+          <Button color="red" variant="filled" onClick={handleDelete} disabled={deleting}>
             {t('account.confirmDelete')}
           </Button>
-        </DialogActions>
-      </Dialog>
+        </Group>
+      </Modal>
     </Box>
   );
 }

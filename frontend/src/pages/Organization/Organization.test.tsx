@@ -1,3 +1,4 @@
+import { MantineProvider } from '@mantine/core';
 import { configureStore } from '@reduxjs/toolkit';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Provider } from 'react-redux';
@@ -53,9 +54,11 @@ function renderPage(permissions: string[]) {
   store.dispatch(setCurrentUser(makeUser(permissions)));
   render(
     <Provider store={store}>
-      <MemoryRouter>
-        <OrganizationPage />
-      </MemoryRouter>
+      <MantineProvider>
+        <MemoryRouter>
+          <OrganizationPage />
+        </MemoryRouter>
+      </MantineProvider>
     </Provider>,
   );
   return store;

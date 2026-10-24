@@ -1,6 +1,4 @@
-import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
-import Typography from '@mui/material/Typography';
+import { Button, Center, Stack, Text, Title } from '@mantine/core';
 import { useTranslation } from 'react-i18next';
 import { isRouteErrorResponse, Link as RouterLink, useRouteError } from 'react-router-dom';
 
@@ -14,23 +12,14 @@ export default function ErrorPage() {
     errorMessage = error.message;
   }
   return (
-    <Box
-      sx={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: '100vh',
-        gap: 2,
-      }}
-    >
-      <Typography variant="h1" component="h1">
-        {t('error.oops')}
-      </Typography>
-      <Typography variant="body1">{errorMessage}</Typography>
-      <Button component={RouterLink} to="/" variant="contained">
-        {t('error.goHome')}
-      </Button>
-    </Box>
+    <Center style={{ minHeight: '100vh' }}>
+      <Stack align="center" gap="md">
+        <Title order={1}>{t('error.oops')}</Title>
+        <Text>{errorMessage}</Text>
+        <Button component={RouterLink} to="/" variant="filled">
+          {t('error.goHome')}
+        </Button>
+      </Stack>
+    </Center>
   );
 }

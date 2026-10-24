@@ -1,9 +1,15 @@
-import Alert from '@mui/material/Alert';
-import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
-import CircularProgress from '@mui/material/CircularProgress';
-import Paper from '@mui/material/Paper';
-import Typography from '@mui/material/Typography';
+import {
+  Alert,
+  Box,
+  Button,
+  Center,
+  Group,
+  Loader,
+  Paper,
+  Stack,
+  Text,
+  Title,
+} from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -50,33 +56,33 @@ function UserProfile() {
 
   if (loading && !user) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
-        <CircularProgress />
-      </Box>
+      <Center p="xl">
+        <Loader />
+      </Center>
     );
   }
 
   return (
-    <Box sx={{ p: 2, maxWidth: 600, mx: 'auto' }}>
-      <Paper sx={{ p: 3 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-          <Typography variant="h4">
+    <Box p="md" maw={600} mx="auto">
+      <Paper shadow="sm" p="lg">
+        <Group justify="space-between" mb="md">
+          <Title order={3}>
             {isNew
               ? t('userProfile.newUser')
               : editing
                 ? t('userProfile.editUser')
                 : (user?.name ?? t('userProfile.title'))}
-          </Typography>
+          </Title>
           {!isNew && (
-            <Box>
+            <Group>
               {!editing ? (
-                <Button variant="contained" onClick={() => setEditing(true)}>
+                <Button variant="filled" onClick={() => setEditing(true)}>
                   {t('common.edit')}
                 </Button>
               ) : (
                 <>
                   <Button
-                    variant="outlined"
+                    variant="default"
                     onClick={() => {
                       setEditing(false);
                       if (user)
@@ -87,30 +93,29 @@ function UserProfile() {
                           state: user.state,
                         });
                     }}
-                    sx={{ mr: 1 }}
                   >
                     {t('common.cancel')}
                   </Button>
-                  <Button variant="contained" onClick={handleSave}>
+                  <Button variant="filled" onClick={handleSave}>
                     {t('common.save')}
                   </Button>
                 </>
               )}
-            </Box>
+            </Group>
           )}
-        </Box>
+        </Group>
 
         {error && (
-          <Alert severity="error" sx={{ mb: 2 }}>
+          <Alert color="red" variant="light" mb="md">
             {error}
           </Alert>
         )}
 
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <Stack gap="md">
           <Box>
-            <Typography variant="subtitle2" color="text.secondary">
+            <Text size="sm" fw={500} c="dimmed" mb={4}>
               {t('common.name')}
-            </Typography>
+            </Text>
             <EditField
               value={editData.name ?? user?.name ?? ''}
               editing={editing || isNew}
@@ -119,9 +124,9 @@ function UserProfile() {
             />
           </Box>
           <Box>
-            <Typography variant="subtitle2" color="text.secondary">
+            <Text size="sm" fw={500} c="dimmed" mb={4}>
               {t('common.email')}
-            </Typography>
+            </Text>
             <EditField
               value={editData.email ?? user?.email ?? ''}
               editing={editing || isNew}
@@ -130,9 +135,9 @@ function UserProfile() {
             />
           </Box>
           <Box>
-            <Typography variant="subtitle2" color="text.secondary">
+            <Text size="sm" fw={500} c="dimmed" mb={4}>
               {t('common.description')}
-            </Typography>
+            </Text>
             <EditField
               value={editData.description ?? user?.description ?? ''}
               editing={editing || isNew}
@@ -141,17 +146,17 @@ function UserProfile() {
             />
           </Box>
           <Box>
-            <Typography variant="subtitle2" color="text.secondary">
+            <Text size="sm" fw={500} c="dimmed" mb={4}>
               {t('userProfile.permissions')}
-            </Typography>
-            <Typography variant="body1">
+            </Text>
+            <Text size="sm">
               {user?.permissions?.length ? user.permissions.join(', ') : t('common.none')}
-            </Typography>
+            </Text>
           </Box>
           <Box>
-            <Typography variant="subtitle2" color="text.secondary">
+            <Text size="sm" fw={500} c="dimmed" mb={4}>
               {t('userProfile.state')}
-            </Typography>
+            </Text>
             <EditField
               value={editData.state ?? user?.state ?? 'active'}
               editing={editing || isNew}
@@ -163,11 +168,11 @@ function UserProfile() {
               onChange={v => setEditData(p => ({ ...p, state: v as 'active' | 'inactive' }))}
             />
           </Box>
-        </Box>
+        </Stack>
 
         {!isNew && (
-          <Box sx={{ mt: 3 }}>
-            <Button variant="text" onClick={() => navigate('/users')}>
+          <Box mt="lg">
+            <Button variant="subtle" onClick={() => navigate('/users')}>
               {t('userProfile.backToList')}
             </Button>
           </Box>

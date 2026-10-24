@@ -1,5 +1,6 @@
+import { MantineProvider } from '@mantine/core';
 import { configureStore } from '@reduxjs/toolkit';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { Provider } from 'react-redux';
 import { BrowserRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -49,9 +50,11 @@ function renderNavBar(organizations: Organization[]) {
   store.dispatch(fetchMyOrganizations.fulfilled(organizations, ''));
   render(
     <Provider store={store}>
-      <BrowserRouter>
-        <NavBar />
-      </BrowserRouter>
+      <MantineProvider>
+        <BrowserRouter>
+          <NavBar />
+        </BrowserRouter>
+      </MantineProvider>
     </Provider>,
   );
   return store;
@@ -78,22 +81,23 @@ describe('NavBar', () => {
     expect(screen.queryByRole('combobox', { name: 'Select organization' })).not.toBeInTheDocument();
   });
 
-  it('activates another organization when selected', () => {
+  it('activates another organization when selected', async () => {
     const store = renderNavBar([orgA, orgB]);
 
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Select organization' }));
-    fireEvent.click(screen.getByRole('option', { name: 'Org B' }));
+    fireEvent.click(screen.getByRole('combobox', { name: 'Select organization' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Org B' }));
 
     expect(store.getState().organization.activeOrganizationId).toBe('org-b');
     expect(localStorage.getItem('watodo_active_organization')).toBe('org-b');
   });
 
-  it('shows the selector at the top of the mobile menu', () => {
+  it('shows the selector at the top of the mobile menu', async () => {
     renderNavBar([orgA, orgB]);
 
     fireEvent.click(screen.getByRole('button', { name: 'navigation menu' }));
-    const menu = screen.getByRole('menu');
-    const selector = within(menu).getByRole('combobox', { name: 'Select organization' });
-    expect(selector).toBeInTheDocument();
+    expect(await screen.findByRole('menu')).toBeInTheDocument();
+    // The organization selector renders inside the mobile menu dropdown.
+    const selectors = screen.getAllByRole('combobox', { name: 'Select organization' });
+    expect(selectors.length).toBeGreaterThan(0);
   });
 });

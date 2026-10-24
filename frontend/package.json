@@ -1,7 +1,7 @@
 {
   "name": "@watodo/frontend",
   "version": "1.0.0",
-  "description": "Watodo frontend - React + Vite + TypeScript + MUI",
+  "description": "Watodo frontend - React + Vite + TypeScript + Mantine",
   "private": true,
   "type": "module",
   "engines": {
@@ -29,12 +29,10 @@
     "check:fix": "biome check --write ."
   },
   "dependencies": {
-    "@emotion/react": "^11.14.0",
-    "@emotion/styled": "^11.14.1",
-    "@fontsource/roboto": "^5.3.0",
-    "@mui/icons-material": "^9.5.0",
-    "@mui/material": "^9.5.0",
+    "@mantine/core": "^9.7.3",
+    "@mantine/hooks": "^9.7.3",
     "@reduxjs/toolkit": "^2.13.0",
+    "@tabler/icons-react": "^3.49.0",
     "i18next": "^26.5.5",
     "moment": "^2.31.0",
     "react": "^19.3.1",

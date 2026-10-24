@@ -1,7 +1,4 @@
-import Box from '@mui/material/Box';
-import CircularProgress from '@mui/material/CircularProgress';
-import CssBaseline from '@mui/material/CssBaseline';
-import { createTheme, ThemeProvider } from '@mui/material/styles';
+import { Box, Loader, MantineProvider } from '@mantine/core';
 import { useEffect } from 'react';
 import { Provider } from 'react-redux';
 import { Route, Routes } from 'react-router-dom';
@@ -18,14 +15,6 @@ import UserProfile from './pages/UserProfile/UserProfile.js';
 import { store } from './store/index.js';
 import { fetchMyOrganizations } from './store/organization-slice.js';
 import { fetchCurrentUser } from './store/user-slice.js';
-
-const theme = createTheme({
-  palette: {
-    mode: 'light',
-    primary: { main: '#1976d2' },
-    secondary: { main: '#dc004e' },
-  },
-});
 
 function AppContent() {
   const dispatch = useAppDispatch();
@@ -48,14 +37,14 @@ function AppContent() {
   if (authStatus !== 'authenticated') {
     return (
       <Box
-        sx={{
+        style={{
           minHeight: '100vh',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
         }}
       >
-        <CircularProgress />
+        <Loader />
       </Box>
     );
   }
@@ -79,10 +68,9 @@ function AppContent() {
 function App() {
   return (
     <Provider store={store}>
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
+      <MantineProvider>
         <AppContent />
-      </ThemeProvider>
+      </MantineProvider>
     </Provider>
   );
 }

@@ -1,9 +1,15 @@
-import Alert from '@mui/material/Alert';
-import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
-import CircularProgress from '@mui/material/CircularProgress';
-import Paper from '@mui/material/Paper';
-import Typography from '@mui/material/Typography';
+import {
+  Alert,
+  Box,
+  Button,
+  Center,
+  Group,
+  Loader,
+  Paper,
+  Stack,
+  Text,
+  Title,
+} from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import EditField from '../../components/EditField/EditField.js';
@@ -90,9 +96,9 @@ function OrganizationPage() {
 
   if (!loaded || (loading && !organization)) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
-        <CircularProgress />
-      </Box>
+      <Center p="xl">
+        <Loader />
+      </Center>
     );
   }
 
@@ -101,17 +107,17 @@ function OrganizationPage() {
   }
 
   return (
-    <Box sx={{ p: 2, maxWidth: 600, mx: 'auto' }}>
-      <Paper sx={{ p: 3 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-          <Typography variant="h4">
+    <Box p="md" maw={600} mx="auto">
+      <Paper shadow="sm" p="lg">
+        <Group justify="space-between" mb="md">
+          <Title order={3}>
             {editing ? t('organization.editOrganization') : organization.name}
-          </Typography>
+          </Title>
           {canEdit && (
-            <Box>
+            <Group>
               {!editing ? (
                 <Button
-                  variant="contained"
+                  variant="filled"
                   onClick={() => {
                     setFieldErrors({});
                     setEditing(true);
@@ -121,29 +127,29 @@ function OrganizationPage() {
                 </Button>
               ) : (
                 <>
-                  <Button variant="outlined" onClick={handleCancel} sx={{ mr: 1 }}>
+                  <Button variant="default" onClick={handleCancel}>
                     {t('common.cancel')}
                   </Button>
-                  <Button variant="contained" onClick={handleSave}>
+                  <Button variant="filled" onClick={handleSave}>
                     {t('common.save')}
                   </Button>
                 </>
               )}
-            </Box>
+            </Group>
           )}
-        </Box>
+        </Group>
 
         {error && (
-          <Alert severity="error" sx={{ mb: 2 }}>
+          <Alert color="red" variant="light" mb="md">
             {error}
           </Alert>
         )}
 
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <Stack gap="md">
           <Box>
-            <Typography variant="subtitle2" color={fieldErrors.name ? 'error' : 'text.secondary'}>
+            <Text size="sm" fw={500} c={fieldErrors.name ? 'red' : 'dimmed'} mb={4}>
               {t('common.name')}
-            </Typography>
+            </Text>
             <EditField
               value={editData.name ?? organization.name}
               editing={editing}
@@ -153,12 +159,9 @@ function OrganizationPage() {
             />
           </Box>
           <Box>
-            <Typography
-              variant="subtitle2"
-              color={fieldErrors.description ? 'error' : 'text.secondary'}
-            >
+            <Text size="sm" fw={500} c={fieldErrors.description ? 'red' : 'dimmed'} mb={4}>
               {t('common.description')}
-            </Typography>
+            </Text>
             <EditField
               value={editData.description ?? organization.description}
               editing={editing}
@@ -168,12 +171,9 @@ function OrganizationPage() {
             />
           </Box>
           <Box>
-            <Typography
-              variant="subtitle2"
-              color={fieldErrors.defaultTimezone ? 'error' : 'text.secondary'}
-            >
+            <Text size="sm" fw={500} c={fieldErrors.defaultTimezone ? 'red' : 'dimmed'} mb={4}>
               {t('organization.defaultTimezone')}
-            </Typography>
+            </Text>
             <EditField
               value={editData.defaultTimezone ?? organization.defaultTimezone}
               editing={editing}
@@ -182,7 +182,7 @@ function OrganizationPage() {
               onChange={value => updateField('defaultTimezone', value)}
             />
           </Box>
-        </Box>
+        </Stack>
       </Paper>
     </Box>
   );

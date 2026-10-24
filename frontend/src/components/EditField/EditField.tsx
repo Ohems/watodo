@@ -1,6 +1,4 @@
-import Box from '@mui/material/Box';
-import FormHelperText from '@mui/material/FormHelperText';
-import TextField from '@mui/material/TextField';
+import { Box, Text, TextInput } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import Select, { type SingleValue } from 'react-select';
@@ -52,18 +50,21 @@ function EditField({ value, editing, options, label, error, onChange }: EditFiel
           isClearable
           placeholder={label ?? t('common.select')}
         />
-        {error && <FormHelperText error>{error}</FormHelperText>}
+        {error && (
+          <Text size="sm" c="red" mt={4}>
+            {error}
+          </Text>
+        )}
       </Box>
     );
   }
 
   return (
-    <TextField
-      fullWidth
-      size="small"
-      error={Boolean(error)}
-      helperText={error}
-      slotProps={{ htmlInput: { 'aria-label': label } }}
+    <TextInput
+      w="100%"
+      size="sm"
+      error={error}
+      aria-label={label}
       value={localValue}
       onChange={e => {
         setLocalValue(e.target.value);

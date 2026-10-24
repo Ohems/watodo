@@ -1,8 +1,4 @@
-import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
-import CircularProgress from '@mui/material/CircularProgress';
-import Paper from '@mui/material/Paper';
-import Typography from '@mui/material/Typography';
+import { Box, Button, Center, Loader, Paper, Stack, Text } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { authApi } from '../../api/index.js';
@@ -38,68 +34,44 @@ function LoginPage() {
   const returnUrl = window.location.href;
 
   return (
-    <Box
-      sx={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        p: 2,
-      }}
-    >
-      <Paper
-        sx={{
-          width: '100%',
-          maxWidth: 400,
-          overflow: 'hidden',
-        }}
-      >
+    <Center style={{ minHeight: '100vh', padding: 16 }}>
+      <Paper shadow="md" style={{ width: '100%', maxWidth: 400 }}>
         <Box
-          sx={{
-            bgcolor: 'primary.main',
+          style={{
+            backgroundColor: 'var(--mantine-color-blue-7)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            py: 4,
+            padding: '32px 0',
           }}
         >
           <Box
             component="img"
             src="/logo_white.svg"
             alt={t('login.logoAlt')}
-            sx={{ display: 'block', width: 200, height: 'auto' }}
+            style={{ display: 'block', width: 200, height: 'auto' }}
           />
         </Box>
-        <Box
-          sx={{
-            p: 4,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: 2,
-          }}
-        >
-          <Typography variant="body1" color="text.secondary">
-            {t('login.signInToContinue')}
-          </Typography>
+        <Stack align="center" gap="md" p="xl">
+          <Text c="dimmed">{t('login.signInToContinue')}</Text>
           {providers === null ? (
-            <CircularProgress />
+            <Loader />
           ) : (
             providers.map(provider => (
               <Button
                 key={provider.id}
                 component="a"
                 href={authApi.loginUrl(provider.id, undefined, returnUrl)}
-                variant="outlined"
+                variant="outline"
                 fullWidth
               >
                 {t('login.signInWith', { provider: provider.name })}
               </Button>
             ))
           )}
-        </Box>
+        </Stack>
       </Paper>
-    </Box>
+    </Center>
   );
 }
 

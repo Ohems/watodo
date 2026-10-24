@@ -9,12 +9,12 @@ Watodo is a community event and responsibility management tool. It is a
 monorepo with two npm workspaces:
 
 - `backend/` - Fastify v5 REST API server (TypeScript, Node.js)
-- `frontend/` - React 19 single-page application (Vite, TypeScript, MUI)
+- `frontend/` - React 19 single-page application (Vite, TypeScript, Mantine)
 
 ## Tech Stack
 
 - **Backend**: Fastify v5, TypeScript, Kysely + node-pg-migrate, PostgreSQL 17, Redis, pino, Zod v4
-- **Frontend**: React 19, Vite 7, TypeScript, Material-UI v7, React Router v7, Redux Toolkit
+- **Frontend**: React 19, Vite 7, TypeScript, Mantine v9, React Router v7, Redux Toolkit
 - **Tooling**: Biome (lint + format), Vitest (unit/component tests), Playwright (E2E tests)
 - **Runtime**: Node.js >= 24.21.0 (see `.nvmrc`)
 
@@ -258,7 +258,7 @@ frontend/src/
 - **API calls**: All API calls go through the client in `api/index.ts`. The client
   reads the auth token from localStorage and sends it as the `x-token` header.
 - **Routing**: React Router v7 with `createBrowserRouter`. Routes are defined in `App.tsx`.
-- **UI**: Material-UI v7 components. Use `sx` prop for styling.
+- **UI**: Mantine v9 components. Use the `style` prop or Mantine style props for styling.
 - **Components**: Each component lives in its own folder with an `index.ts` barrel export.
 
 ## Database
@@ -340,7 +340,8 @@ See `.env.sample` for all variables. Key ones:
 - Never change the database schema directly. Always create a migration.
 - Never rename or renumber existing migration files.
 - Do not introduce new dependencies without good reason. The project uses specific
-  modern versions of all libraries.
+  modern versions of all libraries. Mantine extensions (official `@mantine/*`
+  packages) and community extensions are acceptable when they provide clear value.
 - When adding a new dependency, check that the version used is the latest one with
   `npm view <package-name> version`.
 - Do not use `any` types. If a type is truly unknown, use `unknown` and narrow it.

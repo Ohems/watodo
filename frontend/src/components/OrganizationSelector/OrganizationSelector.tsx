@@ -1,5 +1,4 @@
-import MenuItem from '@mui/material/MenuItem';
-import Select, { type SelectChangeEvent } from '@mui/material/Select';
+import { Select } from '@mantine/core';
 import { useTranslation } from 'react-i18next';
 import { useAppDispatch, useAppSelector } from '../../hooks/redux.js';
 import { setActiveOrganization } from '../../store/organization-slice.js';
@@ -19,34 +18,37 @@ function OrganizationSelector({ onDark = false }: OrganizationSelectorProps) {
     return null;
   }
 
-  const handleChange = (event: SelectChangeEvent<string>) => {
-    dispatch(setActiveOrganization(event.target.value));
-  };
+  const data = organizations.map(organization => ({
+    value: organization.id,
+    label: organization.name,
+  }));
 
   return (
     <Select
-      size="small"
-      value={activeOrganizationId ?? ''}
-      onChange={handleChange}
-      inputProps={{ 'aria-label': t('nav.selectOrganization') }}
-      sx={{
-        minWidth: 160,
-        ...(onDark
-          ? {
-              color: 'common.white',
-              '.MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255, 255, 255, 0.5)' },
-              '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'common.white' },
-              '.MuiSelect-icon': { color: 'common.white' },
-            }
-          : {}),
+      size="sm"
+      data={data}
+      value={activeOrganizationId ?? null}
+      onChange={value => {
+        if (value) dispatch(setActiveOrganization(value));
       }}
-    >
-      {organizations.map(organization => (
-        <MenuItem key={organization.id} value={organization.id}>
-          {organization.name}
-        </MenuItem>
-      ))}
-    </Select>
+      aria-label={t('nav.selectOrganization')}
+      styles={
+        onDark
+          ? {
+              input: {
+                minWidth: 160,
+                backgroundColor: 'transparent',
+                color: 'white',
+                borderColor: 'rgba(255, 255, 255, 0.5)',
+              },
+              dropdown: {
+                color: 'black',
+              },
+            }
+          : { input: { minWidth: 160 } }
+      }
+      comboboxProps={{ withinPortal: true }}
+    />
   );
 }
 

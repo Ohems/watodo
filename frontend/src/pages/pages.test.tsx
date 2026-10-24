@@ -1,3 +1,4 @@
+import { MantineProvider } from '@mantine/core';
 import { render, screen } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
@@ -9,7 +10,11 @@ describe('ErrorPage', () => {
       [{ path: '*', element: <ErrorPageComponent />, errorElement: <ErrorPageComponent /> }],
       { initialEntries: ['/'] },
     );
-    render(<RouterProvider router={router} />);
+    render(
+      <MantineProvider>
+        <RouterProvider router={router} />
+      </MantineProvider>,
+    );
     expect(await screen.findByText('Oops!')).toBeInTheDocument();
   });
 });
@@ -21,7 +26,11 @@ describe('NoOrganizationPage', () => {
     const router = createMemoryRouter([{ path: '*', element: <NoOrganizationPage /> }], {
       initialEntries: ['/'],
     });
-    render(<RouterProvider router={router} />);
+    render(
+      <MantineProvider>
+        <RouterProvider router={router} />
+      </MantineProvider>,
+    );
     expect(screen.getByText('No Organization')).toBeInTheDocument();
     expect(screen.getByText(/not a member of any organization/i)).toBeInTheDocument();
   });

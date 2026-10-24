@@ -1,3 +1,4 @@
+import { MantineProvider } from '@mantine/core';
 import { configureStore } from '@reduxjs/toolkit';
 import { render, screen } from '@testing-library/react';
 import { Provider } from 'react-redux';
@@ -105,7 +106,9 @@ function renderWithProviders(ui: React.ReactElement) {
   });
   return render(
     <Provider store={store}>
-      <BrowserRouter>{ui}</BrowserRouter>
+      <MantineProvider>
+        <BrowserRouter>{ui}</BrowserRouter>
+      </MantineProvider>
     </Provider>,
   );
 }

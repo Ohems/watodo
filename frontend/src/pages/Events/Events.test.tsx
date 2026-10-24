@@ -1,3 +1,4 @@
+import { MantineProvider } from '@mantine/core';
 import { configureStore } from '@reduxjs/toolkit';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Provider } from 'react-redux';
@@ -187,7 +188,11 @@ function makeUser(permissions: string[]): User {
 function renderWithUser(ui: React.ReactElement, permissions: string[]) {
   const store = configureStore({ reducer: { user: userReducer } });
   store.dispatch(setCurrentUser(makeUser(permissions)));
-  return render(<Provider store={store}>{ui}</Provider>);
+  return render(
+    <Provider store={store}>
+      <MantineProvider>{ui}</MantineProvider>
+    </Provider>,
+  );
 }
 
 describe('Events page', () => {

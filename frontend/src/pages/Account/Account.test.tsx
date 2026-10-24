@@ -1,3 +1,4 @@
+import { MantineProvider } from '@mantine/core';
 import { configureStore } from '@reduxjs/toolkit';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Provider } from 'react-redux';
@@ -65,9 +66,11 @@ function renderPage(authAccounts: AuthAccount[] = mockAuthAccounts, initialEntry
   store.dispatch(fetchAuthAccounts.fulfilled(authAccounts, ''));
   render(
     <Provider store={store}>
-      <MemoryRouter initialEntries={[initialEntry]}>
-        <AccountPage />
-      </MemoryRouter>
+      <MantineProvider>
+        <MemoryRouter initialEntries={[initialEntry]}>
+          <AccountPage />
+        </MemoryRouter>
+      </MantineProvider>
     </Provider>,
   );
   return store;

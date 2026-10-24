@@ -1,5 +1,4 @@
-import Box from '@mui/material/Box';
-import CircularProgress from '@mui/material/CircularProgress';
+import { Group, Loader, Title } from '@mantine/core';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { eventsApi } from '../../api/index.js';
@@ -61,10 +60,10 @@ function Home() {
 
   return (
     <div style={{ padding: 16 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-        <h2 style={{ margin: 0 }}>{t('home.title')}</h2>
-        {loading && <CircularProgress size={20} />}
-      </Box>
+      <Group gap="md" mb="sm">
+        <Title order={2}>{t('home.title')}</Title>
+        {loading && <Loader size="sm" />}
+      </Group>
       <Calendar
         events={events}
         onRangeChange={newRange => setRange(newRange)}
