@@ -10,14 +10,29 @@
     "name": "Name",
     "email": "Email",
     "phoneNumber": "Phone number",
-    "description": "Description"
+    "description": "Description",
+    "add": "Add",
+    "delete": "Delete",
+    "search": "Search",
+    "actions": "Actions",
+    "loading": "Loading...",
+    "noResults": "No results found",
+    "perPage": "Per page",
+    "page": "Page",
+    "of": "of",
+    "all": "All"
   },
   "nav": {
-    "calendar": "Calendar",
-    "contacts": "Contacts",
+    "home": "Home",
     "events": "Events",
-    "templates": "Templates",
+    "eventsCalendar": "Calendar",
+    "eventsManagement": "Management",
+    "teams": "Teams",
     "organization": "Organization",
+    "orgGeneral": "General",
+    "orgLocations": "Locations",
+    "orgJobs": "Jobs",
+    "orgUsers": "Users",
     "profile": "Profile",
     "account": "Account",
     "logout": "Logout",
@@ -27,7 +42,13 @@
     "selectOrganization": "Select organization"
   },
   "home": {
-    "title": "Calendar"
+    "title": "Home",
+    "notifications": "Notifications",
+    "upcomingEvents": "Upcoming events",
+    "noNotifications": "No notifications",
+    "noUpcomingEvents": "No upcoming events",
+    "markAllRead": "Mark all as read",
+    "unread": "unread"
   },
   "login": {
     "signInToContinue": "Sign in to continue",
@@ -46,7 +67,51 @@
   },
   "organization": {
     "editOrganization": "Edit organization",
-    "defaultTimezone": "Default timezone"
+    "defaultTimezone": "Default timezone",
+    "general": "General",
+    "locations": "Locations",
+    "jobs": "Jobs",
+    "users": "Users"
+  },
+  "teams": {
+    "title": "Teams",
+    "addNew": "Add team",
+    "newTeam": "New team",
+    "editTeam": "Edit team",
+    "members": "Members",
+    "memberCount": "Members",
+    "addMember": "Add member",
+    "noTeams": "No teams yet",
+    "noMembers": "No members in this team",
+    "deleteTeam": "Delete team",
+    "deleteTeamConfirm": "Delete the team \"{{name}}\"?",
+    "backToList": "Back to teams"
+  },
+  "locations": {
+    "title": "Locations",
+    "addNew": "Add location",
+    "newLocation": "New location",
+    "editLocation": "Edit location",
+    "noLocations": "No locations yet",
+    "deleteLocation": "Delete location",
+    "deleteLocationConfirm": "Delete the location \"{{name}}\"?",
+    "backToList": "Back to locations"
+  },
+  "jobs": {
+    "title": "Jobs",
+    "addNew": "Add job",
+    "newJob": "New job",
+    "editJob": "Edit job",
+    "noJobs": "No jobs yet",
+    "deleteJob": "Delete job",
+    "deleteJobConfirm": "Delete the job \"{{name}}\"?",
+    "backToList": "Back to jobs"
+  },
+  "orgUsers": {
+    "title": "Users",
+    "noUsers": "No users found",
+    "profilePicture": "Profile picture",
+    "backToList": "Back to users"
   },
   "users": {
     "title": "Contacts",
@@ -62,45 +127,14 @@
     "stateInactive": "Inactive",
     "backToList": "Back to list"
   },
-  "account": {
-    "title": "Account",
-    "personalInfo": "Personal information",
-    "loginMethods": "Login methods",
-    "noProviders": "No login methods are configured on this server.",
-    "connect": "Connect {{provider}}",
-    "connectedAt": "Connected {{date}}",
-    "disconnect": "Disconnect",
-    "cannotDisconnectLast": "You cannot disconnect your last login method.",
-    "dangerZone": "Danger zone",
-    "deleteAccount": "Delete account",
-    "deleteAccountDescription": "Permanently delete your account and all associated data.",
-    "deleteAccountTitle": "Delete account?",
-    "deleteAccountConfirm": "This permanently deletes your account, including your login methods and sessions. This action cannot be undone.",
-    "confirmDelete": "Delete my account",
-    "saveFailed": "Failed to save changes",
-    "connectFailed": "Failed to connect the login method",
-    "disconnectFailed": "Failed to disconnect the login method",
-    "deleteFailed": "Failed to delete the account"
-  },
-  "errors": {
-    "failedToFetchUsers": "Failed to fetch users",
-    "failedToFetchOrganizations": "Failed to fetch organizations",
-    "failedToUpdateOrganization": "Failed to update organization"
-  },
-  "validation": {
-    "nameRequired": "Name is required",
-    "emailInvalid": "Enter a valid email address",
-    "phoneNumberInvalid": "Phone number must include the country code (e.g. +358401234567)",
-    "defaultTimezoneRequired": "Default timezone is required",
-    "defaultTimezoneTooLong": "Default timezone must be at most 64 characters"
-  },
   "events": {
-    "title": "Event Series",
+    "title": "Events",
+    "calendar": "Calendar",
+    "management": "Management",
     "newSeries": "New event series",
     "editSeries": "Edit event series",
     "seriesTitle": "Title",
     "titleRequired": "Title is required",
-    "calendar": "Calendar",
     "calendarRequired": "Calendar is required",
     "calendarName": "Calendar name",
     "createCalendar": "Create calendar",
@@ -165,6 +199,53 @@
     "actions": "Actions",
     "deleteSeries": "Delete series",
     "deleteSeriesConfirm": "Delete the series \"{{title}}\" and all its jobs, comments and exceptions?",
-    "noSeries": "No event series yet"
+    "noSeries": "No event series yet",
+    "filterAll": "All events",
+    "filterTeam": "My team's events",
+    "filterMine": "My events",
+    "filterByLocation": "Filter by location",
+    "filterByTeam": "Filter by team",
+    "filterDateFrom": "From",
+    "filterDateTo": "To",
+    "filterHasTeam": "Has team assigned",
+    "filterNoTeam": "No team assigned",
+    "eventConfig": "Event configuration",
+    "location": "Location",
+    "assignedTeams": "Assigned teams",
+    "noLocation": "No location",
+    "noTeams": "No teams assigned",
+    "backToList": "Back to events"
+  },
+  "account": {
+    "title": "Account",
+    "personalInfo": "Personal information",
+    "loginMethods": "Login methods",
+    "noProviders": "No login methods are configured on this server.",
+    "connect": "Connect {{provider}}",
+    "connectedAt": "Connected {{date}}",
+    "disconnect": "Disconnect",
+    "cannotDisconnectLast": "You cannot disconnect your last login method.",
+    "dangerZone": "Danger zone",
+    "deleteAccount": "Delete account",
+    "deleteAccountDescription": "Permanently delete your account and all associated data.",
+    "deleteAccountTitle": "Delete account?",
+    "deleteAccountConfirm": "This permanently deletes your account, including your login methods and sessions. This action cannot be undone.",
+    "confirmDelete": "Delete my account",
+    "saveFailed": "Failed to save changes",
+    "connectFailed": "Failed to connect the login method",
+    "disconnectFailed": "Failed to disconnect the login method",
+    "deleteFailed": "Failed to delete the account"
+  },
+  "errors": {
+    "failedToFetchUsers": "Failed to fetch users",
+    "failedToFetchOrganizations": "Failed to fetch organizations",
+    "failedToUpdateOrganization": "Failed to update organization"
+  },
+  "validation": {
+    "nameRequired": "Name is required",
+    "emailInvalid": "Enter a valid email address",
+    "phoneNumberInvalid": "Phone number must include the country code (e.g. +358401234567)",
+    "defaultTimezoneRequired": "Default timezone is required",
+    "defaultTimezoneTooLong": "Default timezone must be at most 64 characters"
   }
 }

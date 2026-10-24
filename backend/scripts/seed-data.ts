@@ -293,10 +293,15 @@ const SUMMARY_TABLES = [
   'role_permissions',
   'user_roles',
   'teams',
+  'team_members',
+  'locations',
+  'jobs',
+  'notifications',
   'calendars',
   'event_types',
   'event_type_roles',
   'event_series',
+  'event_series_teams',
   'event_exceptions',
   'event_jobs',
   'event_job_assignments',
@@ -515,6 +520,64 @@ async function addComment(
       user_id: userId,
       body,
     })
+    .execute();
+}
+
+async function createLocations(
+  tx: Tx,
+  organizationId: string,
+  seeds: { name: string; description: string }[],
+) {
+  const locations = [];
+  for (const seed of seeds) {
+    const location = await tx
+      .insertInto('locations')
+      .values({ name: seed.name, description: seed.description, organization_id: organizationId })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    locations.push(location);
+  }
+  return locations;
+}
+
+async function createJobs(tx: Tx, organizationId: string, seeds: { name: string }[]) {
+  const jobs = [];
+  for (const seed of seeds) {
+    const job = await tx
+      .insertInto('jobs')
+      .values({ name: seed.name, organization_id: organizationId })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    jobs.push(job);
+  }
+  return jobs;
+}
+
+async function addTeamMembers(tx: Tx, teamId: string, userIds: string[]): Promise<void> {
+  for (const userId of userIds) {
+    await tx.insertInto('team_members').values({ team_id: teamId, user_id: userId }).execute();
+  }
+}
+
+async function assignTeamsToSeries(tx: Tx, seriesId: number, teamIds: string[]): Promise<void> {
+  for (const teamId of teamIds) {
+    await tx
+      .insertInto('event_series_teams')
+      .values({ event_series_id: seriesId, team_id: teamId })
+      .execute();
+  }
+}
+
+async function addNotification(
+  tx: Tx,
+  userId: string,
+  title: string,
+  body: string,
+  isRead: boolean,
+): Promise<void> {
+  await tx
+    .insertInto('notifications')
+    .values({ user_id: userId, title, body, is_read: isRead })
     .execute();
 }
 
@@ -769,6 +832,31 @@ async function main(): Promise<void> {
         { name: 'Community Kitchen', description: 'Cooks and serves the community lunch.' },
       ]);
 
+      // Team members: assign mock users (and the real user) to teams.
+      await addTeamMembers(tx, teamsOne[0].id, [
+        mockUsersOne[0].id,
+        mockUsersOne[6].id,
+        realUser.id,
+      ]);
+      await addTeamMembers(tx, teamsOne[1].id, [mockUsersOne[1].id, mockUsersOne[4].id]);
+      await addTeamMembers(tx, teamsOne[2].id, [mockUsersOne[2].id, mockUsersOne[7].id]);
+
+      // Locations for the first organization.
+      const locationsOne = await createLocations(tx, firstOrganization.id, [
+        { name: 'Community Hall', description: 'The main community hall with a kitchen.' },
+        { name: 'Central Park', description: 'Outdoor park area with a stage.' },
+        { name: 'Sports Grounds', description: 'Sports fields and courts.' },
+        { name: 'Community Kitchen', description: 'Shared kitchen for events.' },
+      ]);
+
+      // Jobs for the first organization.
+      await createJobs(tx, firstOrganization.id, [
+        { name: 'Setup' },
+        { name: 'Cleanup' },
+        { name: 'Kitchen Helper' },
+        { name: 'AV Technician' },
+      ]);
+
       let defaultCalendarOne = await tx
         .selectFrom('calendars')
         .selectAll()
@@ -1019,6 +1107,61 @@ async function main(): Promise<void> {
       );
       await assignUser(tx, webinarJob.id, realUser.id);
 
+      // Set locations and assign teams to event series.
+      await tx
+        .updateTable('event_series')
+        .set({ location_id: locationsOne[0].id })
+        .where('id', '=', cleanupDay.id)
+        .execute();
+      await tx
+        .updateTable('event_series')
+        .set({ location_id: locationsOne[0].id })
+        .where('id', '=', generalMeeting.id)
+        .execute();
+      await tx
+        .updateTable('event_series')
+        .set({ location_id: locationsOne[1].id })
+        .where('id', '=', festivalPlanning.id)
+        .execute();
+      await tx
+        .updateTable('event_series')
+        .set({ location_id: locationsOne[2].id })
+        .where('id', '=', kickoff.id)
+        .execute();
+      await assignTeamsToSeries(tx, cleanupDay.id, [teamsOne[0].id]);
+      await assignTeamsToSeries(tx, festivalPlanning.id, [teamsOne[1].id]);
+      await assignTeamsToSeries(tx, kickoff.id, [teamsOne[0].id, teamsOne[1].id]);
+
+      // Notifications for the first organization's users.
+      await addNotification(
+        tx,
+        realUser.id,
+        'Welcome to Watodo',
+        'Your organization has been set up. Explore the calendar and invite your team.',
+        false,
+      );
+      await addNotification(
+        tx,
+        realUser.id,
+        'Upcoming event',
+        'Summer Festival Planning is happening this month. Check the calendar for details.',
+        false,
+      );
+      await addNotification(
+        tx,
+        mockUsersOne[0].id,
+        'You have been assigned a job',
+        'You are assigned to "Room setup" for the Weekly Community Meeting.',
+        true,
+      );
+      await addNotification(
+        tx,
+        mockUsersOne[2].id,
+        'New event comment',
+        'Someone commented on the Weekly Community Meeting.',
+        false,
+      );
+
       logger.info(`Seeded event series for "${firstOrganization.name}"`);
 
       // --- Second organization ---
@@ -1058,6 +1201,32 @@ async function main(): Promise<void> {
       const teamsTwo = await createTeams(tx, secondOrganization.id, [
         { name: 'Events Team', description: 'Plans and runs the association events.' },
         { name: 'Sports Crew', description: 'Coaches and trains the sports teams.' },
+      ]);
+
+      // Team members for the second organization.
+      await addTeamMembers(tx, teamsTwo[0].id, [
+        mockUsersTwo[0].id,
+        mockUsersTwo[2].id,
+        realUser.id,
+      ]);
+      await addTeamMembers(tx, teamsTwo[1].id, [
+        mockUsersTwo[1].id,
+        mockUsersTwo[3].id,
+        mockUsersTwo[5].id,
+      ]);
+
+      // Locations for the second organization.
+      const locationsTwo = await createLocations(tx, secondOrganization.id, [
+        { name: 'Association Hall', description: 'The main association hall.' },
+        { name: 'Riverside Beach', description: 'Beach area along the river.' },
+        { name: 'Sports Field', description: 'Outdoor sports field with changing rooms.' },
+      ]);
+
+      // Jobs for the second organization.
+      await createJobs(tx, secondOrganization.id, [
+        { name: 'Event Setup' },
+        { name: 'Coaching' },
+        { name: 'Kitchen Duty' },
       ]);
 
       const mainCalendar = await createCalendar(tx, secondOrganization.id, 'Main Calendar');
@@ -1302,6 +1471,54 @@ async function main(): Promise<void> {
         'Start the stream and moderate the chat.',
       );
       await assignUser(tx, moderatorJob.id, realUser.id);
+
+      // Set locations and assign teams to event series for the second org.
+      await tx
+        .updateTable('event_series')
+        .set({ location_id: locationsTwo[1].id })
+        .where('id', '=', beachCleanup.id)
+        .execute();
+      await tx
+        .updateTable('event_series')
+        .set({ location_id: locationsTwo[0].id })
+        .where('id', '=', boardMeeting.id)
+        .execute();
+      await tx
+        .updateTable('event_series')
+        .set({ location_id: locationsTwo[0].id })
+        .where('id', '=', potluck.id)
+        .execute();
+      await tx
+        .updateTable('event_series')
+        .set({ location_id: locationsTwo[2].id })
+        .where('id', '=', seasonKickoff.id)
+        .execute();
+      await assignTeamsToSeries(tx, beachCleanup.id, [teamsTwo[0].id]);
+      await assignTeamsToSeries(tx, potluck.id, [teamsTwo[0].id]);
+      await assignTeamsToSeries(tx, seasonKickoff.id, [teamsTwo[1].id]);
+
+      // Notifications for the second organization's users.
+      await addNotification(
+        tx,
+        realUser.id,
+        'New organization ready',
+        'Riverside Community Association has been created. Start adding events.',
+        false,
+      );
+      await addNotification(
+        tx,
+        mockUsersTwo[0].id,
+        'You are now an event coordinator',
+        'You have been assigned the Event Coordinator role.',
+        true,
+      );
+      await addNotification(
+        tx,
+        mockUsersTwo[4].id,
+        'Upcoming event',
+        'Community Potluck is happening this month. Sign up for a dish.',
+        false,
+      );
 
       logger.info(`Seeded event series for "${secondOrganization.name}"`);
 

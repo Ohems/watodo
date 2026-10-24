@@ -64,6 +64,7 @@ import type {
   EventSeries,
   EventSeriesPush,
   EventSeriesUpdate,
+  OccurrenceFilter,
   OpAssignment,
   Operation,
   OperationInput,
@@ -156,12 +157,15 @@ export const eventsApi = {
     api.patch<EventSeries>(`/api/v1/event-series/${seriesId}`, data),
   deleteEventSeries: (seriesId: number) => api.delete(`/api/v1/event-series/${seriesId}`),
 
-  getOccurrences: (start: Date, end: Date, calendarId?: string) => {
+  getOccurrences: (start: Date, end: Date, calendarId?: string, filter?: OccurrenceFilter) => {
     const params = new URLSearchParams({
       start: start.toISOString(),
       end: end.toISOString(),
     });
     if (calendarId) params.set('calendarId', calendarId);
+    if (filter?.scope) params.set('scope', filter.scope);
+    if (filter?.locationId) params.set('locationId', filter.locationId);
+    if (filter?.teamId) params.set('teamId', filter.teamId);
     return api.get<EventOccurrence[]>(`/api/v1/event-series/occurrences?${params.toString()}`);
   },
   getSeriesOccurrences: (seriesId: number, start: Date, end: Date) => {
@@ -223,4 +227,162 @@ export const eventsApi = {
     api.patch<EventComment>(`/api/v1/event-series/${seriesId}/comments/${commentId}`, { body }),
   deleteComment: (seriesId: number, commentId: number) =>
     api.delete(`/api/v1/event-series/${seriesId}/comments/${commentId}`),
+};
+
+// --- Teams ---
+
+import type {
+  Paginated,
+  TableQuery,
+  Team,
+  TeamMember,
+  TeamPush,
+  TeamUpdate,
+} from '../types/index.js';
+
+export const teamsApi = {
+  listTeams: (organizationId: string, query?: TableQuery) => {
+    const params = new URLSearchParams();
+    if (query?.page !== undefined) params.set('page', String(query.page));
+    if (query?.limit !== undefined) params.set('limit', String(query.limit));
+    if (query?.search) params.set('search', query.search);
+    const qs = params.toString();
+    return api.get<Paginated<Team>>(
+      `/api/v1/organizations/${organizationId}/teams${qs ? `?${qs}` : ''}`,
+    );
+  },
+  getTeam: (organizationId: string, teamId: string) =>
+    api.get<Team>(`/api/v1/organizations/${organizationId}/teams/${teamId}`),
+  createTeam: (organizationId: string, data: TeamPush) =>
+    api.post<Team>(`/api/v1/organizations/${organizationId}/teams`, data),
+  updateTeam: (organizationId: string, teamId: string, data: TeamUpdate) =>
+    api.patch<Team>(`/api/v1/organizations/${organizationId}/teams/${teamId}`, data),
+  deleteTeam: (organizationId: string, teamId: string) =>
+    api.delete(`/api/v1/organizations/${organizationId}/teams/${teamId}`),
+  listMembers: (organizationId: string, teamId: string) =>
+    api.get<TeamMember[]>(`/api/v1/organizations/${organizationId}/teams/${teamId}/members`),
+  addMember: (organizationId: string, teamId: string, userId: string) =>
+    api.post<TeamMember>(`/api/v1/organizations/${organizationId}/teams/${teamId}/members`, {
+      userId,
+    }),
+  removeMember: (organizationId: string, teamId: string, userId: string) =>
+    api.delete(`/api/v1/organizations/${organizationId}/teams/${teamId}/members/${userId}`),
+};
+
+// --- Locations ---
+
+import type { Location, LocationPush, LocationUpdate } from '../types/index.js';
+
+export const locationsApi = {
+  listLocations: (organizationId: string, query?: TableQuery) => {
+    const params = new URLSearchParams();
+    if (query?.page !== undefined) params.set('page', String(query.page));
+    if (query?.limit !== undefined) params.set('limit', String(query.limit));
+    if (query?.search) params.set('search', query.search);
+    const qs = params.toString();
+    return api.get<Paginated<Location>>(
+      `/api/v1/organizations/${organizationId}/locations${qs ? `?${qs}` : ''}`,
+    );
+  },
+  listAllLocations: (organizationId: string) =>
+    api.get<Location[]>(`/api/v1/organizations/${organizationId}/locations/all`),
+  getLocation: (organizationId: string, locationId: string) =>
+    api.get<Location>(`/api/v1/organizations/${organizationId}/locations/${locationId}`),
+  createLocation: (organizationId: string, data: LocationPush) =>
+    api.post<Location>(`/api/v1/organizations/${organizationId}/locations`, data),
+  updateLocation: (organizationId: string, locationId: string, data: LocationUpdate) =>
+    api.patch<Location>(`/api/v1/organizations/${organizationId}/locations/${locationId}`, data),
+  deleteLocation: (organizationId: string, locationId: string) =>
+    api.delete(`/api/v1/organizations/${organizationId}/locations/${locationId}`),
+};
+
+// --- Jobs ---
+
+import type { Job, JobPush, JobUpdate } from '../types/index.js';
+
+export const jobsApi = {
+  listJobs: (organizationId: string, query?: TableQuery) => {
+    const params = new URLSearchParams();
+    if (query?.page !== undefined) params.set('page', String(query.page));
+    if (query?.limit !== undefined) params.set('limit', String(query.limit));
+    if (query?.search) params.set('search', query.search);
+    const qs = params.toString();
+    return api.get<Paginated<Job>>(
+      `/api/v1/organizations/${organizationId}/jobs${qs ? `?${qs}` : ''}`,
+    );
+  },
+  listAllJobs: (organizationId: string) =>
+    api.get<Job[]>(`/api/v1/organizations/${organizationId}/jobs/all`),
+  getJob: (organizationId: string, jobId: number) =>
+    api.get<Job>(`/api/v1/organizations/${organizationId}/jobs/${jobId}`),
+  createJob: (organizationId: string, data: JobPush) =>
+    api.post<Job>(`/api/v1/organizations/${organizationId}/jobs`, data),
+  updateJob: (organizationId: string, jobId: number, data: JobUpdate) =>
+    api.patch<Job>(`/api/v1/organizations/${organizationId}/jobs/${jobId}`, data),
+  deleteJob: (organizationId: string, jobId: number) =>
+    api.delete(`/api/v1/organizations/${organizationId}/jobs/${jobId}`),
+};
+
+// --- Notifications ---
+
+import type { Notification, PaginatedNotifications } from '../types/index.js';
+
+export const notificationsApi = {
+  listNotifications: (query?: TableQuery) => {
+    const params = new URLSearchParams();
+    if (query?.page !== undefined) params.set('page', String(query.page));
+    if (query?.limit !== undefined) params.set('limit', String(query.limit));
+    const qs = params.toString();
+    return api.get<PaginatedNotifications>(`/api/v1/notifications${qs ? `?${qs}` : ''}`);
+  },
+  markRead: (notificationId: number, isRead: boolean) =>
+    api.patch<Notification>(`/api/v1/notifications/${notificationId}`, { isRead }),
+  markAllRead: () => api.post<{ updated: number }>('/api/v1/notifications/mark-all-read', {}),
+};
+
+// --- Organization users ---
+
+import type { OrganizationUser } from '../types/index.js';
+
+export const organizationUsersApi = {
+  listUsers: (organizationId: string, query?: TableQuery) => {
+    const params = new URLSearchParams();
+    if (query?.page !== undefined) params.set('page', String(query.page));
+    if (query?.limit !== undefined) params.set('limit', String(query.limit));
+    if (query?.search) params.set('search', query.search);
+    const qs = params.toString();
+    return api.get<Paginated<OrganizationUser>>(
+      `/api/v1/organizations/${organizationId}/users${qs ? `?${qs}` : ''}`,
+    );
+  },
+};
+
+// --- Event series management ---
+
+import type {
+  EventSeriesConfigUpdate,
+  EventSeriesListQuery,
+  EventSeriesManagement,
+} from '../types/index.js';
+
+export const eventManagementApi = {
+  listEventSeries: (query?: EventSeriesListQuery) => {
+    const params = new URLSearchParams();
+    if (query?.page !== undefined) params.set('page', String(query.page));
+    if (query?.limit !== undefined) params.set('limit', String(query.limit));
+    if (query?.search) params.set('search', query.search);
+    if (query?.startFrom) params.set('startFrom', query.startFrom);
+    if (query?.startTo) params.set('startTo', query.startTo);
+    if (query?.locationId) params.set('locationId', query.locationId);
+    if (query?.teamId) params.set('teamId', query.teamId);
+    if (query?.hasTeam !== undefined) params.set('hasTeam', String(query.hasTeam));
+    const qs = params.toString();
+    return api.get<Paginated<EventSeriesManagement>>(
+      `/api/v1/event-series/management${qs ? `?${qs}` : ''}`,
+    );
+  },
+  getEventSeries: (seriesId: number) =>
+    api.get<EventSeriesManagement>(`/api/v1/event-series/${seriesId}/management`),
+  updateConfig: (seriesId: number, data: EventSeriesConfigUpdate) =>
+    api.patch<EventSeriesManagement>(`/api/v1/event-series/${seriesId}/config`, data),
 };

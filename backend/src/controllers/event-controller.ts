@@ -128,10 +128,13 @@ export async function getOccurrencesHandler(
   reply: FastifyReply,
 ): Promise<void> {
   const query = occurrenceRangeQuerySchema.parse(request.query);
+  const user = requireAuthUser(request);
   const occurrences = await getOccurrences(
     new Date(query.start),
     new Date(query.end),
     query.calendarId,
+    query,
+    user.id,
   );
   return reply.status(200).send(occurrences);
 }
@@ -343,4 +346,41 @@ export async function deleteEventCommentHandler(
     user.id,
   );
   return reply.status(200).send({ success: true });
+}
+
+// --- Management endpoints ---
+
+import { eventSeriesConfigSchema, eventSeriesListQuerySchema } from '../schemas/index.js';
+import {
+  getEventSeriesManagement,
+  listEventSeriesPaginated,
+  updateEventSeriesConfig,
+} from '../services/event-service.js';
+
+export async function listEventSeriesPaginatedHandler(
+  request: FastifyRequest<{ Querystring: unknown }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const query = eventSeriesListQuerySchema.parse(request.query);
+  const result = await listEventSeriesPaginated(query);
+  return reply.status(200).send(result);
+}
+
+export async function getEventSeriesManagementHandler(
+  request: FastifyRequest<SeriesParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const seriesId = parseId(request.params.seriesId, 'seriesId');
+  const series = await getEventSeriesManagement(seriesId);
+  return reply.status(200).send(series);
+}
+
+export async function updateEventSeriesConfigHandler(
+  request: FastifyRequest<SeriesParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const seriesId = parseId(request.params.seriesId, 'seriesId');
+  const data = eventSeriesConfigSchema.parse(request.body);
+  const series = await updateEventSeriesConfig(seriesId, data);
+  return reply.status(200).send(series);
 }

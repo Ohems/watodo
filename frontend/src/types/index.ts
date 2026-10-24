@@ -220,3 +220,157 @@ export interface EventOccurrenceDetail {
   jobs: EventJob[];
   comments: EventComment[];
 }
+
+// --- Teams ---
+
+export interface Team {
+  id: string;
+  name: string;
+  description: string;
+  organizationId: string;
+  memberCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TeamPush {
+  name: string;
+  description?: string;
+  organizationId: string;
+}
+
+export interface TeamUpdate {
+  name?: string;
+  description?: string;
+}
+
+export interface TeamMember {
+  id: number;
+  teamId: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  createdAt: string;
+}
+
+// --- Locations ---
+
+export interface Location {
+  id: string;
+  name: string;
+  description: string;
+  organizationId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LocationPush {
+  name: string;
+  description?: string;
+  organizationId: string;
+}
+
+export interface LocationUpdate {
+  name?: string;
+  description?: string;
+}
+
+// --- Jobs ---
+
+export interface Job {
+  id: number;
+  name: string;
+  organizationId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface JobPush {
+  name: string;
+  organizationId: string;
+}
+
+export interface JobUpdate {
+  name?: string;
+}
+
+// --- Notifications ---
+
+export interface Notification {
+  id: number;
+  userId: string;
+  title: string;
+  body: string;
+  isRead: boolean;
+  createdAt: string;
+}
+
+// --- Paginated responses ---
+
+export interface Paginated<T> {
+  items: T[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface PaginatedNotifications extends Paginated<Notification> {
+  unreadCount: number;
+}
+
+// --- Organization users ---
+
+export interface OrganizationUser {
+  id: string;
+  name: string;
+  email: string;
+  description: string;
+  isEmployed: boolean;
+  isSuspended: boolean;
+  isBlocked: boolean;
+  state: string;
+  createdAt: string;
+}
+
+// --- Event series management ---
+
+export interface EventSeriesTeam {
+  id: string;
+  name: string;
+}
+
+export interface EventSeriesManagement extends EventSeries {
+  locationId: string | null;
+  locationName: string | null;
+  teams: EventSeriesTeam[];
+}
+
+export interface EventSeriesConfigUpdate {
+  locationId?: string | null;
+  teamIds?: string[];
+}
+
+export interface EventSeriesListQuery {
+  page?: number;
+  limit?: number;
+  search?: string;
+  startFrom?: string;
+  startTo?: string;
+  locationId?: string;
+  teamId?: string;
+  hasTeam?: boolean;
+}
+
+export interface OccurrenceFilter {
+  scope?: 'all' | 'team' | 'mine';
+  locationId?: string;
+  teamId?: string;
+}
+
+// --- Table query ---
+
+export interface TableQuery {
+  page?: number;
+  limit?: number;
+  search?: string;
+}

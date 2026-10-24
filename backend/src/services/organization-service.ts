@@ -119,3 +119,82 @@ export async function updateOrganization(
 
   return serializeOrganization(updated);
 }
+
+// --- Organization users ---
+
+export interface OrganizationUserResponse {
+  id: string;
+  name: string;
+  email: string;
+  description: string;
+  isEmployed: boolean;
+  isSuspended: boolean;
+  isBlocked: boolean;
+  state: string;
+  createdAt: string;
+}
+
+export interface PaginatedOrgUsers {
+  items: OrganizationUserResponse[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+/**
+ * Lists the users of an organization with pagination and search.
+ * @param organizationId - The organization ID.
+ * @param query - Pagination and search parameters.
+ * @returns Paginated users.
+ */
+export async function listOrganizationUsers(
+  organizationId: string,
+  query: { page?: number; limit?: number; search?: string } = {},
+): Promise<PaginatedOrgUsers> {
+  logger.trace('organizationService.listOrganizationUsers');
+  const page = query.page ?? 0;
+  const limit = query.limit ?? 50;
+  const search = query.search?.trim();
+
+  let baseQuery = db
+    .selectFrom('user_organizations')
+    .innerJoin('users', 'users.id', 'user_organizations.user_id')
+    .selectAll('users')
+    .where('user_organizations.organization_id', '=', organizationId);
+  let countQuery = db
+    .selectFrom('user_organizations')
+    .innerJoin('users', 'users.id', 'user_organizations.user_id')
+    .select(db.fn.countAll().as('count'))
+    .where('user_organizations.organization_id', '=', organizationId);
+
+  if (search) {
+    baseQuery = baseQuery.where('users.name', 'ilike', `%${search}%`);
+    countQuery = countQuery.where('users.name', 'ilike', `%${search}%`);
+  }
+
+  const [rows, countRow] = await Promise.all([
+    baseQuery
+      .orderBy('users.name', 'asc')
+      .limit(limit)
+      .offset(page * limit)
+      .execute(),
+    countQuery.executeTakeFirstOrThrow(),
+  ]);
+
+  return {
+    items: rows.map(user => ({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      description: user.description,
+      isEmployed: user.is_employed,
+      isSuspended: user.is_suspended,
+      isBlocked: user.is_blocked,
+      state: user.state,
+      createdAt: user.created_at.toISOString(),
+    })),
+    total: Number(countRow.count),
+    page,
+    limit,
+  };
+}

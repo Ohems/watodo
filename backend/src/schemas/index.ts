@@ -177,11 +177,23 @@ export const eventSeriesPushSchema = z.object({
 
 export const eventSeriesUpdateSchema = eventSeriesPushSchema.partial();
 
-export const occurrenceRangeQuerySchema = z.object({
-  start: z.iso.datetime(),
-  end: z.iso.datetime(),
-  calendarId: z.uuid().optional(),
+// --- Occurrence filter ---
+
+export const occurrenceFilterSchema = z.object({
+  scope: z.enum(['all', 'team', 'mine']).optional(),
+  locationId: z.uuid().optional(),
+  teamId: z.uuid().optional(),
 });
+
+export type OccurrenceFilter = z.infer<typeof occurrenceFilterSchema>;
+
+export const occurrenceRangeQuerySchema = z
+  .object({
+    start: z.iso.datetime(),
+    end: z.iso.datetime(),
+    calendarId: z.uuid().optional(),
+  })
+  .extend(occurrenceFilterSchema.shape);
 
 export const occurrenceStartSchema = z.iso.datetime();
 
@@ -243,3 +255,90 @@ export type EventCommentPush = z.infer<typeof eventCommentPushSchema>;
 export type EventCommentUpdate = z.infer<typeof eventCommentUpdateSchema>;
 export type EventCommentsQuery = z.infer<typeof eventCommentsQuerySchema>;
 export type EventJobsQuery = z.infer<typeof eventJobsQuerySchema>;
+
+// --- Teams ---
+
+export const teamPushSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  organizationId: z.uuid(),
+});
+
+export const teamUpdateSchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().optional(),
+});
+
+export const teamMemberSchema = z.object({
+  userId: z.uuid(),
+});
+
+// --- Locations ---
+
+export const locationPushSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  organizationId: z.uuid(),
+});
+
+export const locationUpdateSchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().optional(),
+});
+
+// --- Jobs ---
+
+export const jobPushSchema = z.object({
+  name: z.string().min(1),
+  organizationId: z.uuid(),
+});
+
+export const jobUpdateSchema = z.object({
+  name: z.string().min(1).optional(),
+});
+
+// --- Notifications ---
+
+export const notificationUpdateSchema = z.object({
+  isRead: z.boolean().optional(),
+});
+
+// --- Paginated table query ---
+
+export const tableQuerySchema = z.object({
+  page: z.coerce.number().int().min(0).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  search: z.string().optional(),
+});
+
+// --- Event series management query ---
+
+export const eventSeriesListQuerySchema = z.object({
+  page: z.coerce.number().int().min(0).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  search: z.string().optional(),
+  startFrom: z.iso.datetime().optional(),
+  startTo: z.iso.datetime().optional(),
+  locationId: z.uuid().optional(),
+  teamId: z.uuid().optional(),
+  hasTeam: z.coerce.boolean().optional(),
+});
+
+// --- Event series location/team update ---
+
+export const eventSeriesConfigSchema = z.object({
+  locationId: z.uuid().nullable().optional(),
+  teamIds: z.array(z.uuid()).optional(),
+});
+
+export type TeamPush = z.infer<typeof teamPushSchema>;
+export type TeamUpdate = z.infer<typeof teamUpdateSchema>;
+export type TeamMemberInput = z.infer<typeof teamMemberSchema>;
+export type LocationPush = z.infer<typeof locationPushSchema>;
+export type LocationUpdate = z.infer<typeof locationUpdateSchema>;
+export type JobPush = z.infer<typeof jobPushSchema>;
+export type JobUpdate = z.infer<typeof jobUpdateSchema>;
+export type NotificationUpdate = z.infer<typeof notificationUpdateSchema>;
+export type TableQuery = z.infer<typeof tableQuerySchema>;
+export type EventSeriesListQuery = z.infer<typeof eventSeriesListQuerySchema>;
+export type EventSeriesConfig = z.infer<typeof eventSeriesConfigSchema>;

@@ -10,18 +10,21 @@ import {
   deleteEventSeriesHandler,
   deleteExceptionHandler,
   getEventSeriesHandler,
+  getEventSeriesManagementHandler,
   getOccurrenceDetailHandler,
   getOccurrencesHandler,
   getSeriesOccurrencesHandler,
   listEventCommentsHandler,
   listEventJobsHandler,
   listEventSeriesHandler,
+  listEventSeriesPaginatedHandler,
   listExceptionsHandler,
   rescheduleOccurrenceHandler,
   splitEventSeriesHandler,
   unassignUserFromJobHandler,
   updateEventCommentHandler,
   updateEventJobHandler,
+  updateEventSeriesConfigHandler,
   updateEventSeriesHandler,
 } from '../controllers/event-controller.js';
 import { requirePermissions } from '../middleware/auth.js';
@@ -59,6 +62,9 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
   );
   app.post('/api/v1/event-series', { preHandler: write }, createEventSeriesHandler);
 
+  // Paginated event series list for the management view
+  app.get('/api/v1/event-series/management', { preHandler: read }, listEventSeriesPaginatedHandler);
+
   // Occurrences of all series within a time range (used by calendars)
   app.get('/api/v1/event-series/occurrences', { preHandler: read }, getOccurrencesHandler);
 
@@ -67,6 +73,21 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: read },
     getEventSeriesHandler,
   );
+
+  // Event series management detail (with location and teams)
+  app.get<SeriesParams>(
+    '/api/v1/event-series/:seriesId/management',
+    { preHandler: read },
+    getEventSeriesManagementHandler,
+  );
+
+  // Update location and team assignments
+  app.patch<SeriesParams>(
+    '/api/v1/event-series/:seriesId/config',
+    { preHandler: write },
+    updateEventSeriesConfigHandler,
+  );
+
   app.patch<SeriesParams>(
     '/api/v1/event-series/:seriesId',
     { preHandler: write },

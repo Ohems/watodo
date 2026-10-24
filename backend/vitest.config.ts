@@ -14,6 +14,10 @@ export default defineConfig({
     // Integration tests share a single database and assert on table
     // contents, so test files must not run in parallel.
     fileParallelism: false,
+    // Use the forks pool instead of the default vmThreads pool. The vmThreads
+    // pool in vitest 5 / vite 8 crashes on Node 24 when source map lookups
+    // encounter non-string module code (code.charCodeAt is not a function).
+    pool: 'forks',
     testTimeout: 10000,
     hookTimeout: 10000,
     coverage: {

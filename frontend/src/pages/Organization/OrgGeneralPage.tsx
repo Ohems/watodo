@@ -19,10 +19,9 @@ import type { FieldErrors, OrganizationUpdate } from '../../types/index.js';
 import { validateOrganizationUpdate } from '../../validation.js';
 import NoOrganizationPage from '../NoOrganizationPage/NoOrganizationPage.js';
 
-/** Users with any of these permissions may edit the organization. */
 const EDIT_PERMISSIONS = ['admin', 'organization:write'];
 
-function OrganizationPage() {
+function OrgGeneralPage() {
   const { t } = useTranslation();
   const dispatch = useAppDispatch();
   const currentUser = useAppSelector(state => state.user.currentUser);
@@ -77,8 +76,7 @@ function OrganizationPage() {
       setFieldErrors({});
     } catch {
       // The frontend validation catches invalid fields before the request is
-      // sent; a rejection here is unexpected. The form stays open and the
-      // backend message is shown via the slice's error state.
+      // sent; a rejection here is unexpected.
     }
   };
 
@@ -188,4 +186,4 @@ function OrganizationPage() {
   );
 }
 
-export default OrganizationPage;
+export default OrgGeneralPage;

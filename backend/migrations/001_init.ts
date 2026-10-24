@@ -124,6 +124,58 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     },
   });
 
+  // Team members: users belonging to a team.
+  pgm.createTable('team_members', {
+    id: { type: 'serial', primaryKey: true },
+    team_id: { type: 'uuid', notNull: true, references: 'teams', onDelete: 'CASCADE' },
+    user_id: { type: 'uuid', notNull: true, references: 'users', onDelete: 'CASCADE' },
+    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+  });
+  pgm.addConstraint('team_members', 'team_members_team_user_unique', 'UNIQUE(team_id, user_id)');
+  pgm.createIndex('team_members', 'user_id');
+
+  // Locations (organization-scoped venues where events take place)
+  pgm.createTable('locations', {
+    id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
+    name: { type: 'text', notNull: true },
+    description: { type: 'text', notNull: true, default: '' },
+    organization_id: {
+      type: 'uuid',
+      notNull: true,
+      references: 'organizations',
+      onDelete: 'CASCADE',
+    },
+    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+    updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+  });
+  pgm.createIndex('locations', 'organization_id');
+
+  // Jobs (organization-scoped job types, e.g. "Cook", "Driver")
+  pgm.createTable('jobs', {
+    id: { type: 'serial', primaryKey: true },
+    name: { type: 'text', notNull: true },
+    organization_id: {
+      type: 'uuid',
+      notNull: true,
+      references: 'organizations',
+      onDelete: 'CASCADE',
+    },
+    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+    updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+  });
+  pgm.createIndex('jobs', 'organization_id');
+
+  // Notifications (per-user)
+  pgm.createTable('notifications', {
+    id: { type: 'serial', primaryKey: true },
+    user_id: { type: 'uuid', notNull: true, references: 'users', onDelete: 'CASCADE' },
+    title: { type: 'text', notNull: true },
+    body: { type: 'text', notNull: true, default: '' },
+    is_read: { type: 'boolean', notNull: true, default: false },
+    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+  });
+  pgm.createIndex('notifications', 'user_id');
+
   // Calendars
   pgm.createTable('calendars', {
     id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
@@ -230,6 +282,7 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     title: { type: 'text', notNull: true },
     description: { type: 'text' },
     calendar_id: { type: 'uuid', notNull: true, references: 'calendars', onDelete: 'CASCADE' },
+    location_id: { type: 'uuid', references: 'locations', onDelete: 'SET NULL' },
     start: { type: 'timestamptz', notNull: true },
     duration_minutes: { type: 'integer', notNull: true, default: 60 },
     is_all_day: { type: 'boolean', notNull: true, default: false },
@@ -246,6 +299,26 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
   );
   pgm.createIndex('event_series', 'calendar_id');
   pgm.createIndex('event_series', 'start');
+  pgm.createIndex('event_series', 'location_id');
+
+  // Event series to teams (many-to-many: teams assigned to an event series)
+  pgm.createTable('event_series_teams', {
+    id: { type: 'serial', primaryKey: true },
+    event_series_id: {
+      type: 'integer',
+      notNull: true,
+      references: 'event_series',
+      onDelete: 'CASCADE',
+    },
+    team_id: { type: 'uuid', notNull: true, references: 'teams', onDelete: 'CASCADE' },
+    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+  });
+  pgm.addConstraint(
+    'event_series_teams',
+    'event_series_teams_series_team_unique',
+    'UNIQUE(event_series_id, team_id)',
+  );
+  pgm.createIndex('event_series_teams', 'team_id');
 
   // Event exceptions: per-occurrence overrides for a series (cancel an
   // occurrence, or reschedule it to a different time). `occurrence_start` is
@@ -361,6 +434,8 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
   pgm.createIndex('access_tokens', 'user_id');
   pgm.createIndex('operations', 'name');
   pgm.createIndex('op_assignments', 'operation_id');
+  pgm.createIndex('teams', 'organization_id');
+  pgm.createIndex('event_series', 'title');
 }
 
 export async function down(pgm: MigrationBuilder): Promise<void> {
@@ -370,6 +445,7 @@ export async function down(pgm: MigrationBuilder): Promise<void> {
   pgm.dropTable('event_job_assignments');
   pgm.dropTable('event_jobs');
   pgm.dropTable('event_exceptions');
+  pgm.dropTable('event_series_teams');
   pgm.dropTable('event_series');
   pgm.dropTable('event_type_roles');
   pgm.dropTable('user_roles');
@@ -377,6 +453,10 @@ export async function down(pgm: MigrationBuilder): Promise<void> {
   pgm.dropTable('roles');
   pgm.dropTable('event_types');
   pgm.dropTable('calendars');
+  pgm.dropTable('notifications');
+  pgm.dropTable('jobs');
+  pgm.dropTable('locations');
+  pgm.dropTable('team_members');
   pgm.dropTable('teams');
   pgm.dropTable('user_organizations');
   pgm.dropTable('organizations');

@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import {
   getOrganizationHandler,
   listMyOrganizationsHandler,
+  listOrganizationUsersHandler,
   updateOrganizationHandler,
 } from '../controllers/organization-controller.js';
 import { requirePermissions } from '../middleware/auth.js';
@@ -28,5 +29,11 @@ export async function organizationRoutes(app: FastifyInstance): Promise<void> {
     '/api/v1/organizations/:organizationId',
     { preHandler: requirePermissions(PERMISSIONS.ORGANIZATION_WRITE) },
     updateOrganizationHandler,
+  );
+
+  app.get<OrganizationParams>(
+    '/api/v1/organizations/:organizationId/users',
+    { preHandler: requirePermissions(PERMISSIONS.ORGANIZATION_READ) },
+    listOrganizationUsersHandler,
   );
 }
