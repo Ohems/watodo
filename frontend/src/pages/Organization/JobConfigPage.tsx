@@ -11,66 +11,59 @@ import {
   TextInput,
   Title,
 } from '@mantine/core';
-import { useCallback, useEffect, useState } from 'react';
+import { skipToken } from '@reduxjs/toolkit/query/react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
-import { jobsApi } from '../../api/index.js';
+import {
+  getApiErrorMessage,
+  useGetCurrentUserQuery,
+  useGetJobQuery,
+  useUpdateJobMutation,
+} from '../../api/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
-import type { Job } from '../../types/index.js';
+import { selectActiveOrganizationId } from '../../store/organization-slice.js';
 
 function JobConfigPage() {
   const { t } = useTranslation();
   const { jobId } = useParams<{ jobId: string }>();
   const navigate = useNavigate();
-  const activeOrganizationId = useAppSelector(state => state.organization.activeOrganizationId);
-  const currentUser = useAppSelector(state => state.user.currentUser);
+  const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
+  const { data: currentUser } = useGetCurrentUserQuery();
   const canWrite =
     currentUser?.permissions?.includes('admin') === true ||
     currentUser?.permissions?.includes('job-management:write') === true;
 
-  const [job, setJob] = useState<Job | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const parsedJobId = Number.parseInt(jobId ?? '', 10);
+  const jobArg =
+    activeOrganizationId && !Number.isNaN(parsedJobId)
+      ? { organizationId: activeOrganizationId, jobId: parsedJobId }
+      : skipToken;
+  const { data: job, isLoading: loading, error: jobError } = useGetJobQuery(jobArg);
+  const [updateJob, { isLoading: saving }] = useUpdateJobMutation();
+
+  const [actionError, setActionError] = useState<string | null>(null);
+  const error = actionError ?? (jobError ? getApiErrorMessage(jobError) : null);
 
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState('');
 
-  const parsedJobId = Number.parseInt(jobId ?? '', 10);
-
-  const load = useCallback(async () => {
-    if (!activeOrganizationId || Number.isNaN(parsedJobId)) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await jobsApi.getJob(activeOrganizationId, parsedJobId);
-      setJob(data);
-      setEditName(data.name);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [activeOrganizationId, parsedJobId]);
-
   useEffect(() => {
-    load();
-  }, [load]);
+    if (job) setEditName(job.name);
+  }, [job]);
 
   const handleSave = async () => {
     if (!activeOrganizationId || Number.isNaN(parsedJobId)) return;
-    setSaving(true);
-    setError(null);
+    setActionError(null);
     try {
-      await jobsApi.updateJob(activeOrganizationId, parsedJobId, {
-        name: editName,
-      });
+      await updateJob({
+        organizationId: activeOrganizationId,
+        jobId: parsedJobId,
+        data: { name: editName },
+      }).unwrap();
       setEditing(false);
-      await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
+      setActionError(getApiErrorMessage(err));
     }
   };
 

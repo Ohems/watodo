@@ -11,48 +11,35 @@ import {
   Text,
   Title,
 } from '@mantine/core';
-import { useCallback, useEffect, useState } from 'react';
+import { skipToken } from '@reduxjs/toolkit/query/react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
-import { organizationUsersApi } from '../../api/index.js';
+import { getApiErrorMessage, useGetOrganizationUsersQuery } from '../../api/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
-import type { OrganizationUser } from '../../types/index.js';
+import { selectActiveOrganizationId } from '../../store/organization-slice.js';
 
 function OrgUserProfilePage() {
   const { t } = useTranslation();
   const { userId } = useParams<{ userId: string }>();
   const navigate = useNavigate();
-  const activeOrganizationId = useAppSelector(state => state.organization.activeOrganizationId);
+  const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
 
-  const [user, setUser] = useState<OrganizationUser | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    data,
+    isLoading: loading,
+    error: queryError,
+  } = useGetOrganizationUsersQuery(
+    activeOrganizationId
+      ? { organizationId: activeOrganizationId, query: { page: 0, limit: 200 } }
+      : skipToken,
+  );
 
-  const load = useCallback(async () => {
-    if (!userId || !activeOrganizationId) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await organizationUsersApi.listUsers(activeOrganizationId, {
-        page: 0,
-        limit: 200,
-      });
-      const found = result.items.find(u => u.id === userId);
-      if (found) {
-        setUser(found);
-      } else {
-        setError('User not found');
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [userId, activeOrganizationId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const user = data?.items.find(u => u.id === userId) ?? null;
+  const error = queryError
+    ? getApiErrorMessage(queryError)
+    : data && !user
+      ? 'User not found'
+      : null;
 
   if (loading) {
     return (

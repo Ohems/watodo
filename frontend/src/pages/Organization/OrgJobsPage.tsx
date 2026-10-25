@@ -1,61 +1,49 @@
 import { Button, Group, Modal, TextInput } from '@mantine/core';
-import { useCallback, useEffect, useState } from 'react';
+import { skipToken } from '@reduxjs/toolkit/query/react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { jobsApi } from '../../api/index.js';
+import { useCreateJobMutation, useGetCurrentUserQuery, useGetJobsQuery } from '../../api/index.js';
 import DataTable, { type DataTableColumn } from '../../components/DataTable/DataTable.js';
 import { useAppSelector } from '../../hooks/redux.js';
-import type { Job, TableQuery } from '../../types/index.js';
+import { selectActiveOrganizationId } from '../../store/organization-slice.js';
+import type { Job } from '../../types/index.js';
 
 function OrgJobsPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const activeOrganizationId = useAppSelector(state => state.organization.activeOrganizationId);
-  const currentUser = useAppSelector(state => state.user.currentUser);
+  const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
+  const { data: currentUser } = useGetCurrentUserQuery();
   const canWrite =
     currentUser?.permissions?.includes('admin') === true ||
     currentUser?.permissions?.includes('job-management:write') === true;
 
-  const [data, setData] = useState<Job[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [limit, setLimit] = useState(50);
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
 
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [newName, setNewName] = useState('');
 
-  const load = useCallback(async () => {
-    if (!activeOrganizationId) return;
-    setLoading(true);
-    try {
-      const query: TableQuery = { page, limit, search: search || undefined };
-      const result = await jobsApi.listJobs(activeOrganizationId, query);
-      setData(result.items);
-      setTotal(result.total);
-    } catch {
-      setData([]);
-      setTotal(0);
-    } finally {
-      setLoading(false);
-    }
-  }, [activeOrganizationId, page, limit, search]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const { data, isLoading: loading } = useGetJobsQuery(
+    activeOrganizationId
+      ? {
+          organizationId: activeOrganizationId,
+          query: { page, limit, search: search || undefined },
+        }
+      : skipToken,
+  );
+  const [createJob] = useCreateJobMutation();
 
   const handleAdd = async () => {
     if (!activeOrganizationId || !newName.trim()) return;
     try {
-      await jobsApi.createJob(activeOrganizationId, {
-        name: newName.trim(),
+      await createJob({
         organizationId: activeOrganizationId,
-      });
+        data: { name: newName.trim(), organizationId: activeOrganizationId },
+      }).unwrap();
       setAddModalOpen(false);
       setNewName('');
-      await load();
     } catch {
       // Ignore
     }
@@ -74,8 +62,8 @@ function OrgJobsPage() {
       <DataTable
         title={t('nav.orgJobs')}
         columns={columns}
-        data={data}
-        total={total}
+        data={data?.items ?? []}
+        total={data?.total ?? 0}
         page={page}
         limit={limit}
         loading={loading}

@@ -1,10 +1,9 @@
 import { Box, Loader, MantineProvider } from '@mantine/core';
 
-import { useEffect } from 'react';
 import { Provider } from 'react-redux';
 import { Route, Routes } from 'react-router-dom';
+import { useGetCurrentUserQuery } from './api/index.js';
 import NavBar from './components/NavBar/NavBar.js';
-import { useAppDispatch, useAppSelector } from './hooks/redux.js';
 import AccountPage from './pages/Account/Account.js';
 import ErrorPage from './pages/ErrorPage/ErrorPage.js';
 import CalendarPage from './pages/Events/CalendarPage.js';
@@ -25,28 +24,15 @@ import TeamsPage from './pages/Teams/TeamsPage.js';
 import UserList from './pages/UserList/UserList.js';
 import UserProfile from './pages/UserProfile/UserProfile.js';
 import { store } from './store/index.js';
-import { fetchMyOrganizations } from './store/organization-slice.js';
-import { fetchCurrentUser } from './store/user-slice.js';
 
 function AppContent() {
-  const dispatch = useAppDispatch();
-  const authStatus = useAppSelector(state => state.user.authStatus);
+  const { data: currentUser, isLoading, isError } = useGetCurrentUserQuery();
 
-  useEffect(() => {
-    dispatch(fetchCurrentUser());
-  }, [dispatch]);
-
-  useEffect(() => {
-    if (authStatus === 'authenticated') {
-      dispatch(fetchMyOrganizations());
-    }
-  }, [dispatch, authStatus]);
-
-  if (authStatus === 'unauthenticated') {
+  if (isError) {
     return <LoginPage />;
   }
 
-  if (authStatus !== 'authenticated') {
+  if (isLoading || !currentUser) {
     return (
       <Box
         style={{

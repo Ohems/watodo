@@ -1,67 +1,62 @@
 import { Button, Group, Modal, Textarea, TextInput } from '@mantine/core';
-import { useCallback, useEffect, useState } from 'react';
+import { skipToken } from '@reduxjs/toolkit/query/react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { sitesApi } from '../../api/index.js';
+import {
+  useCreateSiteMutation,
+  useGetCurrentUserQuery,
+  useGetSitesQuery,
+} from '../../api/index.js';
 import DataTable, { type DataTableColumn } from '../../components/DataTable/DataTable.js';
 import { useAppSelector } from '../../hooks/redux.js';
-import type { Site, TableQuery } from '../../types/index.js';
+import { selectActiveOrganizationId } from '../../store/organization-slice.js';
+import type { Site } from '../../types/index.js';
 
 function OrgSitesPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const activeOrganizationId = useAppSelector(state => state.organization.activeOrganizationId);
-  const currentUser = useAppSelector(state => state.user.currentUser);
+  const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
+  const { data: currentUser } = useGetCurrentUserQuery();
   const canWrite =
     currentUser?.permissions?.includes('admin') === true ||
     currentUser?.permissions?.includes('site-management:write') === true;
 
-  const [data, setData] = useState<Site[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [limit, setLimit] = useState(50);
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
 
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newDescription, setNewDescription] = useState('');
   const [newAddress, setNewAddress] = useState('');
 
-  const load = useCallback(async () => {
-    if (!activeOrganizationId) return;
-    setLoading(true);
-    try {
-      const query: TableQuery = { page, limit, search: search || undefined };
-      const result = await sitesApi.listSites(activeOrganizationId, query);
-      setData(result.items);
-      setTotal(result.total);
-    } catch {
-      setData([]);
-      setTotal(0);
-    } finally {
-      setLoading(false);
-    }
-  }, [activeOrganizationId, page, limit, search]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const { data, isLoading: loading } = useGetSitesQuery(
+    activeOrganizationId
+      ? {
+          organizationId: activeOrganizationId,
+          query: { page, limit, search: search || undefined },
+        }
+      : skipToken,
+  );
+  const [createSite] = useCreateSiteMutation();
 
   const handleAdd = async () => {
     if (!activeOrganizationId || !newName.trim()) return;
     try {
-      await sitesApi.createSite(activeOrganizationId, {
-        name: newName.trim(),
-        description: newDescription.trim() || null,
-        address: newAddress.trim() || null,
+      await createSite({
         organizationId: activeOrganizationId,
-      });
+        data: {
+          name: newName.trim(),
+          description: newDescription.trim() || null,
+          address: newAddress.trim() || null,
+          organizationId: activeOrganizationId,
+        },
+      }).unwrap();
       setAddModalOpen(false);
       setNewName('');
       setNewDescription('');
       setNewAddress('');
-      await load();
     } catch {
       // Ignore
     }
@@ -90,8 +85,8 @@ function OrgSitesPage() {
       <DataTable
         title={t('nav.orgSites')}
         columns={columns}
-        data={data}
-        total={total}
+        data={data?.items ?? []}
+        total={data?.total ?? 0}
         page={page}
         limit={limit}
         loading={loading}

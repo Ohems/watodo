@@ -11,67 +11,63 @@ import {
   TextInput,
   Title,
 } from '@mantine/core';
-import { useCallback, useEffect, useState } from 'react';
+import { skipToken } from '@reduxjs/toolkit/query/react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
-import { roomsApi } from '../../api/index.js';
+import {
+  getApiErrorMessage,
+  useGetCurrentUserQuery,
+  useGetRoomQuery,
+  useUpdateRoomMutation,
+} from '../../api/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
-import type { Room } from '../../types/index.js';
+import { selectActiveOrganizationId } from '../../store/organization-slice.js';
 
 function RoomConfigPage() {
   const { t } = useTranslation();
   const { siteId, roomId } = useParams<{ siteId: string; roomId: string }>();
   const navigate = useNavigate();
-  const activeOrganizationId = useAppSelector(state => state.organization.activeOrganizationId);
-  const currentUser = useAppSelector(state => state.user.currentUser);
+  const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
+  const { data: currentUser } = useGetCurrentUserQuery();
   const canWrite =
     currentUser?.permissions?.includes('admin') === true ||
     currentUser?.permissions?.includes('room-management:write') === true;
 
-  const [room, setRoom] = useState<Room | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const roomArg =
+    activeOrganizationId && siteId && roomId
+      ? { organizationId: activeOrganizationId, siteId, roomId }
+      : skipToken;
+  const { data: room, isLoading: loading, error: roomError } = useGetRoomQuery(roomArg);
+  const [updateRoom, { isLoading: saving }] = useUpdateRoomMutation();
+
+  const [actionError, setActionError] = useState<string | null>(null);
+  const error = actionError ?? (roomError ? getApiErrorMessage(roomError) : null);
 
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
 
-  const load = useCallback(async () => {
-    if (!activeOrganizationId || !siteId || !roomId) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await roomsApi.getRoom(activeOrganizationId, siteId, roomId);
-      setRoom(data);
-      setEditName(data.name);
-      setEditDescription(data.description);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [activeOrganizationId, siteId, roomId]);
-
   useEffect(() => {
-    load();
-  }, [load]);
+    if (room) {
+      setEditName(room.name);
+      setEditDescription(room.description);
+    }
+  }, [room]);
 
   const handleSave = async () => {
     if (!activeOrganizationId || !siteId || !roomId) return;
-    setSaving(true);
-    setError(null);
+    setActionError(null);
     try {
-      await roomsApi.updateRoom(activeOrganizationId, siteId, roomId, {
-        name: editName,
-        description: editDescription,
-      });
+      await updateRoom({
+        organizationId: activeOrganizationId,
+        siteId,
+        roomId,
+        data: { name: editName, description: editDescription },
+      }).unwrap();
       setEditing(false);
-      await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
+      setActionError(getApiErrorMessage(err));
     }
   };
 

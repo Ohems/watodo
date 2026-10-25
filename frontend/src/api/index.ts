@@ -1,53 +1,4 @@
-const TOKEN_KEY = 'watodo_token';
-
-export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
-}
-
-export function setToken(token: string): void {
-  localStorage.setItem(TOKEN_KEY, token);
-}
-
-export function clearToken(): void {
-  localStorage.removeItem(TOKEN_KEY);
-}
-
-interface RequestOptions {
-  method?: string;
-  body?: unknown;
-  token?: string | null;
-}
-
-async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, token } = options;
-  const authToken = token ?? getToken();
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (authToken) headers['x-token'] = authToken;
-
-  const response = await fetch(path, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error || `Request failed: ${response.status}`);
-  }
-
-  if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
-}
-
-export const api = {
-  get: <T>(path: string, token?: string | null) => request<T>(path, { token }),
-  post: <T>(path: string, body: unknown, token?: string | null) =>
-    request<T>(path, { method: 'POST', body, token }),
-  patch: <T>(path: string, body: unknown, token?: string | null) =>
-    request<T>(path, { method: 'PATCH', body, token }),
-  delete: <T>(path: string, token?: string | null) => request<T>(path, { method: 'DELETE', token }),
-};
-
+import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import type {
   AuthAccount,
   AuthProviderInfo,
@@ -62,377 +13,875 @@ import type {
   EventOccurrence,
   EventOccurrenceDetail,
   EventSeries,
+  EventSeriesConfigUpdate,
+  EventSeriesListQuery,
+  EventSeriesManagement,
   EventSeriesPush,
   EventSeriesUpdate,
+  Job,
+  JobPush,
+  JobUpdate,
+  Notification,
   OccurrenceFilter,
   OpAssignment,
   Operation,
   OperationInput,
   Organization,
   OrganizationUpdate,
+  OrganizationUser,
+  Paginated,
+  PaginatedNotifications,
+  Room,
+  RoomPush,
+  RoomUpdate,
+  Site,
+  SitePush,
+  SiteUpdate,
+  TableQuery,
+  Team,
+  TeamMember,
+  TeamPush,
+  TeamUpdate,
   User,
   UserListItem,
   UserPush,
   UserSelfUpdate,
 } from '../types/index.js';
 
-export const authApi = {
-  getProviders: () => api.get<{ providers: AuthProviderInfo[] }>('/api/v1/auth/providers'),
-  loginUrl: (provider: string, state?: string, returnUrl?: string) => {
-    const params = new URLSearchParams();
-    if (state) params.set('state', state);
-    if (returnUrl) params.set('returnUrl', returnUrl);
-    return `/api/v1/auth/${provider}/login?${params.toString()}`;
-  },
-  logout: () => api.get('/api/v1/auth/logout'),
-  /** Starts an OAuth flow that connects the provider to the current account. */
-  startLink: (provider: string, returnUrl?: string) =>
-    api.post<{ authorizationUrl: string }>(`/api/v1/auth/${provider}/link`, { returnUrl }),
-};
+const TOKEN_KEY = 'watodo_token';
 
-export const usersApi = {
-  getUsers: (params?: { page?: number; limit?: number; archived?: boolean }) => {
-    const search = new URLSearchParams();
-    if (params?.page !== undefined) search.set('page', String(params.page));
-    if (params?.limit !== undefined) search.set('limit', String(params.limit));
-    if (params?.archived !== undefined) search.set('archived', String(params.archived));
-    const qs = search.toString();
-    return api.get<User[]>(`/api/v1/users${qs ? `?${qs}` : ''}`);
-  },
-  getUser: (userId: string) => api.get<User>(`/api/v1/users/${userId}`),
-  getCurrentUser: () => api.get<User>('/api/v1/users/@me'),
-  getUserList: () => api.get<UserListItem[]>('/api/v1/users/list'),
-  updateUser: (userId: string, data: UserPush) => api.patch<User>(`/api/v1/users/${userId}`, data),
-  deleteUser: (userId: string) => api.delete(`/api/v1/users/${userId}`),
-  updateCurrentUser: (data: UserSelfUpdate) => api.patch<User>('/api/v1/users/@me', data),
-  deleteCurrentUser: () => api.delete('/api/v1/users/@me'),
-  getAuthAccounts: () => api.get<AuthAccount[]>('/api/v1/users/@me/auth-accounts'),
-  unlinkAuthAccount: (provider: string) =>
-    api.delete(`/api/v1/users/@me/auth-accounts/${provider}`),
-};
+export function getToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
 
-export const operationsApi = {
-  getOperations: () => api.get<Operation[]>('/api/v1/operations'),
-  getOperation: (id: number) => api.get<Operation>(`/api/v1/operations/${id}`),
-  upsertOperation: (data: OperationInput) => api.post<Operation>('/api/v1/operations', data),
-  deleteOperation: (id: number) => api.delete(`/api/v1/operations/${id}`),
-  addAssignment: (operationId: number, data: { name: string; description?: string }) =>
-    api.post<OpAssignment>(`/api/v1/operations/${operationId}/assignments`, data),
-  updateAssignment: (
-    operationId: number,
-    assignmentId: number,
-    data: { name: string; description?: string },
-  ) =>
-    api.patch<OpAssignment>(`/api/v1/operations/${operationId}/assignments/${assignmentId}`, data),
-  deleteAssignment: (operationId: number, assignmentId: number) =>
-    api.delete(`/api/v1/operations/${operationId}/assignments/${assignmentId}`),
-};
+export function setToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token);
+}
 
-export const organizationsApi = {
-  getMyOrganizations: () => api.get<Organization[]>('/api/v1/organizations'),
-  getOrganization: (organizationId: string) =>
-    api.get<Organization>(`/api/v1/organizations/${organizationId}`),
-  updateOrganization: (organizationId: string, data: OrganizationUpdate) =>
-    api.patch<Organization>(`/api/v1/organizations/${organizationId}`, data),
-};
+export function clearToken(): void {
+  localStorage.removeItem(TOKEN_KEY);
+}
 
-export const calendarsApi = {
-  getCalendars: () => api.get<Calendar[]>('/api/v1/calendars'),
-  createCalendar: (data: CalendarPush) => api.post<Calendar>('/api/v1/calendars', data),
-};
+/** Builds the login URL for an OAuth provider (the browser navigates there). */
+export function getLoginUrl(provider: string, state?: string, returnUrl?: string): string {
+  const params = new URLSearchParams();
+  if (state) params.set('state', state);
+  if (returnUrl) params.set('returnUrl', returnUrl);
+  return `/api/v1/auth/${provider}/login?${params.toString()}`;
+}
+
+/** Appends the defined query parameters of an object to a path. */
+function withQuery<T extends object>(path: string, params: T): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      search.set(key, String(value));
+    }
+  }
+  const queryString = search.toString();
+  return queryString ? `${path}?${queryString}` : path;
+}
+
+/** Extracts a displayable message from an RTK Query error. */
+export function getApiErrorMessage(error: unknown): string {
+  if (error && typeof error === 'object') {
+    if ('data' in error) {
+      const data = (error as { data?: unknown }).data;
+      if (data && typeof data === 'object' && 'error' in data) {
+        const message = (data as { error?: unknown }).error;
+        if (typeof message === 'string' && message) return message;
+      }
+      if (typeof data === 'string' && data) return data;
+      if ('status' in error) {
+        return `Request failed: ${(error as { status?: unknown }).status}`;
+      }
+    }
+    if ('message' in error) {
+      const message = (error as { message?: unknown }).message;
+      if (typeof message === 'string' && message) return message;
+    }
+  }
+  return String(error);
+}
 
 function occurrencePath(seriesId: number, occurrenceStart: string): string {
   return `/api/v1/event-series/${seriesId}/occurrences/${encodeURIComponent(occurrenceStart)}`;
 }
 
-export const eventsApi = {
-  getEventSeries: (calendarId?: string) =>
-    api.get<EventSeries[]>(
-      `/api/v1/event-series${calendarId ? `?calendarId=${encodeURIComponent(calendarId)}` : ''}`,
-    ),
-  getEventSeriesById: (seriesId: number) =>
-    api.get<EventSeries>(`/api/v1/event-series/${seriesId}`),
-  createEventSeries: (data: EventSeriesPush) => api.post<EventSeries>('/api/v1/event-series', data),
-  updateEventSeries: (seriesId: number, data: EventSeriesUpdate) =>
-    api.patch<EventSeries>(`/api/v1/event-series/${seriesId}`, data),
-  deleteEventSeries: (seriesId: number) => api.delete(`/api/v1/event-series/${seriesId}`),
+/** Detail cache tag shared by all occurrences of one series. */
+function seriesDetailTag(seriesId: number) {
+  return { type: 'OccurrenceDetail' as const, id: `series:${seriesId}` };
+}
 
-  getOccurrences: (start: Date, end: Date, calendarId?: string, filter?: OccurrenceFilter) => {
-    const params = new URLSearchParams({
-      start: start.toISOString(),
-      end: end.toISOString(),
-    });
-    if (calendarId) params.set('calendarId', calendarId);
-    if (filter?.scope) params.set('scope', filter.scope);
-    if (filter?.siteId) params.set('siteId', filter.siteId);
-    if (filter?.roomId) params.set('roomId', filter.roomId);
-    if (filter?.teamId) params.set('teamId', filter.teamId);
-    return api.get<EventOccurrence[]>(`/api/v1/event-series/occurrences?${params.toString()}`);
-  },
-  getSeriesOccurrences: (seriesId: number, start: Date, end: Date) => {
-    const params = new URLSearchParams({
-      start: start.toISOString(),
-      end: end.toISOString(),
-    });
-    return api.get<EventOccurrence[]>(
-      `/api/v1/event-series/${seriesId}/occurrences?${params.toString()}`,
-    );
-  },
-  getOccurrenceDetail: (seriesId: number, occurrenceStart: string) =>
-    api.get<EventOccurrenceDetail>(occurrencePath(seriesId, occurrenceStart)),
+/** Detail cache tag of one specific occurrence. */
+function occurrenceDetailTag(seriesId: number, occurrenceStart: string) {
+  return { type: 'OccurrenceDetail' as const, id: `${seriesId}:${occurrenceStart}` };
+}
 
-  cancelOccurrence: (seriesId: number, occurrenceStart: string) =>
-    api.post<EventException>(`${occurrencePath(seriesId, occurrenceStart)}/cancel`, {}),
-  rescheduleOccurrence: (
-    seriesId: number,
-    occurrenceStart: string,
-    data: { start: string; end?: string },
-  ) => api.post<EventException>(`${occurrencePath(seriesId, occurrenceStart)}/reschedule`, data),
-  deleteException: (seriesId: number, occurrenceStart: string) =>
-    api.delete(`${occurrencePath(seriesId, occurrenceStart)}/exception`),
-  splitEventSeries: (seriesId: number, occurrenceStart: string, data: EventSeriesUpdate) =>
-    api.post<EventSeries>(`${occurrencePath(seriesId, occurrenceStart)}/split`, data),
-  listExceptions: (seriesId: number) =>
-    api.get<EventException[]>(`/api/v1/event-series/${seriesId}/exceptions`),
+/**
+ * The frontend API definition. RTK Query caches query results and shares
+ * concurrent identical requests, so components that mount twice (React
+ * StrictMode double-invoked effects in development) or that need the same
+ * data (the current user, the organization list) trigger a single request.
+ */
+export const api = createApi({
+  reducerPath: 'api',
+  baseQuery: fetchBaseQuery({
+    // An absolute base URL is required because fetchBaseQuery builds a Request
+    // object, which rejects relative URLs outside the browser.
+    baseUrl: window.location.origin,
+    prepareHeaders: headers => {
+      const token = getToken();
+      if (token) headers.set('x-token', token);
+      return headers;
+    },
+  }),
+  // Data is fetched on mount and on navigation; refetching on window focus or
+  // reconnect would fire requests the app does not need.
+  refetchOnFocus: false,
+  refetchOnReconnect: false,
+  tagTypes: [
+    'CurrentUser',
+    'User',
+    'UserList',
+    'AuthAccounts',
+    'AuthProviders',
+    'Organization',
+    'Calendar',
+    'EventSeries',
+    'Occurrences',
+    'OccurrenceDetail',
+    'Team',
+    'Site',
+    'Room',
+    'Job',
+    'Notifications',
+    'OrganizationUsers',
+    'EventSeriesManagement',
+    'Operation',
+  ],
+  endpoints: build => ({
+    // --- Auth ---
 
-  listJobs: (seriesId: number, occurrenceStart?: string) => {
-    const params = new URLSearchParams();
-    if (occurrenceStart) params.set('occurrenceStart', occurrenceStart);
-    const qs = params.toString();
-    return api.get<EventJob[]>(`/api/v1/event-series/${seriesId}/jobs${qs ? `?${qs}` : ''}`);
-  },
-  createJob: (seriesId: number, data: EventJobPush) =>
-    api.post<EventJob>(`/api/v1/event-series/${seriesId}/jobs`, data),
-  updateJob: (seriesId: number, jobId: number, data: EventJobUpdate) =>
-    api.patch<EventJob>(`/api/v1/event-series/${seriesId}/jobs/${jobId}`, data),
-  deleteJob: (seriesId: number, jobId: number) =>
-    api.delete(`/api/v1/event-series/${seriesId}/jobs/${jobId}`),
-  assignUserToJob: (seriesId: number, jobId: number, userId: string) =>
-    api.post<EventJobAssignment>(`/api/v1/event-series/${seriesId}/jobs/${jobId}/assignments`, {
-      userId,
+    getAuthProviders: build.query<{ providers: AuthProviderInfo[] }, void>({
+      query: () => '/api/v1/auth/providers',
+      providesTags: ['AuthProviders'],
     }),
-  unassignUserFromJob: (seriesId: number, jobId: number, assignmentId: number) =>
-    api.delete(`/api/v1/event-series/${seriesId}/jobs/${jobId}/assignments/${assignmentId}`),
-
-  listComments: (seriesId: number, occurrenceStart?: string) => {
-    const params = new URLSearchParams();
-    if (occurrenceStart) params.set('occurrenceStart', occurrenceStart);
-    const qs = params.toString();
-    return api.get<EventComment[]>(
-      `/api/v1/event-series/${seriesId}/comments${qs ? `?${qs}` : ''}`,
-    );
-  },
-  createComment: (seriesId: number, data: { body: string; occurrenceStart?: string | null }) =>
-    api.post<EventComment>(`/api/v1/event-series/${seriesId}/comments`, data),
-  updateComment: (seriesId: number, commentId: number, body: string) =>
-    api.patch<EventComment>(`/api/v1/event-series/${seriesId}/comments/${commentId}`, { body }),
-  deleteComment: (seriesId: number, commentId: number) =>
-    api.delete(`/api/v1/event-series/${seriesId}/comments/${commentId}`),
-};
-
-// --- Teams ---
-
-import type {
-  Paginated,
-  TableQuery,
-  Team,
-  TeamMember,
-  TeamPush,
-  TeamUpdate,
-} from '../types/index.js';
-
-export const teamsApi = {
-  listTeams: (organizationId: string, query?: TableQuery) => {
-    const params = new URLSearchParams();
-    if (query?.page !== undefined) params.set('page', String(query.page));
-    if (query?.limit !== undefined) params.set('limit', String(query.limit));
-    if (query?.search) params.set('search', query.search);
-    const qs = params.toString();
-    return api.get<Paginated<Team>>(
-      `/api/v1/organizations/${organizationId}/teams${qs ? `?${qs}` : ''}`,
-    );
-  },
-  getTeam: (organizationId: string, teamId: string) =>
-    api.get<Team>(`/api/v1/organizations/${organizationId}/teams/${teamId}`),
-  createTeam: (organizationId: string, data: TeamPush) =>
-    api.post<Team>(`/api/v1/organizations/${organizationId}/teams`, data),
-  updateTeam: (organizationId: string, teamId: string, data: TeamUpdate) =>
-    api.patch<Team>(`/api/v1/organizations/${organizationId}/teams/${teamId}`, data),
-  deleteTeam: (organizationId: string, teamId: string) =>
-    api.delete(`/api/v1/organizations/${organizationId}/teams/${teamId}`),
-  listMembers: (organizationId: string, teamId: string) =>
-    api.get<TeamMember[]>(`/api/v1/organizations/${organizationId}/teams/${teamId}/members`),
-  addMember: (organizationId: string, teamId: string, userId: string) =>
-    api.post<TeamMember>(`/api/v1/organizations/${organizationId}/teams/${teamId}/members`, {
-      userId,
+    logout: build.mutation<void, void>({
+      query: () => '/api/v1/auth/logout',
     }),
-  removeMember: (organizationId: string, teamId: string, userId: string) =>
-    api.delete(`/api/v1/organizations/${organizationId}/teams/${teamId}/members/${userId}`),
-};
+    /** Starts an OAuth flow that connects the provider to the current account. */
+    startLink: build.mutation<
+      { authorizationUrl: string },
+      { provider: string; returnUrl?: string }
+    >({
+      query: ({ provider, returnUrl }) => ({
+        url: `/api/v1/auth/${provider}/link`,
+        method: 'POST',
+        body: { returnUrl },
+      }),
+    }),
 
-// --- Sites ---
+    // --- Users ---
 
-import type { Site, SitePush, SiteUpdate } from '../types/index.js';
+    getUsers: build.query<User[], { page?: number; limit?: number; archived?: boolean }>({
+      query: query => withQuery('/api/v1/users', query),
+      providesTags: ['User'],
+    }),
+    getUser: build.query<User, string>({
+      query: userId => `/api/v1/users/${userId}`,
+      providesTags: (_result, _error, userId) => [{ type: 'User', id: userId }],
+    }),
+    getCurrentUser: build.query<User, void>({
+      query: () => '/api/v1/users/@me',
+      providesTags: result =>
+        result ? ['CurrentUser', { type: 'User', id: result.id }] : ['CurrentUser'],
+    }),
+    getUserList: build.query<UserListItem[], void>({
+      query: () => '/api/v1/users/list',
+      providesTags: ['UserList'],
+    }),
+    updateUser: build.mutation<User, { userId: string; data: UserPush }>({
+      query: ({ userId, data }) => ({
+        url: `/api/v1/users/${userId}`,
+        method: 'PATCH',
+        body: data,
+      }),
+      invalidatesTags: (result, _error, { userId }) =>
+        result ? ['User', { type: 'User', id: userId }] : [],
+    }),
+    deleteUser: build.mutation<void, string>({
+      query: userId => ({ url: `/api/v1/users/${userId}`, method: 'DELETE' }),
+      invalidatesTags: (_result, _error, userId) => [{ type: 'User', id: userId }, 'User'],
+    }),
+    updateCurrentUser: build.mutation<User, UserSelfUpdate>({
+      query: data => ({ url: '/api/v1/users/@me', method: 'PATCH', body: data }),
+      invalidatesTags: result =>
+        result ? ['CurrentUser', { type: 'User', id: result.id }] : ['CurrentUser'],
+    }),
+    deleteCurrentUser: build.mutation<void, void>({
+      query: () => ({ url: '/api/v1/users/@me', method: 'DELETE' }),
+    }),
+    getAuthAccounts: build.query<AuthAccount[], void>({
+      query: () => '/api/v1/users/@me/auth-accounts',
+      providesTags: ['AuthAccounts'],
+    }),
+    unlinkAuthAccount: build.mutation<void, string>({
+      query: provider => ({ url: `/api/v1/users/@me/auth-accounts/${provider}`, method: 'DELETE' }),
+      invalidatesTags: ['AuthAccounts'],
+    }),
 
-export const sitesApi = {
-  listSites: (organizationId: string, query?: TableQuery) => {
-    const params = new URLSearchParams();
-    if (query?.page !== undefined) params.set('page', String(query.page));
-    if (query?.limit !== undefined) params.set('limit', String(query.limit));
-    if (query?.search) params.set('search', query.search);
-    const qs = params.toString();
-    return api.get<Paginated<Site>>(
-      `/api/v1/organizations/${organizationId}/sites${qs ? `?${qs}` : ''}`,
-    );
-  },
-  listAllSites: (organizationId: string) =>
-    api.get<Site[]>(`/api/v1/organizations/${organizationId}/sites/all`),
-  getSite: (organizationId: string, siteId: string) =>
-    api.get<Site>(`/api/v1/organizations/${organizationId}/sites/${siteId}`),
-  createSite: (organizationId: string, data: SitePush) =>
-    api.post<Site>(`/api/v1/organizations/${organizationId}/sites`, data),
-  updateSite: (organizationId: string, siteId: string, data: SiteUpdate) =>
-    api.patch<Site>(`/api/v1/organizations/${organizationId}/sites/${siteId}`, data),
-  deleteSite: (organizationId: string, siteId: string) =>
-    api.delete(`/api/v1/organizations/${organizationId}/sites/${siteId}`),
-};
+    // --- Operations ---
 
-// --- Rooms ---
+    getOperations: build.query<Operation[], void>({
+      query: () => '/api/v1/operations',
+      providesTags: ['Operation'],
+    }),
+    getOperation: build.query<Operation, number>({
+      query: id => `/api/v1/operations/${id}`,
+      providesTags: (_result, _error, id) => [{ type: 'Operation', id }],
+    }),
+    upsertOperation: build.mutation<Operation, OperationInput>({
+      query: data => ({ url: '/api/v1/operations', method: 'POST', body: data }),
+      invalidatesTags: ['Operation'],
+    }),
+    deleteOperation: build.mutation<void, number>({
+      query: id => ({ url: `/api/v1/operations/${id}`, method: 'DELETE' }),
+      invalidatesTags: ['Operation'],
+    }),
+    addAssignment: build.mutation<
+      OpAssignment,
+      { operationId: number; data: { name: string; description?: string } }
+    >({
+      query: ({ operationId, data }) => ({
+        url: `/api/v1/operations/${operationId}/assignments`,
+        method: 'POST',
+        body: data,
+      }),
+      invalidatesTags: ['Operation'],
+    }),
+    updateAssignment: build.mutation<
+      OpAssignment,
+      { operationId: number; assignmentId: number; data: { name: string; description?: string } }
+    >({
+      query: ({ operationId, assignmentId, data }) => ({
+        url: `/api/v1/operations/${operationId}/assignments/${assignmentId}`,
+        method: 'PATCH',
+        body: data,
+      }),
+      invalidatesTags: ['Operation'],
+    }),
+    deleteAssignment: build.mutation<void, { operationId: number; assignmentId: number }>({
+      query: ({ operationId, assignmentId }) => ({
+        url: `/api/v1/operations/${operationId}/assignments/${assignmentId}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['Operation'],
+    }),
 
-import type { Room, RoomPush, RoomUpdate } from '../types/index.js';
+    // --- Organizations ---
 
-export const roomsApi = {
-  listRooms: (organizationId: string, query?: TableQuery & { siteId?: string }) => {
-    const params = new URLSearchParams();
-    if (query?.page !== undefined) params.set('page', String(query.page));
-    if (query?.limit !== undefined) params.set('limit', String(query.limit));
-    if (query?.search) params.set('search', query.search);
-    if (query?.siteId) params.set('siteId', query.siteId);
-    const qs = params.toString();
-    return api.get<Paginated<Room>>(
-      `/api/v1/organizations/${organizationId}/rooms${qs ? `?${qs}` : ''}`,
-    );
-  },
-  listAllRooms: (organizationId: string, siteId?: string) => {
-    const qs = siteId ? `?siteId=${encodeURIComponent(siteId)}` : '';
-    return api.get<Room[]>(`/api/v1/organizations/${organizationId}/rooms/all${qs}`);
-  },
-  listRoomsBySite: (organizationId: string, siteId: string, query?: TableQuery) => {
-    const params = new URLSearchParams();
-    if (query?.page !== undefined) params.set('page', String(query.page));
-    if (query?.limit !== undefined) params.set('limit', String(query.limit));
-    if (query?.search) params.set('search', query.search);
-    const qs = params.toString();
-    return api.get<Paginated<Room>>(
-      `/api/v1/organizations/${organizationId}/sites/${siteId}/rooms${qs ? `?${qs}` : ''}`,
-    );
-  },
-  listAllRoomsBySite: (organizationId: string, siteId: string) =>
-    api.get<Room[]>(`/api/v1/organizations/${organizationId}/sites/${siteId}/rooms/all`),
-  getRoom: (organizationId: string, siteId: string, roomId: string) =>
-    api.get<Room>(`/api/v1/organizations/${organizationId}/sites/${siteId}/rooms/${roomId}`),
-  createRoom: (
-    organizationId: string,
-    siteId: string,
-    data: Omit<RoomPush, 'siteId' | 'organizationId'>,
-  ) => api.post<Room>(`/api/v1/organizations/${organizationId}/sites/${siteId}/rooms`, data),
-  updateRoom: (organizationId: string, siteId: string, roomId: string, data: RoomUpdate) =>
-    api.patch<Room>(
-      `/api/v1/organizations/${organizationId}/sites/${siteId}/rooms/${roomId}`,
-      data,
+    getMyOrganizations: build.query<Organization[], void>({
+      query: () => '/api/v1/organizations',
+      providesTags: ['Organization'],
+    }),
+    getOrganization: build.query<Organization, string>({
+      query: organizationId => `/api/v1/organizations/${organizationId}`,
+      providesTags: (_result, _error, organizationId) => [
+        { type: 'Organization', id: organizationId },
+      ],
+    }),
+    updateOrganization: build.mutation<
+      Organization,
+      { organizationId: string; data: OrganizationUpdate }
+    >({
+      query: ({ organizationId, data }) => ({
+        url: `/api/v1/organizations/${organizationId}`,
+        method: 'PATCH',
+        body: data,
+      }),
+      invalidatesTags: (result, _error, { organizationId }) =>
+        result ? [{ type: 'Organization', id: organizationId }, 'Organization'] : [],
+    }),
+
+    // --- Calendars ---
+
+    getCalendars: build.query<Calendar[], void>({
+      query: () => '/api/v1/calendars',
+      providesTags: ['Calendar'],
+    }),
+    createCalendar: build.mutation<Calendar, CalendarPush>({
+      query: data => ({ url: '/api/v1/calendars', method: 'POST', body: data }),
+      invalidatesTags: ['Calendar'],
+    }),
+
+    // --- Event series ---
+
+    getEventSeriesList: build.query<EventSeries[], string | undefined>({
+      query: calendarId => withQuery('/api/v1/event-series', { calendarId }),
+      providesTags: ['EventSeries'],
+    }),
+    getEventSeriesById: build.query<EventSeries, number>({
+      query: seriesId => `/api/v1/event-series/${seriesId}`,
+      providesTags: (_result, _error, seriesId) => [{ type: 'EventSeries', id: seriesId }],
+    }),
+    createEventSeries: build.mutation<EventSeries, EventSeriesPush>({
+      query: data => ({ url: '/api/v1/event-series', method: 'POST', body: data }),
+      invalidatesTags: ['EventSeries', 'EventSeriesManagement', 'Occurrences'],
+    }),
+    updateEventSeries: build.mutation<EventSeries, { seriesId: number; data: EventSeriesUpdate }>({
+      query: ({ seriesId, data }) => ({
+        url: `/api/v1/event-series/${seriesId}`,
+        method: 'PATCH',
+        body: data,
+      }),
+      invalidatesTags: (result, _error, { seriesId }) =>
+        result
+          ? [
+              { type: 'EventSeries', id: seriesId },
+              'EventSeries',
+              'EventSeriesManagement',
+              'Occurrences',
+            ]
+          : [],
+    }),
+    deleteEventSeries: build.mutation<void, number>({
+      query: seriesId => ({ url: `/api/v1/event-series/${seriesId}`, method: 'DELETE' }),
+      invalidatesTags: ['EventSeries', 'EventSeriesManagement', 'Occurrences'],
+    }),
+
+    // --- Occurrences ---
+
+    getOccurrences: build.query<
+      EventOccurrence[],
+      { start: string; end: string; calendarId?: string; filter?: OccurrenceFilter }
+    >({
+      query: ({ start, end, calendarId, filter }) =>
+        withQuery('/api/v1/event-series/occurrences', {
+          start,
+          end,
+          calendarId,
+          scope: filter?.scope,
+          siteId: filter?.siteId,
+          roomId: filter?.roomId,
+          teamId: filter?.teamId,
+        }),
+      providesTags: ['Occurrences'],
+    }),
+    getSeriesOccurrences: build.query<
+      EventOccurrence[],
+      { seriesId: number; start: string; end: string }
+    >({
+      query: ({ seriesId, start, end }) =>
+        withQuery(`/api/v1/event-series/${seriesId}/occurrences`, { start, end }),
+      providesTags: ['Occurrences'],
+    }),
+    getOccurrenceDetail: build.query<
+      EventOccurrenceDetail,
+      { seriesId: number; occurrenceStart: string }
+    >({
+      query: ({ seriesId, occurrenceStart }) => occurrencePath(seriesId, occurrenceStart),
+      providesTags: (_result, _error, { seriesId, occurrenceStart }) => [
+        occurrenceDetailTag(seriesId, occurrenceStart),
+        seriesDetailTag(seriesId),
+      ],
+    }),
+    cancelOccurrence: build.mutation<EventException, { seriesId: number; occurrenceStart: string }>(
+      {
+        query: ({ seriesId, occurrenceStart }) => ({
+          url: `${occurrencePath(seriesId, occurrenceStart)}/cancel`,
+          method: 'POST',
+          body: {},
+        }),
+        invalidatesTags: (_result, _error, { seriesId, occurrenceStart }) => [
+          occurrenceDetailTag(seriesId, occurrenceStart),
+          'Occurrences',
+        ],
+      },
     ),
-  deleteRoom: (organizationId: string, siteId: string, roomId: string) =>
-    api.delete(`/api/v1/organizations/${organizationId}/sites/${siteId}/rooms/${roomId}`),
-};
+    rescheduleOccurrence: build.mutation<
+      EventException,
+      { seriesId: number; occurrenceStart: string; data: { start: string; end?: string } }
+    >({
+      query: ({ seriesId, occurrenceStart, data }) => ({
+        url: `${occurrencePath(seriesId, occurrenceStart)}/reschedule`,
+        method: 'POST',
+        body: data,
+      }),
+      invalidatesTags: (_result, _error, { seriesId, occurrenceStart }) => [
+        occurrenceDetailTag(seriesId, occurrenceStart),
+        'Occurrences',
+      ],
+    }),
+    deleteException: build.mutation<void, { seriesId: number; occurrenceStart: string }>({
+      query: ({ seriesId, occurrenceStart }) => ({
+        url: `${occurrencePath(seriesId, occurrenceStart)}/exception`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: (_result, _error, { seriesId, occurrenceStart }) => [
+        occurrenceDetailTag(seriesId, occurrenceStart),
+        'Occurrences',
+      ],
+    }),
+    splitEventSeries: build.mutation<
+      EventSeries,
+      { seriesId: number; occurrenceStart: string; data: EventSeriesUpdate }
+    >({
+      query: ({ seriesId, occurrenceStart, data }) => ({
+        url: `${occurrencePath(seriesId, occurrenceStart)}/split`,
+        method: 'POST',
+        body: data,
+      }),
+      invalidatesTags: (_result, _error, { seriesId, occurrenceStart }) => [
+        occurrenceDetailTag(seriesId, occurrenceStart),
+        'Occurrences',
+        'EventSeries',
+        'EventSeriesManagement',
+      ],
+    }),
+    listExceptions: build.query<EventException[], number>({
+      query: seriesId => `/api/v1/event-series/${seriesId}/exceptions`,
+      providesTags: (_result, _error, seriesId) => [{ type: 'EventSeries', id: seriesId }],
+    }),
 
-// --- Jobs ---
+    // --- Event jobs ---
 
-import type { Job, JobPush, JobUpdate } from '../types/index.js';
+    listEventJobs: build.query<EventJob[], { seriesId: number; occurrenceStart?: string }>({
+      query: ({ seriesId, occurrenceStart }) =>
+        withQuery(`/api/v1/event-series/${seriesId}/jobs`, { occurrenceStart }),
+      providesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
+    }),
+    createEventJob: build.mutation<EventJob, { seriesId: number; data: EventJobPush }>({
+      query: ({ seriesId, data }) => ({
+        url: `/api/v1/event-series/${seriesId}/jobs`,
+        method: 'POST',
+        body: data,
+      }),
+      invalidatesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
+    }),
+    updateEventJob: build.mutation<
+      EventJob,
+      { seriesId: number; jobId: number; data: EventJobUpdate }
+    >({
+      query: ({ seriesId, jobId, data }) => ({
+        url: `/api/v1/event-series/${seriesId}/jobs/${jobId}`,
+        method: 'PATCH',
+        body: data,
+      }),
+      invalidatesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
+    }),
+    deleteEventJob: build.mutation<void, { seriesId: number; jobId: number }>({
+      query: ({ seriesId, jobId }) => ({
+        url: `/api/v1/event-series/${seriesId}/jobs/${jobId}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
+    }),
+    assignUserToJob: build.mutation<
+      EventJobAssignment,
+      { seriesId: number; jobId: number; userId: string }
+    >({
+      query: ({ seriesId, jobId, userId }) => ({
+        url: `/api/v1/event-series/${seriesId}/jobs/${jobId}/assignments`,
+        method: 'POST',
+        body: { userId },
+      }),
+      invalidatesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
+    }),
+    unassignUserFromJob: build.mutation<
+      void,
+      { seriesId: number; jobId: number; assignmentId: number }
+    >({
+      query: ({ seriesId, jobId, assignmentId }) => ({
+        url: `/api/v1/event-series/${seriesId}/jobs/${jobId}/assignments/${assignmentId}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
+    }),
 
-export const jobsApi = {
-  listJobs: (organizationId: string, query?: TableQuery) => {
-    const params = new URLSearchParams();
-    if (query?.page !== undefined) params.set('page', String(query.page));
-    if (query?.limit !== undefined) params.set('limit', String(query.limit));
-    if (query?.search) params.set('search', query.search);
-    const qs = params.toString();
-    return api.get<Paginated<Job>>(
-      `/api/v1/organizations/${organizationId}/jobs${qs ? `?${qs}` : ''}`,
-    );
-  },
-  listAllJobs: (organizationId: string) =>
-    api.get<Job[]>(`/api/v1/organizations/${organizationId}/jobs/all`),
-  getJob: (organizationId: string, jobId: number) =>
-    api.get<Job>(`/api/v1/organizations/${organizationId}/jobs/${jobId}`),
-  createJob: (organizationId: string, data: JobPush) =>
-    api.post<Job>(`/api/v1/organizations/${organizationId}/jobs`, data),
-  updateJob: (organizationId: string, jobId: number, data: JobUpdate) =>
-    api.patch<Job>(`/api/v1/organizations/${organizationId}/jobs/${jobId}`, data),
-  deleteJob: (organizationId: string, jobId: number) =>
-    api.delete(`/api/v1/organizations/${organizationId}/jobs/${jobId}`),
-};
+    // --- Event comments ---
 
-// --- Notifications ---
+    listEventComments: build.query<EventComment[], { seriesId: number; occurrenceStart?: string }>({
+      query: ({ seriesId, occurrenceStart }) =>
+        withQuery(`/api/v1/event-series/${seriesId}/comments`, { occurrenceStart }),
+      providesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
+    }),
+    createEventComment: build.mutation<
+      EventComment,
+      { seriesId: number; data: { body: string; occurrenceStart?: string | null } }
+    >({
+      query: ({ seriesId, data }) => ({
+        url: `/api/v1/event-series/${seriesId}/comments`,
+        method: 'POST',
+        body: data,
+      }),
+      invalidatesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
+    }),
+    updateEventComment: build.mutation<
+      EventComment,
+      { seriesId: number; commentId: number; body: string }
+    >({
+      query: ({ seriesId, commentId, body }) => ({
+        url: `/api/v1/event-series/${seriesId}/comments/${commentId}`,
+        method: 'PATCH',
+        body: { body },
+      }),
+      invalidatesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
+    }),
+    deleteEventComment: build.mutation<void, { seriesId: number; commentId: number }>({
+      query: ({ seriesId, commentId }) => ({
+        url: `/api/v1/event-series/${seriesId}/comments/${commentId}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
+    }),
 
-import type { Notification, PaginatedNotifications } from '../types/index.js';
+    // --- Teams ---
 
-export const notificationsApi = {
-  listNotifications: (query?: TableQuery) => {
-    const params = new URLSearchParams();
-    if (query?.page !== undefined) params.set('page', String(query.page));
-    if (query?.limit !== undefined) params.set('limit', String(query.limit));
-    const qs = params.toString();
-    return api.get<PaginatedNotifications>(`/api/v1/notifications${qs ? `?${qs}` : ''}`);
-  },
-  markRead: (notificationId: number, isRead: boolean) =>
-    api.patch<Notification>(`/api/v1/notifications/${notificationId}`, { isRead }),
-  markAllRead: () => api.post<{ updated: number }>('/api/v1/notifications/mark-all-read', {}),
-};
+    getTeams: build.query<Paginated<Team>, { organizationId: string; query?: TableQuery }>({
+      query: ({ organizationId, query }) =>
+        withQuery(`/api/v1/organizations/${organizationId}/teams`, query ?? {}),
+      providesTags: ['Team'],
+    }),
+    getTeam: build.query<Team, { organizationId: string; teamId: string }>({
+      query: ({ organizationId, teamId }) =>
+        `/api/v1/organizations/${organizationId}/teams/${teamId}`,
+      providesTags: (_result, _error, { teamId }) => [{ type: 'Team', id: teamId }],
+    }),
+    createTeam: build.mutation<Team, { organizationId: string; data: TeamPush }>({
+      query: ({ organizationId, data }) => ({
+        url: `/api/v1/organizations/${organizationId}/teams`,
+        method: 'POST',
+        body: data,
+      }),
+      invalidatesTags: ['Team'],
+    }),
+    updateTeam: build.mutation<Team, { organizationId: string; teamId: string; data: TeamUpdate }>({
+      query: ({ organizationId, teamId, data }) => ({
+        url: `/api/v1/organizations/${organizationId}/teams/${teamId}`,
+        method: 'PATCH',
+        body: data,
+      }),
+      invalidatesTags: ['Team'],
+    }),
+    deleteTeam: build.mutation<void, { organizationId: string; teamId: string }>({
+      query: ({ organizationId, teamId }) => ({
+        url: `/api/v1/organizations/${organizationId}/teams/${teamId}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['Team'],
+    }),
+    getTeamMembers: build.query<TeamMember[], { organizationId: string; teamId: string }>({
+      query: ({ organizationId, teamId }) =>
+        `/api/v1/organizations/${organizationId}/teams/${teamId}/members`,
+      providesTags: (_result, _error, { teamId }) => [{ type: 'Team', id: teamId }],
+    }),
+    addTeamMember: build.mutation<
+      TeamMember,
+      { organizationId: string; teamId: string; userId: string }
+    >({
+      query: ({ organizationId, teamId, userId }) => ({
+        url: `/api/v1/organizations/${organizationId}/teams/${teamId}/members`,
+        method: 'POST',
+        body: { userId },
+      }),
+      invalidatesTags: ['Team'],
+    }),
+    removeTeamMember: build.mutation<
+      void,
+      { organizationId: string; teamId: string; userId: string }
+    >({
+      query: ({ organizationId, teamId, userId }) => ({
+        url: `/api/v1/organizations/${organizationId}/teams/${teamId}/members/${userId}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['Team'],
+    }),
 
-// --- Organization users ---
+    // --- Sites ---
 
-import type { OrganizationUser } from '../types/index.js';
+    getSites: build.query<Paginated<Site>, { organizationId: string; query?: TableQuery }>({
+      query: ({ organizationId, query }) =>
+        withQuery(`/api/v1/organizations/${organizationId}/sites`, query ?? {}),
+      providesTags: ['Site'],
+    }),
+    getAllSites: build.query<Site[], string>({
+      query: organizationId => `/api/v1/organizations/${organizationId}/sites/all`,
+      providesTags: ['Site'],
+    }),
+    getSite: build.query<Site, { organizationId: string; siteId: string }>({
+      query: ({ organizationId, siteId }) =>
+        `/api/v1/organizations/${organizationId}/sites/${siteId}`,
+      providesTags: (_result, _error, { siteId }) => [{ type: 'Site', id: siteId }],
+    }),
+    createSite: build.mutation<Site, { organizationId: string; data: SitePush }>({
+      query: ({ organizationId, data }) => ({
+        url: `/api/v1/organizations/${organizationId}/sites`,
+        method: 'POST',
+        body: data,
+      }),
+      invalidatesTags: ['Site'],
+    }),
+    updateSite: build.mutation<Site, { organizationId: string; siteId: string; data: SiteUpdate }>({
+      query: ({ organizationId, siteId, data }) => ({
+        url: `/api/v1/organizations/${organizationId}/sites/${siteId}`,
+        method: 'PATCH',
+        body: data,
+      }),
+      invalidatesTags: ['Site'],
+    }),
+    deleteSite: build.mutation<void, { organizationId: string; siteId: string }>({
+      query: ({ organizationId, siteId }) => ({
+        url: `/api/v1/organizations/${organizationId}/sites/${siteId}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['Site'],
+    }),
 
-export const organizationUsersApi = {
-  listUsers: (organizationId: string, query?: TableQuery) => {
-    const params = new URLSearchParams();
-    if (query?.page !== undefined) params.set('page', String(query.page));
-    if (query?.limit !== undefined) params.set('limit', String(query.limit));
-    if (query?.search) params.set('search', query.search);
-    const qs = params.toString();
-    return api.get<Paginated<OrganizationUser>>(
-      `/api/v1/organizations/${organizationId}/users${qs ? `?${qs}` : ''}`,
-    );
-  },
-};
+    // --- Rooms ---
 
-// --- Event series management ---
+    getRooms: build.query<
+      Paginated<Room>,
+      { organizationId: string; query?: TableQuery & { siteId?: string } }
+    >({
+      query: ({ organizationId, query }) =>
+        withQuery(`/api/v1/organizations/${organizationId}/rooms`, query ?? {}),
+      providesTags: ['Room'],
+    }),
+    getAllRooms: build.query<Room[], string>({
+      query: organizationId => `/api/v1/organizations/${organizationId}/rooms/all`,
+      providesTags: ['Room'],
+    }),
+    getRoomsBySite: build.query<
+      Paginated<Room>,
+      { organizationId: string; siteId: string; query?: TableQuery }
+    >({
+      query: ({ organizationId, siteId, query }) =>
+        withQuery(`/api/v1/organizations/${organizationId}/sites/${siteId}/rooms`, query ?? {}),
+      providesTags: ['Room'],
+    }),
+    getAllRoomsBySite: build.query<Room[], { organizationId: string; siteId: string }>({
+      query: ({ organizationId, siteId }) =>
+        `/api/v1/organizations/${organizationId}/sites/${siteId}/rooms/all`,
+      providesTags: ['Room'],
+    }),
+    getRoom: build.query<Room, { organizationId: string; siteId: string; roomId: string }>({
+      query: ({ organizationId, siteId, roomId }) =>
+        `/api/v1/organizations/${organizationId}/sites/${siteId}/rooms/${roomId}`,
+      providesTags: (_result, _error, { roomId }) => [{ type: 'Room', id: roomId }],
+    }),
+    createRoom: build.mutation<
+      Room,
+      { organizationId: string; siteId: string; data: Omit<RoomPush, 'siteId' | 'organizationId'> }
+    >({
+      query: ({ organizationId, siteId, data }) => ({
+        url: `/api/v1/organizations/${organizationId}/sites/${siteId}/rooms`,
+        method: 'POST',
+        body: data,
+      }),
+      invalidatesTags: ['Room'],
+    }),
+    updateRoom: build.mutation<
+      Room,
+      { organizationId: string; siteId: string; roomId: string; data: RoomUpdate }
+    >({
+      query: ({ organizationId, siteId, roomId, data }) => ({
+        url: `/api/v1/organizations/${organizationId}/sites/${siteId}/rooms/${roomId}`,
+        method: 'PATCH',
+        body: data,
+      }),
+      invalidatesTags: ['Room'],
+    }),
+    deleteRoom: build.mutation<void, { organizationId: string; siteId: string; roomId: string }>({
+      query: ({ organizationId, siteId, roomId }) => ({
+        url: `/api/v1/organizations/${organizationId}/sites/${siteId}/rooms/${roomId}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['Room'],
+    }),
 
-import type {
-  EventSeriesConfigUpdate,
-  EventSeriesListQuery,
-  EventSeriesManagement,
-} from '../types/index.js';
+    // --- Jobs ---
 
-export const eventManagementApi = {
-  listEventSeries: (query?: EventSeriesListQuery) => {
-    const params = new URLSearchParams();
-    if (query?.page !== undefined) params.set('page', String(query.page));
-    if (query?.limit !== undefined) params.set('limit', String(query.limit));
-    if (query?.search) params.set('search', query.search);
-    if (query?.startFrom) params.set('startFrom', query.startFrom);
-    if (query?.startTo) params.set('startTo', query.startTo);
-    if (query?.siteId) params.set('siteId', query.siteId);
-    if (query?.roomId) params.set('roomId', query.roomId);
-    if (query?.teamId) params.set('teamId', query.teamId);
-    if (query?.hasTeam !== undefined) params.set('hasTeam', String(query.hasTeam));
-    const qs = params.toString();
-    return api.get<Paginated<EventSeriesManagement>>(
-      `/api/v1/event-series/management${qs ? `?${qs}` : ''}`,
-    );
-  },
-  getEventSeries: (seriesId: number) =>
-    api.get<EventSeriesManagement>(`/api/v1/event-series/${seriesId}/management`),
-  updateConfig: (seriesId: number, data: EventSeriesConfigUpdate) =>
-    api.patch<EventSeriesManagement>(`/api/v1/event-series/${seriesId}/config`, data),
-};
+    getJobs: build.query<Paginated<Job>, { organizationId: string; query?: TableQuery }>({
+      query: ({ organizationId, query }) =>
+        withQuery(`/api/v1/organizations/${organizationId}/jobs`, query ?? {}),
+      providesTags: ['Job'],
+    }),
+    getAllJobs: build.query<Job[], string>({
+      query: organizationId => `/api/v1/organizations/${organizationId}/jobs/all`,
+      providesTags: ['Job'],
+    }),
+    getJob: build.query<Job, { organizationId: string; jobId: number }>({
+      query: ({ organizationId, jobId }) => `/api/v1/organizations/${organizationId}/jobs/${jobId}`,
+      providesTags: (_result, _error, { jobId }) => [{ type: 'Job', id: jobId }],
+    }),
+    createJob: build.mutation<Job, { organizationId: string; data: JobPush }>({
+      query: ({ organizationId, data }) => ({
+        url: `/api/v1/organizations/${organizationId}/jobs`,
+        method: 'POST',
+        body: data,
+      }),
+      invalidatesTags: ['Job'],
+    }),
+    updateJob: build.mutation<Job, { organizationId: string; jobId: number; data: JobUpdate }>({
+      query: ({ organizationId, jobId, data }) => ({
+        url: `/api/v1/organizations/${organizationId}/jobs/${jobId}`,
+        method: 'PATCH',
+        body: data,
+      }),
+      invalidatesTags: ['Job'],
+    }),
+    deleteJob: build.mutation<void, { organizationId: string; jobId: number }>({
+      query: ({ organizationId, jobId }) => ({
+        url: `/api/v1/organizations/${organizationId}/jobs/${jobId}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['Job'],
+    }),
+
+    // --- Notifications ---
+
+    getNotifications: build.query<PaginatedNotifications, TableQuery>({
+      query: query => withQuery('/api/v1/notifications', query),
+      providesTags: ['Notifications'],
+    }),
+    markNotificationRead: build.mutation<Notification, { notificationId: number; isRead: boolean }>(
+      {
+        query: ({ notificationId, isRead }) => ({
+          url: `/api/v1/notifications/${notificationId}`,
+          method: 'PATCH',
+          body: { isRead },
+        }),
+        invalidatesTags: ['Notifications'],
+      },
+    ),
+    markAllNotificationsRead: build.mutation<{ updated: number }, void>({
+      query: () => ({ url: '/api/v1/notifications/mark-all-read', method: 'POST', body: {} }),
+      invalidatesTags: ['Notifications'],
+    }),
+
+    // --- Organization users ---
+
+    getOrganizationUsers: build.query<
+      Paginated<OrganizationUser>,
+      { organizationId: string; query?: TableQuery }
+    >({
+      query: ({ organizationId, query }) =>
+        withQuery(`/api/v1/organizations/${organizationId}/users`, query ?? {}),
+      providesTags: ['OrganizationUsers'],
+    }),
+
+    // --- Event series management ---
+
+    getEventSeriesManagementList: build.query<
+      Paginated<EventSeriesManagement>,
+      EventSeriesListQuery
+    >({
+      query: query => withQuery('/api/v1/event-series/management', query),
+      providesTags: ['EventSeriesManagement'],
+    }),
+    getEventSeriesManagement: build.query<EventSeriesManagement, number>({
+      query: seriesId => `/api/v1/event-series/${seriesId}/management`,
+      providesTags: (_result, _error, seriesId) => [
+        { type: 'EventSeriesManagement', id: seriesId },
+      ],
+    }),
+    updateEventSeriesConfig: build.mutation<
+      EventSeriesManagement,
+      { seriesId: number; data: EventSeriesConfigUpdate }
+    >({
+      query: ({ seriesId, data }) => ({
+        url: `/api/v1/event-series/${seriesId}/config`,
+        method: 'PATCH',
+        body: data,
+      }),
+      invalidatesTags: ['EventSeriesManagement'],
+    }),
+  }),
+});
+
+export const {
+  useGetAuthProvidersQuery,
+  useLogoutMutation,
+  useStartLinkMutation,
+  useGetUsersQuery,
+  useGetUserQuery,
+  useGetCurrentUserQuery,
+  useGetUserListQuery,
+  useUpdateUserMutation,
+  useDeleteUserMutation,
+  useUpdateCurrentUserMutation,
+  useDeleteCurrentUserMutation,
+  useGetAuthAccountsQuery,
+  useUnlinkAuthAccountMutation,
+  useGetOperationsQuery,
+  useGetOperationQuery,
+  useUpsertOperationMutation,
+  useDeleteOperationMutation,
+  useAddAssignmentMutation,
+  useUpdateAssignmentMutation,
+  useDeleteAssignmentMutation,
+  useGetMyOrganizationsQuery,
+  useGetOrganizationQuery,
+  useUpdateOrganizationMutation,
+  useGetCalendarsQuery,
+  useCreateCalendarMutation,
+  useGetEventSeriesListQuery,
+  useGetEventSeriesByIdQuery,
+  useCreateEventSeriesMutation,
+  useUpdateEventSeriesMutation,
+  useDeleteEventSeriesMutation,
+  useGetOccurrencesQuery,
+  useGetSeriesOccurrencesQuery,
+  useGetOccurrenceDetailQuery,
+  useCancelOccurrenceMutation,
+  useRescheduleOccurrenceMutation,
+  useDeleteExceptionMutation,
+  useSplitEventSeriesMutation,
+  useListExceptionsQuery,
+  useListEventJobsQuery,
+  useCreateEventJobMutation,
+  useUpdateEventJobMutation,
+  useDeleteEventJobMutation,
+  useAssignUserToJobMutation,
+  useUnassignUserFromJobMutation,
+  useListEventCommentsQuery,
+  useCreateEventCommentMutation,
+  useUpdateEventCommentMutation,
+  useDeleteEventCommentMutation,
+  useGetTeamsQuery,
+  useGetTeamQuery,
+  useCreateTeamMutation,
+  useUpdateTeamMutation,
+  useDeleteTeamMutation,
+  useGetTeamMembersQuery,
+  useAddTeamMemberMutation,
+  useRemoveTeamMemberMutation,
+  useGetSitesQuery,
+  useGetAllSitesQuery,
+  useGetSiteQuery,
+  useCreateSiteMutation,
+  useUpdateSiteMutation,
+  useDeleteSiteMutation,
+  useGetRoomsQuery,
+  useGetAllRoomsQuery,
+  useGetRoomsBySiteQuery,
+  useGetAllRoomsBySiteQuery,
+  useGetRoomQuery,
+  useCreateRoomMutation,
+  useUpdateRoomMutation,
+  useDeleteRoomMutation,
+  useGetJobsQuery,
+  useGetAllJobsQuery,
+  useGetJobQuery,
+  useCreateJobMutation,
+  useUpdateJobMutation,
+  useDeleteJobMutation,
+  useGetNotificationsQuery,
+  useMarkNotificationReadMutation,
+  useMarkAllNotificationsReadMutation,
+  useGetOrganizationUsersQuery,
+  useGetEventSeriesManagementListQuery,
+  useGetEventSeriesManagementQuery,
+  useUpdateEventSeriesConfigMutation,
+} = api;

@@ -13,20 +13,29 @@ import {
   TextInput,
   Title,
 } from '@mantine/core';
-import { useCallback, useEffect, useState } from 'react';
+import { skipToken } from '@reduxjs/toolkit/query/react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
-import { roomsApi, sitesApi } from '../../api/index.js';
+import {
+  getApiErrorMessage,
+  useCreateRoomMutation,
+  useGetCurrentUserQuery,
+  useGetRoomsBySiteQuery,
+  useGetSiteQuery,
+  useUpdateSiteMutation,
+} from '../../api/index.js';
 import DataTable, { type DataTableColumn } from '../../components/DataTable/DataTable.js';
 import { useAppSelector } from '../../hooks/redux.js';
-import type { Room, Site, TableQuery } from '../../types/index.js';
+import { selectActiveOrganizationId } from '../../store/organization-slice.js';
+import type { Room } from '../../types/index.js';
 
 function SiteConfigPage() {
   const { t } = useTranslation();
   const { siteId } = useParams<{ siteId: string }>();
   const navigate = useNavigate();
-  const activeOrganizationId = useAppSelector(state => state.organization.activeOrganizationId);
-  const currentUser = useAppSelector(state => state.user.currentUser);
+  const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
+  const { data: currentUser } = useGetCurrentUserQuery();
   const canWriteSite =
     currentUser?.permissions?.includes('admin') === true ||
     currentUser?.permissions?.includes('site-management:write') === true;
@@ -34,97 +43,77 @@ function SiteConfigPage() {
     currentUser?.permissions?.includes('admin') === true ||
     currentUser?.permissions?.includes('room-management:write') === true;
 
-  const [site, setSite] = useState<Site | null>(null);
-  const [rooms, setRooms] = useState<Room[]>([]);
-  const [roomsTotal, setRoomsTotal] = useState(0);
   const [roomsPage, setRoomsPage] = useState(0);
   const [roomsLimit, setRoomsLimit] = useState(50);
   const [roomsSearch, setRoomsSearch] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+
+  const siteArg =
+    activeOrganizationId && siteId ? { organizationId: activeOrganizationId, siteId } : skipToken;
+  const { data: site, isLoading: loading, error: siteError } = useGetSiteQuery(siteArg);
+  const { data: roomsData } = useGetRoomsBySiteQuery(
+    activeOrganizationId && siteId
+      ? {
+          organizationId: activeOrganizationId,
+          siteId,
+          query: { page: roomsPage, limit: roomsLimit, search: roomsSearch || undefined },
+        }
+      : skipToken,
+  );
+  const rooms = roomsData?.items ?? [];
+  const roomsTotal = roomsData?.total ?? 0;
+  const [updateSite, { isLoading: saving }] = useUpdateSiteMutation();
+  const [createRoom] = useCreateRoomMutation();
+
+  const [actionError, setActionError] = useState<string | null>(null);
+  const error = actionError ?? (siteError ? getApiErrorMessage(siteError) : null);
 
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editAddress, setEditAddress] = useState('');
-  const [saving, setSaving] = useState(false);
 
   const [addRoomModalOpen, setAddRoomModalOpen] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
   const [newRoomDescription, setNewRoomDescription] = useState('');
 
-  const load = useCallback(async () => {
-    if (!activeOrganizationId || !siteId) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const siteData = await sitesApi.getSite(activeOrganizationId, siteId);
-      setSite(siteData);
-      setEditName(siteData.name);
-      setEditDescription(siteData.description ?? '');
-      setEditAddress(siteData.address ?? '');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [activeOrganizationId, siteId]);
-
-  const loadRooms = useCallback(async () => {
-    if (!activeOrganizationId || !siteId) return;
-    try {
-      const query: TableQuery = {
-        page: roomsPage,
-        limit: roomsLimit,
-        search: roomsSearch || undefined,
-      };
-      const result = await roomsApi.listRoomsBySite(activeOrganizationId, siteId, query);
-      setRooms(result.items);
-      setRoomsTotal(result.total);
-    } catch {
-      setRooms([]);
-      setRoomsTotal(0);
-    }
-  }, [activeOrganizationId, siteId, roomsPage, roomsLimit, roomsSearch]);
-
   useEffect(() => {
-    load();
-  }, [load]);
-
-  useEffect(() => {
-    loadRooms();
-  }, [loadRooms]);
+    if (site) {
+      setEditName(site.name);
+      setEditDescription(site.description ?? '');
+      setEditAddress(site.address ?? '');
+    }
+  }, [site]);
 
   const handleSave = async () => {
     if (!activeOrganizationId || !siteId) return;
-    setSaving(true);
-    setError(null);
+    setActionError(null);
     try {
-      await sitesApi.updateSite(activeOrganizationId, siteId, {
-        name: editName,
-        description: editDescription.trim() || null,
-        address: editAddress.trim() || null,
-      });
+      await updateSite({
+        organizationId: activeOrganizationId,
+        siteId,
+        data: {
+          name: editName,
+          description: editDescription.trim() || null,
+          address: editAddress.trim() || null,
+        },
+      }).unwrap();
       setEditing(false);
-      await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
+      setActionError(getApiErrorMessage(err));
     }
   };
 
   const handleAddRoom = async () => {
     if (!activeOrganizationId || !siteId || !newRoomName.trim()) return;
     try {
-      await roomsApi.createRoom(activeOrganizationId, siteId, {
-        name: newRoomName.trim(),
-        description: newRoomDescription.trim(),
-      });
+      await createRoom({
+        organizationId: activeOrganizationId,
+        siteId,
+        data: { name: newRoomName.trim(), description: newRoomDescription.trim() },
+      }).unwrap();
       setAddRoomModalOpen(false);
       setNewRoomName('');
       setNewRoomDescription('');
-      await loadRooms();
     } catch {
       // Ignore
     }

@@ -1,21 +1,14 @@
 import { Box, Center, Flex, Loader, Text, Title } from '@mantine/core';
 import { IconUserPlus } from '@tabler/icons-react';
-import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
+import { getApiErrorMessage, useGetUsersQuery } from '../../api/index.js';
 import UserCard from '../../components/UserCard/UserCard.js';
-import { useAppDispatch, useAppSelector } from '../../hooks/redux.js';
-import { fetchUsers } from '../../store/user-slice.js';
 
 function UserList() {
   const { t } = useTranslation();
-  const dispatch = useAppDispatch();
   const navigate = useNavigate();
-  const { users, loading, error } = useAppSelector(state => state.user);
-
-  useEffect(() => {
-    dispatch(fetchUsers({ page: 0, limit: 50 }));
-  }, [dispatch]);
+  const { data: users = [], isLoading: loading, error } = useGetUsersQuery({ page: 0, limit: 50 });
 
   if (loading) {
     return (
@@ -28,7 +21,7 @@ function UserList() {
   if (error) {
     return (
       <Box p="xl">
-        <Text c="red">{error}</Text>
+        <Text c="red">{getApiErrorMessage(error)}</Text>
       </Box>
     );
   }

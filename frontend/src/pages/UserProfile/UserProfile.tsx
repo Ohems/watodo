@@ -13,26 +13,32 @@ import {
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
+import { getApiErrorMessage, useGetUsersQuery, useUpdateUserMutation } from '../../api/index.js';
 import EditField from '../../components/EditField/EditField.js';
-import { useAppDispatch, useAppSelector } from '../../hooks/redux.js';
-import { clearError, fetchUsers, updateUser } from '../../store/user-slice.js';
 import type { UserPush } from '../../types/index.js';
 
 function UserProfile() {
   const { t } = useTranslation();
   const { userId } = useParams<{ userId: string }>();
   const navigate = useNavigate();
-  const dispatch = useAppDispatch();
-  const { users, loading, error } = useAppSelector(state => state.user);
+  const {
+    data: users = [],
+    isLoading: loading,
+    error: queryError,
+  } = useGetUsersQuery({
+    page: 0,
+    limit: 50,
+  });
+  const [updateUser, { error: updateError }] = useUpdateUserMutation();
 
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState<UserPush>({});
 
   const user = users.find(u => u.id === userId);
   const isNew = userId === 'new';
+  const error = queryError ?? updateError;
 
   useEffect(() => {
-    if (!isNew && users.length === 0) dispatch(fetchUsers({}));
     if (!isNew && user) {
       setEditData({
         name: user.name,
@@ -41,16 +47,16 @@ function UserProfile() {
         state: user.state,
       });
     }
-  }, [dispatch, isNew, user, users.length]);
-
-  useEffect(() => {
-    return () => {
-      dispatch(clearError());
-    };
-  }, [dispatch]);
+  }, [isNew, user]);
 
   const handleSave = async () => {
-    if (user) await dispatch(updateUser({ userId: user.id, data: editData }));
+    if (user) {
+      try {
+        await updateUser({ userId: user.id, data: editData }).unwrap();
+      } catch {
+        // The update error is shown via the mutation state.
+      }
+    }
     setEditing(false);
   };
 
@@ -107,7 +113,7 @@ function UserProfile() {
 
         {error && (
           <Alert color="red" variant="light" mb="md">
-            {error}
+            {getApiErrorMessage(error)}
           </Alert>
         )}
 

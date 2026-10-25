@@ -12,8 +12,9 @@ import {
 import { IconChevronDown, IconMenu2 } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom';
-import { useAppDispatch, useAppSelector } from '../../hooks/redux.js';
-import { logout } from '../../store/user-slice.js';
+import { useGetCurrentUserQuery } from '../../api/index.js';
+import { useAppDispatch } from '../../hooks/redux.js';
+import { logout } from '../../store/session.js';
 import OrganizationSelector from '../OrganizationSelector/OrganizationSelector.js';
 
 interface NavItem {
@@ -27,7 +28,7 @@ function NavBar() {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const location = useLocation();
-  const currentUser = useAppSelector(state => state.user.currentUser);
+  const { data: currentUser } = useGetCurrentUserQuery();
 
   const navItems: NavItem[] = [
     { label: t('nav.home'), path: '/' },

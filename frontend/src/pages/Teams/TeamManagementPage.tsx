@@ -16,29 +16,46 @@ import {
   TextInput,
   Title,
 } from '@mantine/core';
+import { skipToken } from '@reduxjs/toolkit/query/react';
 import { IconTrash, IconUserPlus } from '@tabler/icons-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
-import { teamsApi, usersApi } from '../../api/index.js';
+import {
+  getApiErrorMessage,
+  useAddTeamMemberMutation,
+  useGetCurrentUserQuery,
+  useGetTeamMembersQuery,
+  useGetTeamQuery,
+  useGetUserListQuery,
+  useRemoveTeamMemberMutation,
+  useUpdateTeamMutation,
+} from '../../api/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
-import type { Team, TeamMember, UserListItem } from '../../types/index.js';
+import { selectActiveOrganizationId } from '../../store/organization-slice.js';
+import type { TeamMember } from '../../types/index.js';
 
 function TeamManagementPage() {
   const { t } = useTranslation();
   const { teamId } = useParams<{ teamId: string }>();
   const navigate = useNavigate();
-  const activeOrganizationId = useAppSelector(state => state.organization.activeOrganizationId);
-  const currentUser = useAppSelector(state => state.user.currentUser);
+  const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
+  const { data: currentUser } = useGetCurrentUserQuery();
   const canWrite =
     currentUser?.permissions?.includes('admin') === true ||
     currentUser?.permissions?.includes('team-management:write') === true;
 
-  const [team, setTeam] = useState<Team | null>(null);
-  const [members, setMembers] = useState<TeamMember[]>([]);
-  const [allUsers, setAllUsers] = useState<UserListItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const teamArg =
+    activeOrganizationId && teamId ? { organizationId: activeOrganizationId, teamId } : skipToken;
+  const { data: team, isLoading: loading, error: teamError } = useGetTeamQuery(teamArg);
+  const { data: members = [] } = useGetTeamMembersQuery(teamArg);
+  const { data: allUsers = [] } = useGetUserListQuery();
+  const [updateTeam] = useUpdateTeamMutation();
+  const [addMember] = useAddTeamMemberMutation();
+  const [removeMember] = useRemoveTeamMemberMutation();
+
+  const [actionError, setActionError] = useState<string | null>(null);
+  const error = actionError ?? (teamError ? getApiErrorMessage(teamError) : null);
 
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState('');
@@ -48,66 +65,56 @@ function TeamManagementPage() {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<TeamMember | null>(null);
 
-  const load = useCallback(async () => {
-    if (!activeOrganizationId || !teamId) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const [teamData, membersData, usersData] = await Promise.all([
-        teamsApi.getTeam(activeOrganizationId, teamId),
-        teamsApi.listMembers(activeOrganizationId, teamId),
-        usersApi.getUserList(),
-      ]);
-      setTeam(teamData);
-      setMembers(membersData);
-      setAllUsers(usersData);
-      setEditName(teamData.name);
-      setEditDescription(teamData.description);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [activeOrganizationId, teamId]);
-
   useEffect(() => {
-    load();
-  }, [load]);
+    if (team) {
+      setEditName(team.name);
+      setEditDescription(team.description);
+    }
+  }, [team]);
 
   const handleSave = async () => {
     if (!activeOrganizationId || !teamId) return;
+    setActionError(null);
     try {
-      await teamsApi.updateTeam(activeOrganizationId, teamId, {
-        name: editName,
-        description: editDescription,
-      });
+      await updateTeam({
+        organizationId: activeOrganizationId,
+        teamId,
+        data: { name: editName, description: editDescription },
+      }).unwrap();
       setEditing(false);
-      await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setActionError(getApiErrorMessage(err));
     }
   };
 
   const handleAddMember = async () => {
     if (!activeOrganizationId || !teamId || !selectedUserId) return;
+    setActionError(null);
     try {
-      await teamsApi.addMember(activeOrganizationId, teamId, selectedUserId);
+      await addMember({
+        organizationId: activeOrganizationId,
+        teamId,
+        userId: selectedUserId,
+      }).unwrap();
       setAddModalOpen(false);
       setSelectedUserId(null);
-      await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setActionError(getApiErrorMessage(err));
     }
   };
 
   const handleRemoveMember = async () => {
     if (!activeOrganizationId || !teamId || !deleteTarget) return;
+    setActionError(null);
     try {
-      await teamsApi.removeMember(activeOrganizationId, teamId, deleteTarget.userId);
+      await removeMember({
+        organizationId: activeOrganizationId,
+        teamId,
+        userId: deleteTarget.userId,
+      }).unwrap();
       setDeleteTarget(null);
-      await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setActionError(getApiErrorMessage(err));
     }
   };
 

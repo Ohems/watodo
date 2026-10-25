@@ -1,33 +1,32 @@
 import { Badge, Select, TextInput } from '@mantine/core';
-import { useCallback, useEffect, useState } from 'react';
+import { skipToken } from '@reduxjs/toolkit/query/react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { eventManagementApi, roomsApi, sitesApi, teamsApi } from '../../api/index.js';
+import {
+  useGetAllRoomsQuery,
+  useGetAllSitesQuery,
+  useGetCurrentUserQuery,
+  useGetEventSeriesManagementListQuery,
+  useGetTeamsQuery,
+} from '../../api/index.js';
 import DataTable, { type DataTableColumn } from '../../components/DataTable/DataTable.js';
 import { useAppSelector } from '../../hooks/redux.js';
-import type {
-  EventSeriesListQuery,
-  EventSeriesManagement,
-  Room,
-  Site,
-  Team,
-} from '../../types/index.js';
+import { selectActiveOrganizationId } from '../../store/organization-slice.js';
+import type { EventSeriesManagement } from '../../types/index.js';
 
 function EventManagementPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const activeOrganizationId = useAppSelector(state => state.organization.activeOrganizationId);
-  const currentUser = useAppSelector(state => state.user.currentUser);
+  const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
+  const { data: currentUser } = useGetCurrentUserQuery();
   const canWrite =
     currentUser?.permissions?.includes('admin') === true ||
     currentUser?.permissions?.includes('events:write') === true;
 
-  const [data, setData] = useState<EventSeriesManagement[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [limit, setLimit] = useState(50);
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
 
   // Filters
   const [dateFrom, setDateFrom] = useState('');
@@ -37,54 +36,26 @@ function EventManagementPage() {
   const [teamId, setTeamId] = useState<string | null>(null);
   const [hasTeam, setHasTeam] = useState<boolean | undefined>(undefined);
 
-  const [sites, setSites] = useState<Site[]>([]);
-  const [rooms, setRooms] = useState<Room[]>([]);
-  const [teams, setTeams] = useState<Team[]>([]);
+  const { data: sites = [] } = useGetAllSitesQuery(activeOrganizationId ?? skipToken);
+  const { data: rooms = [] } = useGetAllRoomsQuery(activeOrganizationId ?? skipToken);
+  const { data: teamsData } = useGetTeamsQuery(
+    activeOrganizationId
+      ? { organizationId: activeOrganizationId, query: { limit: 200 } }
+      : skipToken,
+  );
+  const teams = teamsData?.items ?? [];
 
-  useEffect(() => {
-    if (!activeOrganizationId) return;
-    sitesApi
-      .listAllSites(activeOrganizationId)
-      .then(setSites)
-      .catch(() => setSites([]));
-    roomsApi
-      .listAllRooms(activeOrganizationId)
-      .then(setRooms)
-      .catch(() => setRooms([]));
-    teamsApi
-      .listTeams(activeOrganizationId, { limit: 200 })
-      .then(d => setTeams(d.items))
-      .catch(() => setTeams([]));
-  }, [activeOrganizationId]);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const query: EventSeriesListQuery = {
-        page,
-        limit,
-        search: search || undefined,
-        startFrom: dateFrom ? new Date(dateFrom).toISOString() : undefined,
-        startTo: dateTo ? new Date(dateTo).toISOString() : undefined,
-        siteId: siteId ?? undefined,
-        roomId: roomId ?? undefined,
-        teamId: teamId ?? undefined,
-        hasTeam,
-      };
-      const result = await eventManagementApi.listEventSeries(query);
-      setData(result.items);
-      setTotal(result.total);
-    } catch {
-      setData([]);
-      setTotal(0);
-    } finally {
-      setLoading(false);
-    }
-  }, [page, limit, search, dateFrom, dateTo, siteId, roomId, teamId, hasTeam]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const { data, isLoading: loading } = useGetEventSeriesManagementListQuery({
+    page,
+    limit,
+    search: search || undefined,
+    startFrom: dateFrom ? new Date(dateFrom).toISOString() : undefined,
+    startTo: dateTo ? new Date(dateTo).toISOString() : undefined,
+    siteId: siteId ?? undefined,
+    roomId: roomId ?? undefined,
+    teamId: teamId ?? undefined,
+    hasTeam,
+  });
 
   const locationLabel = (item: EventSeriesManagement): string => {
     if (item.roomName && item.siteName) return `${item.siteName} - ${item.roomName}`;
@@ -141,8 +112,8 @@ function EventManagementPage() {
     <DataTable
       title={t('nav.eventsManagement')}
       columns={columns}
-      data={data}
-      total={total}
+      data={data?.items ?? []}
+      total={data?.total ?? 0}
       page={page}
       limit={limit}
       loading={loading}

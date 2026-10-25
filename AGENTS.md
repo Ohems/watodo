@@ -236,12 +236,13 @@ frontend/src/
 ├── main.tsx              # Entry point (Redux Provider + Router)
 ├── App.tsx               # Route definitions
 ├── api/
-│   └── index.ts          # API client (fetch wrapper with token auth)
+│   └── index.ts          # RTK Query api (createApi): queries, mutations, cache tags
 ├── types/
 │   └── index.ts          # TypeScript types (User, Operation, etc.)
 ├── store/
-│   ├── index.ts          # Redux store configuration
-│   └── user-slice.ts     # User state (async thunks for API calls)
+│   ├── index.ts          # Redux store configuration (api reducer + middleware)
+│   ├── organization-slice.ts # Active organization selection (persisted to localStorage)
+│   └── session.ts        # logout / deleteCurrentUser thunks (clear token + api state)
 ├── hooks/
 │   └── redux.ts          # Typed useAppDispatch / useAppSelector
 ├── components/
@@ -263,14 +264,24 @@ frontend/src/
 
 ### Key patterns
 
-- **State management**: Redux Toolkit with async thunks. Use `useAppDispatch` and
+- **State management**: Redux Toolkit. The store holds the RTK Query api reducer
+  (with `api.middleware`) and the organization slice. Use `useAppDispatch` and
   `useAppSelector` from `hooks/redux.ts` (typed wrappers).
-- **Authentication gate**: `App.tsx` fetches the current user on load. While the
-  check is pending a spinner is shown; unauthenticated users are greeted with the
-  `Login` page (provider buttons linking to `/api/v1/auth/:provider/login`) instead
-  of the app. `user-slice.ts` tracks this as `authStatus`.
-- **API calls**: All API calls go through the client in `api/index.ts`. The client
-  reads the auth token from localStorage and sends it as the `x-token` header.
+- **API calls**: All API calls go through the RTK Query api defined with
+  `createApi` in `api/index.ts`. Components use the generated hooks
+  (`useGetCurrentUserQuery`, `useUpdateTeamMutation`, ...); RTK Query deduplicates
+  concurrent requests for the same cache key and caches results, so `React.StrictMode`
+  double effects do not cause duplicate requests. Queries declare `providesTags`
+  and mutations `invalidatesTags` for automatic refetching. The base query reads
+  the auth token from localStorage and sends it as the `x-token` header. Use
+  `skipToken` as the hook argument to skip a query conditionally, and
+  `getApiErrorMessage(error)` to display a mutation/query error.
+- **Authentication gate**: `App.tsx` fetches the current user via
+  `useGetCurrentUserQuery`. While the check is pending a spinner is shown;
+  unauthenticated users are greeted with the `Login` page (provider buttons
+  linking to `/api/v1/auth/:provider/login`) instead of the app. Logging out
+  (`logout` thunk in `store/session.ts`) clears the token and resets the api
+  state, which makes the current-user query fail and shows the login page.
 - **Routing**: React Router v7 with `createBrowserRouter`. Routes are defined in `App.tsx`.
 - **UI**: Mantine v9 components. Use the `style` prop or Mantine style props for styling.
 - **Components**: Each component lives in its own folder with an `index.ts` barrel export.
@@ -321,6 +332,11 @@ frontend/src/
 - Uses jsdom environment with `@testing-library/react`.
 - Run: `npm run test -w frontend` (or `npm run test:unit -w frontend`)
 - Setup file: `frontend/src/test/setup.ts` (imports `@testing-library/jest-dom`)
+- Test helpers in `frontend/src/test/`: `api-mock.ts` stubs global fetch with
+  route-based JSON responses (`mockApi().on(method, path, response, status)`,
+  `callCount`, `lastBody`) and `test-utils.tsx` provides `createTestStore()` and
+  `renderWithProviders(ui, { store, route, strict })` (Provider + MantineProvider +
+  BrowserRouter, optionally wrapped in `React.StrictMode`).
 
 ### Frontend E2E (Playwright)
 

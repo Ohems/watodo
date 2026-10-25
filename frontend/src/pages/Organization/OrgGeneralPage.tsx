@@ -12,9 +12,15 @@ import {
 } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import {
+  getApiErrorMessage,
+  useGetCurrentUserQuery,
+  useGetMyOrganizationsQuery,
+  useUpdateOrganizationMutation,
+} from '../../api/index.js';
 import EditField from '../../components/EditField/EditField.js';
-import { useAppDispatch, useAppSelector } from '../../hooks/redux.js';
-import { fetchMyOrganizations, updateOrganization } from '../../store/organization-slice.js';
+import { useAppSelector } from '../../hooks/redux.js';
+import { selectActiveOrganizationId } from '../../store/organization-slice.js';
 import type { FieldErrors, OrganizationUpdate } from '../../types/index.js';
 import { validateOrganizationUpdate } from '../../validation.js';
 import NoOrganizationPage from '../NoOrganizationPage/NoOrganizationPage.js';
@@ -23,23 +29,23 @@ const EDIT_PERMISSIONS = ['admin', 'organization:write'];
 
 function OrgGeneralPage() {
   const { t } = useTranslation();
-  const dispatch = useAppDispatch();
-  const currentUser = useAppSelector(state => state.user.currentUser);
-  const { organizations, activeOrganizationId, loaded, loading, error } = useAppSelector(
-    state => state.organization,
-  );
+  const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
+  const { data: currentUser } = useGetCurrentUserQuery();
+  const {
+    data: organizations,
+    isLoading: loading,
+    error: queryError,
+  } = useGetMyOrganizationsQuery();
+  const [updateOrganization, { isLoading: saving }] = useUpdateOrganizationMutation();
 
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState<OrganizationUpdate>({});
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
-  const organization = organizations.find(org => org.id === activeOrganizationId) ?? null;
+  const organization = organizations?.find(org => org.id === activeOrganizationId) ?? null;
   const canEdit =
     currentUser?.permissions.some(permission => EDIT_PERMISSIONS.includes(permission)) ?? false;
-
-  useEffect(() => {
-    if (!loaded && !loading) dispatch(fetchMyOrganizations());
-  }, [dispatch, loaded, loading]);
+  const error = queryError ? getApiErrorMessage(queryError) : null;
 
   useEffect(() => {
     if (organization) {
@@ -69,9 +75,7 @@ function OrgGeneralPage() {
       return;
     }
     try {
-      await dispatch(
-        updateOrganization({ organizationId: organization.id, data: editData }),
-      ).unwrap();
+      await updateOrganization({ organizationId: organization.id, data: editData }).unwrap();
       setEditing(false);
       setFieldErrors({});
     } catch {
@@ -92,7 +96,7 @@ function OrgGeneralPage() {
     }
   };
 
-  if (!loaded || (loading && !organization)) {
+  if (loading && !organization) {
     return (
       <Center p="xl">
         <Loader />
@@ -128,7 +132,7 @@ function OrgGeneralPage() {
                   <Button variant="default" onClick={handleCancel}>
                     {t('common.cancel')}
                   </Button>
-                  <Button variant="filled" onClick={handleSave}>
+                  <Button variant="filled" onClick={handleSave} disabled={saving}>
                     {t('common.save')}
                   </Button>
                 </>

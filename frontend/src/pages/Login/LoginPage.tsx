@@ -1,7 +1,6 @@
 import { Box, Button, Center, Loader, Paper, Stack, Text } from '@mantine/core';
-import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { authApi } from '../../api/index.js';
+import { getLoginUrl, useGetAuthProvidersQuery } from '../../api/index.js';
 import type { AuthProviderInfo } from '../../types/index.js';
 
 /** Used when the provider list cannot be fetched from the API. */
@@ -13,22 +12,8 @@ const FALLBACK_PROVIDERS: AuthProviderInfo[] = [
 
 function LoginPage() {
   const { t } = useTranslation();
-  const [providers, setProviders] = useState<AuthProviderInfo[] | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    authApi
-      .getProviders()
-      .then(data => {
-        if (!cancelled) setProviders(data.providers);
-      })
-      .catch(() => {
-        if (!cancelled) setProviders(FALLBACK_PROVIDERS);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { data, isError } = useGetAuthProvidersQuery();
+  const providers = data?.providers ?? (isError ? FALLBACK_PROVIDERS : null);
 
   // The backend redirects back here after the provider callback.
   const returnUrl = window.location.href;
@@ -61,7 +46,7 @@ function LoginPage() {
               <Button
                 key={provider.id}
                 component="a"
-                href={authApi.loginUrl(provider.id, undefined, returnUrl)}
+                href={getLoginUrl(provider.id, undefined, returnUrl)}
                 variant="outline"
                 fullWidth
               >

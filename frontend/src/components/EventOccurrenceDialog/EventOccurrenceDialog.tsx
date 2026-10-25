@@ -14,26 +14,35 @@ import {
   TextInput,
   Title,
 } from '@mantine/core';
+import { skipToken } from '@reduxjs/toolkit/query/react';
 import { IconEdit, IconPlus, IconTrash } from '@tabler/icons-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { calendarsApi, eventsApi, organizationsApi, usersApi } from '../../api/index.js';
+import {
+  getApiErrorMessage,
+  useAssignUserToJobMutation,
+  useCancelOccurrenceMutation,
+  useCreateEventCommentMutation,
+  useCreateEventJobMutation,
+  useDeleteEventCommentMutation,
+  useDeleteEventJobMutation,
+  useDeleteExceptionMutation,
+  useGetCalendarsQuery,
+  useGetCurrentUserQuery,
+  useGetMyOrganizationsQuery,
+  useGetOccurrenceDetailQuery,
+  useGetUserListQuery,
+  useRescheduleOccurrenceMutation,
+  useUnassignUserFromJobMutation,
+  useUpdateEventCommentMutation,
+} from '../../api/index.js';
 import EventSeriesDialog from '../../components/EventSeriesDialog/EventSeriesDialog.js';
-import { useAppSelector } from '../../hooks/redux.js';
-import type {
-  Calendar,
-  EventOccurrenceDetail,
-  Organization,
-  RecurrenceFreq,
-  RecurrenceInput,
-  UserListItem,
-} from '../../types/index.js';
+import type { RecurrenceFreq, RecurrenceInput } from '../../types/index.js';
 
 interface EventOccurrenceDialogProps {
   seriesId: number | null;
   occurrenceStart: string | null;
   onClose: () => void;
-  onChanged: () => void;
 }
 
 function toLocalInputValue(iso: string): string {
@@ -46,24 +55,39 @@ function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString();
 }
 
-function EventOccurrenceDialog({
-  seriesId,
-  occurrenceStart,
-  onClose,
-  onChanged,
-}: EventOccurrenceDialogProps) {
+function EventOccurrenceDialog({ seriesId, occurrenceStart, onClose }: EventOccurrenceDialogProps) {
   const { t } = useTranslation();
-  const currentUser = useAppSelector(state => state.user.currentUser);
+  const { data: currentUser } = useGetCurrentUserQuery();
   const canWrite =
     currentUser?.permissions?.includes('admin') === true ||
     currentUser?.permissions?.includes('events:write') === true;
 
   const open = seriesId !== null && occurrenceStart !== null;
 
-  const [detail, setDetail] = useState<EventOccurrenceDetail | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [userList, setUserList] = useState<UserListItem[]>([]);
+  const detailArg =
+    open && seriesId !== null && occurrenceStart !== null
+      ? { seriesId, occurrenceStart }
+      : skipToken;
+  const {
+    data: detail,
+    isLoading: loading,
+    error: detailError,
+  } = useGetOccurrenceDetailQuery(detailArg);
+  const { data: userList = [] } = useGetUserListQuery(open ? undefined : skipToken);
+
+  const [deleteJob] = useDeleteEventJobMutation();
+  const [unassignUserFromJob] = useUnassignUserFromJobMutation();
+  const [assignUserToJob] = useAssignUserToJobMutation();
+  const [createJob] = useCreateEventJobMutation();
+  const [updateComment] = useUpdateEventCommentMutation();
+  const [deleteComment] = useDeleteEventCommentMutation();
+  const [createComment] = useCreateEventCommentMutation();
+  const [cancelOccurrence] = useCancelOccurrenceMutation();
+  const [deleteException] = useDeleteExceptionMutation();
+  const [rescheduleOccurrence] = useRescheduleOccurrenceMutation();
+
+  const [actionError, setActionError] = useState<string | null>(null);
+  const error = actionError ?? (detailError ? getApiErrorMessage(detailError) : null);
 
   const [commentBody, setCommentBody] = useState('');
   const [editingCommentId, setEditingCommentId] = useState<number | null>(null);
@@ -76,66 +100,35 @@ function EventOccurrenceDialog({
   const [rescheduleStart, setRescheduleStart] = useState('');
 
   const [splitOpen, setSplitOpen] = useState(false);
-  const [calendars, setCalendars] = useState<Calendar[]>([]);
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-
-  const load = useCallback(async () => {
-    if (seriesId === null || occurrenceStart === null) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await eventsApi.getOccurrenceDetail(seriesId, occurrenceStart);
-      setDetail(data);
-      setRescheduleStart(toLocalInputValue(data.occurrence.start));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [seriesId, occurrenceStart]);
+  const { data: calendars = [] } = useGetCalendarsQuery(splitOpen ? undefined : skipToken);
+  const { data: organizations = [] } = useGetMyOrganizationsQuery(
+    splitOpen ? undefined : skipToken,
+  );
 
   useEffect(() => {
-    if (open) {
-      load();
-      usersApi
-        .getUserList()
-        .then(setUserList)
-        .catch(() => setUserList([]));
-    }
-  }, [open, load]);
+    if (detail) setRescheduleStart(toLocalInputValue(detail.occurrence.start));
+  }, [detail]);
 
+  // Mutations invalidate the occurrence detail (and occurrence list) cache
+  // tags, so the dialog and the calendar refresh themselves.
   const run = async (action: () => Promise<unknown>) => {
-    setError(null);
+    setActionError(null);
     try {
       await action();
-      await load();
-      onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setActionError(getApiErrorMessage(err));
     }
   };
 
-  const openSplitDialog = async () => {
-    try {
-      const [calendarsData, organizationsData] = await Promise.all([
-        calendarsApi.getCalendars(),
-        organizationsApi.getMyOrganizations(),
-      ]);
-      setCalendars(calendarsData);
-      setOrganizations(organizationsData);
-    } catch {
-      setCalendars([]);
-      setOrganizations([]);
-    }
+  const openSplitDialog = () => {
     setSplitOpen(true);
   };
 
   const handleSplitSaved = () => {
-    // The occurrence now belongs to the new series, so close this dialog and
-    // let the caller reload the calendar.
+    // The occurrence now belongs to the new series, so close this dialog; the
+    // split mutation invalidated the occurrence list cache tags.
     setSplitOpen(false);
     onClose();
-    onChanged();
   };
 
   const weekdayNames: Record<number, string> = {
@@ -255,7 +248,9 @@ function EventOccurrenceDialog({
                       variant="subtle"
                       color="red"
                       aria-label={t('events.deleteJob')}
-                      onClick={() => run(() => eventsApi.deleteJob(series.id, job.id))}
+                      onClick={() =>
+                        run(() => deleteJob({ seriesId: series.id, jobId: job.id }).unwrap())
+                      }
                     >
                       <IconTrash size={14} />
                     </ActionIcon>
@@ -279,7 +274,11 @@ function EventOccurrenceDialog({
                             variant="transparent"
                             onClick={() =>
                               run(() =>
-                                eventsApi.unassignUserFromJob(series.id, job.id, assignment.id),
+                                unassignUserFromJob({
+                                  seriesId: series.id,
+                                  jobId: job.id,
+                                  assignmentId: assignment.id,
+                                }).unwrap(),
                               )
                             }
                           >
@@ -319,7 +318,11 @@ function EventOccurrenceDialog({
                       disabled={!assignUserIds[job.id]}
                       onClick={() =>
                         run(async () => {
-                          await eventsApi.assignUserToJob(series.id, job.id, assignUserIds[job.id]);
+                          await assignUserToJob({
+                            seriesId: series.id,
+                            jobId: job.id,
+                            userId: assignUserIds[job.id],
+                          }).unwrap();
                           setAssignUserIds(previous => ({ ...previous, [job.id]: '' }));
                         })
                       }
@@ -349,11 +352,14 @@ function EventOccurrenceDialog({
                   disabled={!jobTitle.trim()}
                   onClick={() =>
                     run(async () => {
-                      await eventsApi.createJob(series.id, {
-                        title: jobTitle.trim(),
-                        description: jobDescription.trim(),
-                        occurrenceStart: occurrence.occurrenceStart,
-                      });
+                      await createJob({
+                        seriesId: series.id,
+                        data: {
+                          title: jobTitle.trim(),
+                          description: jobDescription.trim(),
+                          occurrenceStart: occurrence.occurrenceStart,
+                        },
+                      }).unwrap();
                       setJobTitle('');
                       setJobDescription('');
                     })
@@ -382,11 +388,11 @@ function EventOccurrenceDialog({
                       disabled={!editingCommentBody.trim()}
                       onClick={() =>
                         run(async () => {
-                          await eventsApi.updateComment(
-                            series.id,
-                            comment.id,
-                            editingCommentBody.trim(),
-                          );
+                          await updateComment({
+                            seriesId: series.id,
+                            commentId: comment.id,
+                            body: editingCommentBody.trim(),
+                          }).unwrap();
                           setEditingCommentId(null);
                         })
                       }
@@ -421,7 +427,11 @@ function EventOccurrenceDialog({
                       variant="subtle"
                       color="red"
                       aria-label={t('events.deleteComment')}
-                      onClick={() => run(() => eventsApi.deleteComment(series.id, comment.id))}
+                      onClick={() =>
+                        run(() =>
+                          deleteComment({ seriesId: series.id, commentId: comment.id }).unwrap(),
+                        )
+                      }
                     >
                       <IconTrash size={14} />
                     </ActionIcon>
@@ -443,10 +453,13 @@ function EventOccurrenceDialog({
                   disabled={!commentBody.trim()}
                   onClick={() =>
                     run(async () => {
-                      await eventsApi.createComment(series.id, {
-                        body: commentBody.trim(),
-                        occurrenceStart: occurrence.occurrenceStart,
-                      });
+                      await createComment({
+                        seriesId: series.id,
+                        data: {
+                          body: commentBody.trim(),
+                          occurrenceStart: occurrence.occurrenceStart,
+                        },
+                      }).unwrap();
                       setCommentBody('');
                     })
                   }
@@ -469,7 +482,12 @@ function EventOccurrenceDialog({
                       color="yellow"
                       variant="outline"
                       onClick={() =>
-                        run(() => eventsApi.cancelOccurrence(series.id, occurrence.occurrenceStart))
+                        run(() =>
+                          cancelOccurrence({
+                            seriesId: series.id,
+                            occurrenceStart: occurrence.occurrenceStart,
+                          }).unwrap(),
+                        )
                       }
                     >
                       {t('events.cancelOccurrence')}
@@ -480,7 +498,12 @@ function EventOccurrenceDialog({
                       color="green"
                       variant="outline"
                       onClick={() =>
-                        run(() => eventsApi.deleteException(series.id, occurrence.occurrenceStart))
+                        run(() =>
+                          deleteException({
+                            seriesId: series.id,
+                            occurrenceStart: occurrence.occurrenceStart,
+                          }).unwrap(),
+                        )
                       }
                     >
                       {t('events.restoreOccurrence')}
@@ -498,9 +521,11 @@ function EventOccurrenceDialog({
                     disabled={!rescheduleStart}
                     onClick={() =>
                       run(() =>
-                        eventsApi.rescheduleOccurrence(series.id, occurrence.occurrenceStart, {
-                          start: new Date(rescheduleStart).toISOString(),
-                        }),
+                        rescheduleOccurrence({
+                          seriesId: series.id,
+                          occurrenceStart: occurrence.occurrenceStart,
+                          data: { start: new Date(rescheduleStart).toISOString() },
+                        }).unwrap(),
                       )
                     }
                   >

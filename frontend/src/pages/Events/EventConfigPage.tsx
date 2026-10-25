@@ -14,73 +14,66 @@ import {
   Text,
   Title,
 } from '@mantine/core';
-import { useCallback, useEffect, useState } from 'react';
+import { skipToken } from '@reduxjs/toolkit/query/react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
-import { eventManagementApi, roomsApi, sitesApi, teamsApi } from '../../api/index.js';
+import {
+  getApiErrorMessage,
+  useGetAllRoomsQuery,
+  useGetAllSitesQuery,
+  useGetCurrentUserQuery,
+  useGetEventSeriesManagementQuery,
+  useGetTeamsQuery,
+  useUpdateEventSeriesConfigMutation,
+} from '../../api/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
-import type { EventSeriesManagement, Room, Site, Team } from '../../types/index.js';
+import { selectActiveOrganizationId } from '../../store/organization-slice.js';
 
 function EventConfigPage() {
   const { t } = useTranslation();
   const { eventId } = useParams<{ eventId: string }>();
   const navigate = useNavigate();
-  const activeOrganizationId = useAppSelector(state => state.organization.activeOrganizationId);
-  const currentUser = useAppSelector(state => state.user.currentUser);
+  const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
+  const { data: currentUser } = useGetCurrentUserQuery();
   const canWrite =
     currentUser?.permissions?.includes('admin') === true ||
     currentUser?.permissions?.includes('events:write') === true;
 
-  const [series, setSeries] = useState<EventSeriesManagement | null>(null);
-  const [sites, setSites] = useState<Site[]>([]);
-  const [rooms, setRooms] = useState<Room[]>([]);
-  const [teams, setTeams] = useState<Team[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const seriesId = Number.parseInt(eventId ?? '', 10);
+  const validId = !Number.isNaN(seriesId);
+
+  const {
+    data: series,
+    isLoading: loading,
+    error: seriesError,
+  } = useGetEventSeriesManagementQuery(validId ? seriesId : skipToken);
+  const { data: sites = [] } = useGetAllSitesQuery(activeOrganizationId ?? skipToken);
+  const { data: rooms = [] } = useGetAllRoomsQuery(activeOrganizationId ?? skipToken);
+  const { data: teamsData } = useGetTeamsQuery(
+    activeOrganizationId
+      ? { organizationId: activeOrganizationId, query: { limit: 200 } }
+      : skipToken,
+  );
+  const teams = teamsData?.items ?? [];
+  const [updateConfig, { isLoading: saving }] = useUpdateEventSeriesConfigMutation();
+
+  const [actionError, setActionError] = useState<string | null>(null);
+  const error = actionError ?? (seriesError ? getApiErrorMessage(seriesError) : null);
 
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [reserveWholeSite, setReserveWholeSite] = useState(false);
   const [selectedTeamIds, setSelectedTeamIds] = useState<string[]>([]);
 
-  const seriesId = Number.parseInt(eventId ?? '', 10);
-
-  const load = useCallback(async () => {
-    if (Number.isNaN(seriesId)) {
-      setError('Invalid event ID');
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const [seriesData, sitesData, roomsData, teamsData] = await Promise.all([
-        eventManagementApi.getEventSeries(seriesId),
-        activeOrganizationId ? sitesApi.listAllSites(activeOrganizationId) : Promise.resolve([]),
-        activeOrganizationId ? roomsApi.listAllRooms(activeOrganizationId) : Promise.resolve([]),
-        activeOrganizationId
-          ? teamsApi.listTeams(activeOrganizationId, { limit: 200 })
-          : Promise.resolve({ items: [] }),
-      ]);
-      setSeries(seriesData);
-      setSites(sitesData);
-      setRooms(roomsData);
-      setTeams(teamsData.items);
-      setSelectedSiteId(seriesData.siteId);
-      setSelectedRoomId(seriesData.roomId);
-      setReserveWholeSite(seriesData.reserveWholeSite);
-      setSelectedTeamIds(seriesData.teams.map(team => team.id));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [seriesId, activeOrganizationId]);
-
   useEffect(() => {
-    load();
-  }, [load]);
+    if (series) {
+      setSelectedSiteId(series.siteId);
+      setSelectedRoomId(series.roomId);
+      setReserveWholeSite(series.reserveWholeSite);
+      setSelectedTeamIds(series.teams.map(team => team.id));
+    }
+  }, [series]);
 
   // When the site changes, filter rooms to that site and clear the room if it
   // does not belong to the selected site.
@@ -97,22 +90,29 @@ function EventConfigPage() {
 
   const handleSave = async () => {
     if (!series) return;
-    setSaving(true);
-    setError(null);
+    setActionError(null);
     try {
-      await eventManagementApi.updateConfig(series.id, {
-        siteId: selectedSiteId,
-        roomId: selectedRoomId,
-        reserveWholeSite,
-        teamIds: selectedTeamIds,
-      });
-      await load();
+      await updateConfig({
+        seriesId: series.id,
+        data: {
+          siteId: selectedSiteId,
+          roomId: selectedRoomId,
+          reserveWholeSite,
+          teamIds: selectedTeamIds,
+        },
+      }).unwrap();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
+      setActionError(getApiErrorMessage(err));
     }
   };
+
+  if (!validId) {
+    return (
+      <Box p="md">
+        <Alert color="red">Invalid event ID</Alert>
+      </Box>
+    );
+  }
 
   if (loading) {
     return (

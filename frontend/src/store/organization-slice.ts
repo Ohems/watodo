@@ -1,8 +1,7 @@
-import { createAsyncThunk, createSlice, type PayloadAction } from '@reduxjs/toolkit';
-import { organizationsApi } from '../api/index.js';
-import i18n from '../i18n/index.js';
-import type { Organization, OrganizationUpdate } from '../types/index.js';
-import { deleteCurrentUser, logout } from './user-slice.js';
+import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
+import { api } from '../api/index.js';
+import type { RootState } from './index.js';
+import { deleteCurrentUser, logout } from './session.js';
 
 const ACTIVE_ORGANIZATION_KEY = 'watodo_active_organization';
 
@@ -28,52 +27,16 @@ function persistActiveOrganizationId(id: string | null): void {
 }
 
 interface OrganizationState {
-  organizations: Organization[];
   activeOrganizationId: string | null;
-  loaded: boolean;
-  loading: boolean;
-  error: string | null;
 }
 
 const initialState: OrganizationState = {
-  organizations: [],
   activeOrganizationId: loadActiveOrganizationId(),
-  loaded: false,
-  loading: false,
-  error: null,
 };
 
-export const fetchMyOrganizations = createAsyncThunk(
-  'organization/fetchMyOrganizations',
-  async () => {
-    return organizationsApi.getMyOrganizations();
-  },
-);
-
-export const updateOrganization = createAsyncThunk(
-  'organization/updateOrganization',
-  async ({ organizationId, data }: { organizationId: string; data: OrganizationUpdate }) => {
-    return organizationsApi.updateOrganization(organizationId, data);
-  },
-);
-
-/**
- * Keeps exactly one active organization: the persisted selection when it is
- * still a member organization, otherwise the first one.
- */
-function selectActiveOrganization(state: OrganizationState): void {
-  if (state.organizations.length === 0) {
-    if (state.activeOrganizationId !== null) {
-      state.activeOrganizationId = null;
-      persistActiveOrganizationId(null);
-    }
-    return;
-  }
-  const isMember = state.organizations.some(org => org.id === state.activeOrganizationId);
-  if (!isMember) {
-    state.activeOrganizationId = state.organizations[0].id;
-    persistActiveOrganizationId(state.activeOrganizationId);
-  }
+function clearActiveOrganization(state: OrganizationState): void {
+  state.activeOrganizationId = null;
+  persistActiveOrganizationId(null);
 }
 
 const organizationSlice = createSlice({
@@ -87,52 +50,22 @@ const organizationSlice = createSlice({
   },
   extraReducers: builder => {
     builder
-      .addCase(fetchMyOrganizations.pending, state => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(fetchMyOrganizations.fulfilled, (state, action) => {
-        state.loading = false;
-        state.loaded = true;
-        state.organizations = action.payload;
-        selectActiveOrganization(state);
-      })
-      .addCase(fetchMyOrganizations.rejected, (state, action) => {
-        state.loading = false;
-        state.loaded = true;
-        state.error = action.error.message ?? i18n.t('errors.failedToFetchOrganizations');
-      })
-      .addCase(updateOrganization.pending, state => {
-        state.error = null;
-      })
-      .addCase(updateOrganization.fulfilled, (state, action) => {
-        state.error = null;
-        const index = state.organizations.findIndex(org => org.id === action.payload.id);
-        if (index !== -1) {
-          state.organizations[index] = action.payload;
-        }
-      })
-      .addCase(updateOrganization.rejected, (state, action) => {
-        state.error = action.error.message ?? i18n.t('errors.failedToUpdateOrganization');
-      })
-      .addCase(logout.fulfilled, state => {
-        state.organizations = [];
-        state.activeOrganizationId = null;
-        state.loaded = false;
-        state.loading = false;
-        state.error = null;
-        persistActiveOrganizationId(null);
-      })
-      .addCase(deleteCurrentUser.fulfilled, state => {
-        state.organizations = [];
-        state.activeOrganizationId = null;
-        state.loaded = false;
-        state.loading = false;
-        state.error = null;
-        persistActiveOrganizationId(null);
-      });
+      .addCase(logout.fulfilled, clearActiveOrganization)
+      .addCase(deleteCurrentUser.fulfilled, clearActiveOrganization);
   },
 });
+
+/**
+ * The active organization: the persisted selection while the organization
+ * list is loading, then the selection when it is still a member organization,
+ * otherwise the first one (or null when the user has none).
+ */
+export function selectActiveOrganizationId(state: RootState): string | null {
+  const stored = state.organization.activeOrganizationId;
+  const { data } = api.endpoints.getMyOrganizations.select()(state);
+  if (data === undefined) return stored;
+  return data.some(organization => organization.id === stored) ? stored : (data[0]?.id ?? null);
+}
 
 export const { setActiveOrganization } = organizationSlice.actions;
 export default organizationSlice.reducer;

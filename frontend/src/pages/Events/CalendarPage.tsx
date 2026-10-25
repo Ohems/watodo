@@ -1,12 +1,19 @@
 import { Box, Group, Loader, Select, Title } from '@mantine/core';
-import { useCallback, useEffect, useState } from 'react';
+import { skipToken } from '@reduxjs/toolkit/query/react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { eventsApi, roomsApi, sitesApi, teamsApi } from '../../api/index.js';
+import {
+  useGetAllRoomsQuery,
+  useGetAllSitesQuery,
+  useGetOccurrencesQuery,
+  useGetTeamsQuery,
+} from '../../api/index.js';
 import Calendar, { type CalendarEvent } from '../../components/Calendar/Calendar.js';
 import EventOccurrenceDialog from '../../components/EventOccurrenceDialog/EventOccurrenceDialog.js';
 import { useAppSelector } from '../../hooks/redux.js';
-import type { EventOccurrence, Room, Site, Team } from '../../types/index.js';
+import { selectActiveOrganizationId } from '../../store/organization-slice.js';
+import type { EventOccurrence } from '../../types/index.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -19,7 +26,7 @@ function startOfMonth(date: Date): Date {
 function CalendarPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const activeOrganizationId = useAppSelector(state => state.organization.activeOrganizationId);
+  const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
 
   const now = new Date();
 
@@ -27,8 +34,6 @@ function CalendarPage() {
     start: startOfMonth(now),
     end: new Date(now.getFullYear(), now.getMonth() + 1, 1),
   }));
-  const [occurrences, setOccurrences] = useState<EventOccurrence[]>([]);
-  const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<{
     seriesId: number;
     occurrenceStart: string;
@@ -38,54 +43,29 @@ function CalendarPage() {
   const [siteId, setSiteId] = useState<string | null>(null);
   const [roomId, setRoomId] = useState<string | null>(null);
   const [teamId, setTeamId] = useState<string | null>(null);
-  const [sites, setSites] = useState<Site[]>([]);
-  const [rooms, setRooms] = useState<Room[]>([]);
-  const [teams, setTeams] = useState<Team[]>([]);
 
-  useEffect(() => {
-    if (!activeOrganizationId) return;
-    sitesApi
-      .listAllSites(activeOrganizationId)
-      .then(setSites)
-      .catch(() => setSites([]));
-    roomsApi
-      .listAllRooms(activeOrganizationId)
-      .then(setRooms)
-      .catch(() => setRooms([]));
-    teamsApi
-      .listTeams(activeOrganizationId, { limit: 200 })
-      .then(data => setTeams(data.items))
-      .catch(() => setTeams([]));
-  }, [activeOrganizationId]);
-
-  const loadOccurrences = useCallback(
-    async (start: Date, end: Date) => {
-      setLoading(true);
-      try {
-        const data = await eventsApi.getOccurrences(
-          new Date(start.getTime() - DAY_MS),
-          new Date(end.getTime() + 2 * DAY_MS),
-          undefined,
-          {
-            scope,
-            siteId: siteId ?? undefined,
-            roomId: roomId ?? undefined,
-            teamId: teamId ?? undefined,
-          },
-        );
-        setOccurrences(data);
-      } catch {
-        setOccurrences([]);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [scope, siteId, roomId, teamId],
+  const { data: sites = [] } = useGetAllSitesQuery(activeOrganizationId ?? skipToken);
+  const { data: rooms = [] } = useGetAllRoomsQuery(activeOrganizationId ?? skipToken);
+  const { data: teamsData } = useGetTeamsQuery(
+    activeOrganizationId
+      ? { organizationId: activeOrganizationId, query: { limit: 200 } }
+      : skipToken,
   );
+  const teams = teamsData?.items ?? [];
 
-  useEffect(() => {
-    loadOccurrences(range.start, range.end);
-  }, [range, loadOccurrences]);
+  // The API is called with a padded range so occurrences just outside the
+  // visible month are included.
+  const { data: occurrencesData, isFetching: loading } = useGetOccurrencesQuery({
+    start: new Date(range.start.getTime() - DAY_MS).toISOString(),
+    end: new Date(range.end.getTime() + 2 * DAY_MS).toISOString(),
+    filter: {
+      scope,
+      siteId: siteId ?? undefined,
+      roomId: roomId ?? undefined,
+      teamId: teamId ?? undefined,
+    },
+  });
+  const occurrences = occurrencesData ?? [];
 
   // The API returns cancelled occurrences with a flag; they are hidden here.
   const events: CalendarEvent[] = occurrences
@@ -165,7 +145,6 @@ function CalendarPage() {
         seriesId={selected?.seriesId ?? null}
         occurrenceStart={selected?.occurrenceStart ?? null}
         onClose={() => setSelected(null)}
-        onChanged={() => loadOccurrences(range.start, range.end)}
       />
     </Box>
   );

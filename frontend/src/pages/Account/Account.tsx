@@ -2,15 +2,18 @@ import { Alert, Box, Button, Group, Modal, Paper, Stack, Text, Title } from '@ma
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
-import { authApi } from '../../api/index.js';
-import EditField from '../../components/EditField/EditField.js';
-import { useAppDispatch, useAppSelector } from '../../hooks/redux.js';
 import {
-  deleteCurrentUser,
-  fetchAuthAccounts,
-  unlinkAuthAccount,
-  updateCurrentUser,
-} from '../../store/user-slice.js';
+  getApiErrorMessage,
+  useGetAuthAccountsQuery,
+  useGetAuthProvidersQuery,
+  useGetCurrentUserQuery,
+  useStartLinkMutation,
+  useUnlinkAuthAccountMutation,
+  useUpdateCurrentUserMutation,
+} from '../../api/index.js';
+import EditField from '../../components/EditField/EditField.js';
+import { useAppDispatch } from '../../hooks/redux.js';
+import { deleteCurrentUser } from '../../store/session.js';
 import type { AuthProviderInfo, FieldErrors, UserSelfUpdate } from '../../types/index.js';
 import { validateUserSelfUpdate } from '../../validation.js';
 
@@ -21,53 +24,28 @@ const FALLBACK_PROVIDERS: AuthProviderInfo[] = [
   { id: 'microsoft', name: 'Microsoft', configured: false },
 ];
 
-/**
- * Extracts a displayable message from a rejected thunk. `unwrap()` throws the
- * serialized error object ({ message, name, ... }), not an Error instance.
- */
-function errorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message) return error.message;
-  if (typeof error === 'object' && error !== null && 'message' in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === 'string' && message) return message;
-  }
-  return fallback;
-}
-
 function AccountPage() {
   const { t } = useTranslation();
   const dispatch = useAppDispatch();
-  const currentUser = useAppSelector(state => state.user.currentUser);
-  const authAccounts = useAppSelector(state => state.user.authAccounts);
+  const { data: currentUser } = useGetCurrentUserQuery();
+  const { data: authAccounts = [] } = useGetAuthAccountsQuery();
+  const { data: providersData, isError: providersError } = useGetAuthProvidersQuery();
+  const [updateCurrentUser, { isLoading: saving }] = useUpdateCurrentUserMutation();
+  const [startLink] = useStartLinkMutation();
+  const [unlinkAuthAccount] = useUnlinkAuthAccountMutation();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState<UserSelfUpdate>({});
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
-  const [providers, setProviders] = useState<AuthProviderInfo[] | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [accountsError, setAccountsError] = useState<string | null>(null);
   const [linkError, setLinkError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    authApi
-      .getProviders()
-      .then(data => {
-        if (!cancelled) setProviders(data.providers);
-      })
-      .catch(() => {
-        if (!cancelled) setProviders(FALLBACK_PROVIDERS);
-      });
-    dispatch(fetchAuthAccounts());
-    return () => {
-      cancelled = true;
-    };
-  }, [dispatch]);
+  const providers = providersData?.providers ?? (providersError ? FALLBACK_PROVIDERS : null);
 
   // The backend redirects back here with ?linkError=... when connecting a
   // login method fails.
@@ -129,18 +107,15 @@ function AccountPage() {
       setFieldErrors(validationErrors);
       return;
     }
-    setSaving(true);
     try {
-      await dispatch(updateCurrentUser(data)).unwrap();
+      await updateCurrentUser(data).unwrap();
       setEditing(false);
       setEditData({});
       setFieldErrors({});
     } catch (error) {
       // The frontend validation catches invalid fields before the request is
       // sent; a rejection here is unexpected and the backend message is shown.
-      setProfileError(errorMessage(error, t('account.saveFailed')));
-    } finally {
-      setSaving(false);
+      setProfileError(getApiErrorMessage(error) || t('account.saveFailed'));
     }
   };
 
@@ -148,10 +123,13 @@ function AccountPage() {
     setLinkError(null);
     setAccountsError(null);
     try {
-      const { authorizationUrl } = await authApi.startLink(providerId, '/account');
+      const { authorizationUrl } = await startLink({
+        provider: providerId,
+        returnUrl: '/account',
+      }).unwrap();
       window.location.href = authorizationUrl;
     } catch (error) {
-      setAccountsError(errorMessage(error, t('account.connectFailed')));
+      setAccountsError(getApiErrorMessage(error) || t('account.connectFailed'));
     }
   };
 
@@ -159,9 +137,9 @@ function AccountPage() {
     setLinkError(null);
     setAccountsError(null);
     try {
-      await dispatch(unlinkAuthAccount(providerId)).unwrap();
+      await unlinkAuthAccount(providerId).unwrap();
     } catch (error) {
-      setAccountsError(errorMessage(error, t('account.disconnectFailed')));
+      setAccountsError(getApiErrorMessage(error) || t('account.disconnectFailed'));
     }
   };
 
@@ -172,7 +150,7 @@ function AccountPage() {
       await dispatch(deleteCurrentUser()).unwrap();
       // The app switches to the login screen once the account is gone.
     } catch (error) {
-      setDeleteError(errorMessage(error, t('account.deleteFailed')));
+      setDeleteError(getApiErrorMessage(error) || t('account.deleteFailed'));
       setDeleting(false);
       setDeleteDialogOpen(false);
     }
