@@ -4,10 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App.js';
 import './i18n/index.js';
 
-import '@fontsource/roboto/300.css';
-import '@fontsource/roboto/400.css';
-import '@fontsource/roboto/500.css';
-import '@fontsource/roboto/700.css';
+import '@mantine/core/styles.css';
 import './index.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(

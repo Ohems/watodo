@@ -7,6 +7,9 @@ dist/
 # Environment
 .env
 
+# The test environment is tracked on purpose (contains only placeholder values)
+!.env.test
+
 # Logs
 *.log
 

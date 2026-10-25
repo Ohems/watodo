@@ -3,12 +3,7 @@
   "compilerOptions": {
     "noEmit": true,
     "rootDir": ".",
-    "types": [
-      "@emotion/react/types/css-prop",
-      "vitest/globals",
-      "@testing-library/jest-dom",
-      "node"
-    ]
+    "types": ["vitest/globals", "@testing-library/jest-dom", "node"]
   },
   "include": ["src", "e2e", "vite.config.ts", "vitest.config.ts", "playwright.config.ts"],
   "exclude": ["node_modules", "dist", "build"]

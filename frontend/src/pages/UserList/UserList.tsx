@@ -1,7 +1,5 @@
-import PersonAddIcon from '@mui/icons-material/PersonAdd';
-import Box from '@mui/material/Box';
-import CircularProgress from '@mui/material/CircularProgress';
-import Typography from '@mui/material/Typography';
+import { Box, Center, Flex, Loader, Text, Title } from '@mantine/core';
+import { IconUserPlus } from '@tabler/icons-react';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -21,39 +19,41 @@ function UserList() {
 
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
-        <CircularProgress />
-      </Box>
+      <Center p="xl">
+        <Loader />
+      </Center>
     );
   }
 
   if (error) {
     return (
-      <Box sx={{ p: 4 }}>
-        <Typography color="error">{error}</Typography>
+      <Box p="xl">
+        <Text c="red">{error}</Text>
       </Box>
     );
   }
 
   return (
-    <Box sx={{ p: 2 }}>
-      <Typography variant="h4" gutterBottom>
+    <Box p="md">
+      <Title order={3} mb="md">
         {t('users.title')}
-      </Typography>
-      <Box sx={{ display: 'flex', flexWrap: 'wrap' }}>
+      </Title>
+      <Flex wrap="wrap">
         <UserCard onClick={() => navigate('/users/new')}>
-          <PersonAddIcon sx={{ fontSize: 36, mb: 1 }} />
-          <Typography variant="body2">{t('users.addNew')}</Typography>
+          <IconUserPlus size={36} style={{ marginBottom: 4 }} />
+          <Text size="sm">{t('users.addNew')}</Text>
         </UserCard>
         {users.map(user => (
           <UserCard key={user.id} onClick={() => navigate(`/users/${user.id}`)}>
-            <Typography variant="body1">{user.name}</Typography>
-            <Typography variant="caption" color="text.secondary">
+            <Text size="sm" fw={500}>
+              {user.name}
+            </Text>
+            <Text size="xs" c="dimmed">
               {user.email}
-            </Typography>
+            </Text>
           </UserCard>
         ))}
-      </Box>
+      </Flex>
     </Box>
   );
 }

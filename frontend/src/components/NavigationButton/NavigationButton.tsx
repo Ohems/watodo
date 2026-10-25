@@ -1,4 +1,4 @@
-import Button from '@mui/material/Button';
+import { Button } from '@mantine/core';
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -19,10 +19,7 @@ function NavigationButton({ children, route, href, secondary, selected }: Naviga
   };
 
   return (
-    <Button
-      variant={selected ? 'contained' : secondary ? 'outlined' : 'text'}
-      onClick={handleClick}
-    >
+    <Button variant={selected ? 'filled' : secondary ? 'default' : 'subtle'} onClick={handleClick}>
       {children}
     </Button>
   );

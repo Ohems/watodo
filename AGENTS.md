@@ -9,24 +9,30 @@ Watodo is a community event and responsibility management tool. It is a
 monorepo with two npm workspaces:
 
 - `backend/` - Fastify v5 REST API server (TypeScript, Node.js)
-- `frontend/` - React 19 single-page application (Vite, TypeScript, MUI)
+- `frontend/` - React 19 single-page application (Vite, TypeScript, Mantine)
 
 ## Tech Stack
 
 - **Backend**: Fastify v5, TypeScript, Kysely + node-pg-migrate, PostgreSQL 17, Redis, pino, Zod v4
-- **Frontend**: React 19, Vite 7, TypeScript, Material-UI v7, React Router v7, Redux Toolkit
+- **Frontend**: React 19, Vite 7, TypeScript, Mantine v9, React Router v7, Redux Toolkit
 - **Tooling**: Biome (lint + format), Vitest (unit/component tests), Playwright (E2E tests)
 - **Runtime**: Node.js >= 24.21.0 (see `.nvmrc`)
 
 ## Getting Started
 
 ```sh
-docker compose up -d       # start PostgreSQL and Redis
+docker compose up -d       # start PostgreSQL, Redis and the test PostgreSQL (port 6432)
 npm install                # install all workspace dependencies
 cp .env.sample .env       # configure environment
 cp .env.sample backend/.env # backend commands run with cwd=backend/ and load .env from there
 npm run migrate -w backend # apply database migrations
 npm run dev                # start both dev servers
+```
+
+The backend test suite runs against the dedicated test database (`watodo-postgres-test`,
+host port 6432) configured by `backend/.env.test` (committed to Git, placeholder values
+only). It needs no setup beyond `docker compose up -d`: `backend/tests/global-setup.ts`
+applies migrations and seeds the permissions table before the test files run.
 ```
 
 The backend runs on port 3000, the frontend on port 5173 (with API proxy to :3000).
@@ -62,6 +68,7 @@ Run from `backend/`:
 | `npm run migrate:status` | Show migration status |
 | `npm run migrate:redo` | Revert and re-apply the latest migration |
 | `npm run seed:permissions` | Seed the permissions table from the registry (idempotent) |
+| `npm run seed:data` | Generate semi-realistic test data (only on a fresh database: exactly one user and one organization) |
 
 Run from `frontend/`:
 
@@ -105,6 +112,9 @@ Run from `frontend/`:
 - Do not use the em dash character in code comments or markdown files. Use the basic hyphen (`-`) instead.
 - Prefer `const` over `let`. Use template literals over string concatenation.
 - Handle errors explicitly. Do not silently swallow exceptions.
+- When a comment describes the following variable or function, use a JSDoc comment
+  (`/** ... */`) instead of a standard `//` comment. Only add tags like `@param` or
+  `@returns` when the function is not trivial.
 
 ## Backend Architecture
 
@@ -143,7 +153,7 @@ backend/src/
 ```
 
 `backend/scripts/` holds one-off CLI scripts run with tsx (e.g. `seed-permissions.ts`,
-run via `npm run seed:permissions`).
+run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:data`).
 
 ### Key patterns
 
@@ -175,13 +185,21 @@ run via `npm run seed:permissions`).
 - `GET /api/v1/auth/providers` - List supported auth providers (no auth)
 - `GET /api/v1/auth/:provider/login` - Start OAuth flow (discord, google, microsoft)
 - `GET /api/v1/auth/:provider/callback` - OAuth callback
+- `POST /api/v1/auth/:provider/link` - Start an OAuth flow that connects another login method to the current account (auth required)
 - `GET /api/v1/auth/logout` - Logout
 - `GET /api/v1/users` - List users with permissions (paginated, `user-management:read`)
 - `GET /api/v1/users/list` - Simple user list (id + name, no auth)
 - `GET /api/v1/users/@me` - Current user with permissions (auth required)
+- `PATCH /api/v1/users/@me` - Update own personal information (auth required)
+- `DELETE /api/v1/users/@me` - Delete own account (auth required)
+- `GET /api/v1/users/@me/auth-accounts` - List connected login methods (auth required)
+- `DELETE /api/v1/users/@me/auth-accounts/:provider` - Disconnect a login method (auth required)
 - `GET /api/v1/users/:userId` - Get user with permissions (`user-management:read`)
 - `PATCH /api/v1/users/:userId` - Update user (`user-management:write`)
 - `DELETE /api/v1/users/:userId` - Delete user (`user-management:write`)
+- `GET /api/v1/organizations` - List the current user's organizations (auth required)
+- `GET /api/v1/organizations/:organizationId` - Get organization details (members only)
+- `PATCH /api/v1/organizations/:organizationId` - Update organization details (`organization:write`)
 - `GET /api/v1/operations` - List operations with assignments (`operations:read`)
 - `GET /api/v1/operations/:id` - Get operation (`operations:read`)
 - `POST /api/v1/operations` - Create/update operation (`operations:write`)
@@ -223,6 +241,7 @@ frontend/src/
     ├── Home/             # Calendar view (default route)
     ├── UserList/         # User list (Contacts)
     ├── UserProfile/      # User profile detail
+    ├── Account/          # Account page: personal info, login methods, account deletion
     ├── ErrorPage/        # Error page (uses useRouteError)
     ├── Login/            # Login screen (shown when unauthenticated)
     └── NoOrganizationPage/ # Shown when user has no organization
@@ -239,7 +258,7 @@ frontend/src/
 - **API calls**: All API calls go through the client in `api/index.ts`. The client
   reads the auth token from localStorage and sends it as the `x-token` header.
 - **Routing**: React Router v7 with `createBrowserRouter`. Routes are defined in `App.tsx`.
-- **UI**: Material-UI v7 components. Use `sx` prop for styling.
+- **UI**: Mantine v9 components. Use the `style` prop or Mantine style props for styling.
 - **Components**: Each component lives in its own folder with an `index.ts` barrel export.
 
 ## Database
@@ -272,8 +291,13 @@ frontend/src/
 - Tests live in `backend/tests/`.
 - API tests use Fastify's `app.inject()` for HTTP testing without a running server.
 - Run: `npm run test -w backend`
-- Tests that need Redis or a database accept both success and infrastructure-error
-  status codes (e.g. 302 or 500 for login without Redis).
+- Integration tests run against the dedicated test database (`watodo-postgres-test`,
+  host port 6432). `backend/.env.test` (committed, placeholder values only) configures
+  the connection: `tests/setup.ts` loads it in every test worker and
+  `tests/global-setup.ts` applies migrations and seeds the permissions table once
+  before the test files run (via the node-pg-migrate programmatic API).
+- Tests that need Redis or a database skip themselves when the test database is not
+  reachable (e.g. 302 or 500 for login without Redis).
 
 ### Frontend Unit/Component (Vitest)
 
@@ -294,7 +318,8 @@ frontend/src/
 
 See `.env.sample` for all variables. Key ones:
 
-- `DATABASE_URL` - PostgreSQL connection string
+- `DATABASE_URL` - PostgreSQL connection string (`backend/.env.test` points it at the
+  test database on port 6432 for the backend test suite)
 - `REDIS_URL` - Redis connection string
 - `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` - Discord OAuth credentials
 - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` - Google OAuth credentials
@@ -306,10 +331,19 @@ See `.env.sample` for all variables. Key ones:
 ## Rules and Constraints
 
 - Always run `npm run check:fix` and `npm run test` before finishing work.
+- When you add a feature that persists data, update `backend/scripts/seed-data.ts` (run with
+  `npm run seed:data -w backend`) so the generated test data covers the new feature. The script
+  generates semi-realistic test data for both organizations, mock users, roles, teams, calendars,
+  event types, event series (previous/current/next month), exceptions, job slots, comments and
+  operations. It must keep refusing to run unless the database has exactly one user and one
+  organization (the state after the first login).
 - Never change the database schema directly. Always create a migration.
 - Never rename or renumber existing migration files.
 - Do not introduce new dependencies without good reason. The project uses specific
-  modern versions of all libraries.
+  modern versions of all libraries. Mantine extensions (official `@mantine/*`
+  packages) and community extensions are acceptable when they provide clear value.
+- When adding a new dependency, check that the version used is the latest one with
+  `npm view <package-name> version`.
 - Do not use `any` types. If a type is truly unknown, use `unknown` and narrow it.
 - Backend imports must use `.js` extensions (NodeNext module resolution).
 - The frontend uses `.js` extensions in imports too (for consistency with the backend).

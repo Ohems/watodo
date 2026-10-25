@@ -1,5 +1,4 @@
-import Card from '@mui/material/Card';
-import CardContent from '@mui/material/CardContent';
+import { Card, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
 
 interface UserCardProps {
@@ -13,19 +12,19 @@ function UserCard({ children, onClick, className }: UserCardProps) {
     <Card
       className={className}
       onClick={onClick}
-      sx={{
+      withBorder
+      shadow={onClick ? 'sm' : undefined}
+      style={{
         width: 200,
         height: 80,
         cursor: onClick ? 'pointer' : 'default',
-        m: 1,
+        margin: 8,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        transition: 'box-shadow 0.2s',
-        '&:hover': onClick ? { boxShadow: 4 } : {},
       }}
     >
-      <CardContent sx={{ textAlign: 'center' }}>{children}</CardContent>
+      <Text ta="center">{children}</Text>
     </Card>
   );
 }

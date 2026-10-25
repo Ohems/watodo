@@ -5,6 +5,8 @@ export type AuthProvider = 'discord' | 'google' | 'microsoft';
 export interface Users {
   id: Generated<string>;
   email: string;
+  /** Optional contact number in E.164 format (includes the country code). */
+  phone_number: Generated<string | null>;
   name: string;
   is_employed: Generated<boolean>;
   is_suspended: Generated<boolean>;
@@ -100,6 +102,39 @@ export interface Teams {
   organization_id: string;
 }
 
+export interface TeamMembers {
+  id: Generated<number>;
+  team_id: string;
+  user_id: string;
+  created_at: Generated<Date>;
+}
+
+export interface Locations {
+  id: Generated<string>;
+  name: string;
+  description: Generated<string>;
+  organization_id: string;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface Jobs {
+  id: Generated<number>;
+  name: string;
+  organization_id: string;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface Notifications {
+  id: Generated<number>;
+  user_id: string;
+  title: string;
+  body: Generated<string>;
+  is_read: Generated<boolean>;
+  created_at: Generated<Date>;
+}
+
 export interface Calendars {
   id: Generated<string>;
   name: string;
@@ -133,6 +168,7 @@ export interface EventSeriesTable {
   title: string;
   description: string | null;
   calendar_id: string;
+  location_id: string | null;
   start: Date;
   duration_minutes: number;
   is_all_day: Generated<boolean>;
@@ -141,6 +177,13 @@ export interface EventSeriesTable {
   is_visible: Generated<boolean>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
+}
+
+export interface EventSeriesTeams {
+  id: Generated<number>;
+  event_series_id: number;
+  team_id: string;
+  created_at: Generated<Date>;
 }
 
 export interface EventExceptions {
@@ -212,10 +255,15 @@ export interface Database {
   organizations: Organizations;
   user_organizations: UserOrganizations;
   teams: Teams;
+  team_members: TeamMembers;
+  locations: Locations;
+  jobs: Jobs;
+  notifications: Notifications;
   calendars: Calendars;
   event_types: EventTypes;
   event_type_roles: EventTypeRoles;
   event_series: EventSeriesTable;
+  event_series_teams: EventSeriesTeams;
   event_exceptions: EventExceptions;
   event_jobs: EventJobs;
   event_job_assignments: EventJobAssignments;
@@ -251,12 +299,34 @@ export type NewUserRole = Insertable<UserRoles>;
 export type Organization = Selectable<Organizations>;
 export type NewOrganization = Insertable<Organizations>;
 
+export type Team = Selectable<Teams>;
+export type NewTeam = Insertable<Teams>;
+export type TeamUpdate = Updateable<Teams>;
+
+export type TeamMember = Selectable<TeamMembers>;
+export type NewTeamMember = Insertable<TeamMembers>;
+
+export type Location = Selectable<Locations>;
+export type NewLocation = Insertable<Locations>;
+export type LocationUpdate = Updateable<Locations>;
+
+export type Job = Selectable<Jobs>;
+export type NewJob = Insertable<Jobs>;
+export type JobUpdate = Updateable<Jobs>;
+
+export type Notification = Selectable<Notifications>;
+export type NewNotification = Insertable<Notifications>;
+export type NotificationUpdate = Updateable<Notifications>;
+
 export type Calendar = Selectable<Calendars>;
 export type NewCalendar = Insertable<Calendars>;
 
 export type EventSeries = Selectable<EventSeriesTable>;
 export type NewEventSeries = Insertable<EventSeriesTable>;
 export type EventSeriesUpdate = Updateable<EventSeriesTable>;
+
+export type EventSeriesTeam = Selectable<EventSeriesTeams>;
+export type NewEventSeriesTeam = Insertable<EventSeriesTeams>;
 
 export type EventException = Selectable<EventExceptions>;
 export type NewEventException = Insertable<EventExceptions>;

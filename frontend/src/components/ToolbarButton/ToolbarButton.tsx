@@ -1,4 +1,4 @@
-import Button from '@mui/material/Button';
+import { Button } from '@mantine/core';
 import type { ReactNode } from 'react';
 
 interface ToolbarButtonProps {
@@ -10,11 +10,7 @@ interface ToolbarButtonProps {
 
 function ToolbarButton({ children, onClick, expand, selected }: ToolbarButtonProps) {
   return (
-    <Button
-      variant={selected ? 'contained' : 'text'}
-      onClick={onClick}
-      sx={{ minWidth: expand ? 'auto' : 40 }}
-    >
+    <Button variant={selected ? 'filled' : 'subtle'} onClick={onClick} px={expand ? 'md' : 'xs'}>
       {children}
     </Button>
   );

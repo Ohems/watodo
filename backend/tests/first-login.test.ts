@@ -153,6 +153,7 @@ describe('First login flow', () => {
       .executeTakeFirstOrThrow();
 
     // The issued token resolves to the user with admin permissions.
+    if (!result.token) throw new Error('Expected a login token');
     const auth = await getAuthContext(result.token);
     expect(auth.user.id).toBe(user.id);
     expect(auth.permissions).toContain('admin');
@@ -188,6 +189,7 @@ describe('First login flow', () => {
     expect(memberships).toHaveLength(0);
     expect(await getEffectivePermissions(user.id)).not.toContain('admin');
 
+    if (!result.token) throw new Error('Expected a login token');
     const auth = await getAuthContext(result.token);
     expect(auth.user.id).toBe(user.id);
   });
@@ -206,6 +208,7 @@ describe('First login flow', () => {
     expect(await countRows('users')).toBe(2);
     expect(await countRows('organizations')).toBe(1);
 
+    if (!result.token) throw new Error('Expected a login token');
     const auth = await getAuthContext(result.token);
     expect(auth.user.id).toBe(firstUserId);
     expect(auth.permissions).toContain('admin');
@@ -224,6 +227,7 @@ describe('First login flow', () => {
 
     expect(await countRows('users')).toBe(2);
 
+    if (!result.token) throw new Error('Expected a login token');
     const auth = await getAuthContext(result.token);
     expect(auth.user.id).toBe(firstUserId);
 

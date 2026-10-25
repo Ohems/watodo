@@ -1,16 +1,14 @@
-import Alert from '@mui/material/Alert';
-import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
-import Checkbox from '@mui/material/Checkbox';
-import Dialog from '@mui/material/Dialog';
-import DialogActions from '@mui/material/DialogActions';
-import DialogContent from '@mui/material/DialogContent';
-import DialogTitle from '@mui/material/DialogTitle';
-import FormControlLabel from '@mui/material/FormControlLabel';
-import MenuItem from '@mui/material/MenuItem';
-import TextField from '@mui/material/TextField';
-import ToggleButton from '@mui/material/ToggleButton';
-import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
+import {
+  Alert,
+  Button,
+  Checkbox,
+  Group,
+  Modal,
+  Select,
+  Stack,
+  Textarea,
+  TextInput,
+} from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { eventsApi } from '../../api/index.js';
@@ -196,169 +194,152 @@ function EventSeriesDialog({
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>
-        {splitOccurrenceStart
+    <Modal
+      opened={open}
+      onClose={onClose}
+      title={
+        splitOccurrenceStart
           ? t('events.editFollowingTitle')
           : series
             ? t('events.editSeries')
-            : t('events.newSeries')}
-      </DialogTitle>
-      <DialogContent dividers>
+            : t('events.newSeries')
+      }
+      size="md"
+    >
+      <Stack gap="sm" mt="sm">
         {splitOccurrenceStart && (
-          <Alert severity="warning" sx={{ mb: 2 }}>
+          <Alert color="yellow" variant="light">
             {t('events.splitWarning')}
           </Alert>
         )}
         {error && (
-          <Alert severity="error" sx={{ mb: 2 }}>
+          <Alert color="red" variant="light">
             {error}
           </Alert>
         )}
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
-          <TextField
-            label={t('events.seriesTitle')}
-            value={title}
-            onChange={event => setTitle(event.target.value)}
-            required
-            fullWidth
-          />
-          <TextField
-            label={t('common.description')}
-            value={description}
-            onChange={event => setDescription(event.target.value)}
-            multiline
-            minRows={2}
-            fullWidth
-          />
-          <TextField
-            select
-            label={t('events.calendar')}
-            value={calendarId}
-            onChange={event => setCalendarId(event.target.value)}
-            required
-            fullWidth
-          >
-            {calendars.map(calendar => (
-              <MenuItem key={calendar.id} value={calendar.id}>
-                {calendar.name}
-              </MenuItem>
-            ))}
-          </TextField>
-          <TextField
-            label={t('events.start')}
-            type="datetime-local"
-            value={start}
-            onChange={event => setStart(event.target.value)}
-            slotProps={{ inputLabel: { shrink: true } }}
-            required
-            fullWidth
-          />
-          <TextField
-            label={t('events.durationMinutes')}
-            type="number"
-            value={durationMinutes}
-            onChange={event => setDurationMinutes(event.target.value)}
-            fullWidth
-          />
-          <TextField
-            label={t('events.timezone')}
-            value={timezone}
-            onChange={event => setTimezone(event.target.value)}
-            placeholder={calendarOrganization?.defaultTimezone || 'UTC'}
-            helperText={t('events.timezoneHint')}
-            fullWidth
-          />
-          <FormControlLabel
-            control={
-              <Checkbox checked={isAllDay} onChange={event => setIsAllDay(event.target.checked)} />
-            }
-            label={t('events.allDay')}
-          />
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={isVisible}
-                onChange={event => setIsVisible(event.target.checked)}
+        <TextInput
+          label={t('events.seriesTitle')}
+          value={title}
+          onChange={event => setTitle(event.target.value)}
+          required
+        />
+        <Textarea
+          label={t('common.description')}
+          value={description}
+          onChange={event => setDescription(event.target.value)}
+          minRows={2}
+        />
+        <Select
+          label={t('events.calendar')}
+          data={calendars.map(c => ({ value: c.id, label: c.name }))}
+          value={calendarId || null}
+          onChange={value => setCalendarId(value ?? '')}
+          required
+        />
+        <TextInput
+          label={t('events.start')}
+          type="datetime-local"
+          value={start}
+          onChange={event => setStart(event.target.value)}
+          required
+        />
+        <TextInput
+          label={t('events.durationMinutes')}
+          type="number"
+          value={durationMinutes}
+          onChange={event => setDurationMinutes(event.target.value)}
+        />
+        <TextInput
+          label={t('events.timezone')}
+          value={timezone}
+          onChange={event => setTimezone(event.target.value)}
+          placeholder={calendarOrganization?.defaultTimezone || 'UTC'}
+          description={t('events.timezoneHint')}
+        />
+        <Checkbox
+          checked={isAllDay}
+          onChange={event => setIsAllDay(event.target.checked)}
+          label={t('events.allDay')}
+        />
+        <Checkbox
+          checked={isVisible}
+          onChange={event => setIsVisible(event.target.checked)}
+          label={t('events.visible')}
+        />
+        <Checkbox
+          checked={repeats}
+          onChange={event => setRepeats(event.target.checked)}
+          label={t('events.repeats')}
+        />
+        {repeats && (
+          <>
+            <Select
+              label={t('events.frequency')}
+              data={[
+                { value: 'DAILY', label: t('events.freqDaily') },
+                { value: 'WEEKLY', label: t('events.freqWeekly') },
+                { value: 'MONTHLY', label: t('events.freqMonthly') },
+                { value: 'YEARLY', label: t('events.freqYearly') },
+              ]}
+              value={freq}
+              onChange={value => setFreq((value ?? 'WEEKLY') as RecurrenceFreq)}
+            />
+            <TextInput
+              label={t('events.interval')}
+              type="number"
+              value={interval}
+              onChange={event => setInterval(event.target.value)}
+            />
+            {(freq === 'WEEKLY' || freq === 'DAILY') && (
+              <Group gap="xs" mb={4}>
+                {WEEKDAYS.map(day => (
+                  <Button
+                    key={day}
+                    size="xs"
+                    variant={weekdays.includes(day) ? 'filled' : 'default'}
+                    onClick={() =>
+                      setWeekdays(prev =>
+                        prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day],
+                      )
+                    }
+                  >
+                    {weekdayNames[day]}
+                  </Button>
+                ))}
+              </Group>
+            )}
+            {freq === 'MONTHLY' && (
+              <TextInput
+                label={t('events.monthDays')}
+                value={monthDays}
+                onChange={event => setMonthDays(event.target.value)}
+                description={t('events.monthDaysHint')}
               />
-            }
-            label={t('events.visible')}
-          />
-          <FormControlLabel
-            control={
-              <Checkbox checked={repeats} onChange={event => setRepeats(event.target.checked)} />
-            }
-            label={t('events.repeats')}
-          />
-          {repeats && (
-            <>
-              <TextField
-                select
-                label={t('events.frequency')}
-                value={freq}
-                onChange={event => setFreq(event.target.value as RecurrenceFreq)}
-                fullWidth
-              >
-                <MenuItem value="DAILY">{t('events.freqDaily')}</MenuItem>
-                <MenuItem value="WEEKLY">{t('events.freqWeekly')}</MenuItem>
-                <MenuItem value="MONTHLY">{t('events.freqMonthly')}</MenuItem>
-                <MenuItem value="YEARLY">{t('events.freqYearly')}</MenuItem>
-              </TextField>
-              <TextField
-                label={t('events.interval')}
-                type="number"
-                value={interval}
-                onChange={event => setInterval(event.target.value)}
-                fullWidth
-              />
-              {(freq === 'WEEKLY' || freq === 'DAILY') && (
-                <ToggleButtonGroup
-                  value={weekdays}
-                  onChange={(_event, value: number[]) => setWeekdays(value ?? [])}
-                  size="small"
-                >
-                  {WEEKDAYS.map(day => (
-                    <ToggleButton key={day} value={day}>
-                      {weekdayNames[day]}
-                    </ToggleButton>
-                  ))}
-                </ToggleButtonGroup>
-              )}
-              {freq === 'MONTHLY' && (
-                <TextField
-                  label={t('events.monthDays')}
-                  value={monthDays}
-                  onChange={event => setMonthDays(event.target.value)}
-                  helperText={t('events.monthDaysHint')}
-                  fullWidth
-                />
-              )}
-              <TextField
-                label={t('events.until')}
-                type="date"
-                value={until}
-                onChange={event => setUntil(event.target.value)}
-                slotProps={{ inputLabel: { shrink: true } }}
-                fullWidth
-              />
-              <TextField
-                label={t('events.count')}
-                type="number"
-                value={count}
-                onChange={event => setCount(event.target.value)}
-                fullWidth
-              />
-            </>
-          )}
-        </Box>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>{t('common.cancel')}</Button>
-        <Button variant="contained" disabled={saving} onClick={handleSave}>
+            )}
+            <TextInput
+              label={t('events.until')}
+              type="date"
+              value={until}
+              onChange={event => setUntil(event.target.value)}
+            />
+            <TextInput
+              label={t('events.count')}
+              type="number"
+              value={count}
+              onChange={event => setCount(event.target.value)}
+            />
+          </>
+        )}
+      </Stack>
+      <Group justify="flex-end" mt="md">
+        <Button variant="default" onClick={onClose}>
+          {t('common.cancel')}
+        </Button>
+        <Button variant="filled" disabled={saving} onClick={handleSave}>
           {t('common.save')}
         </Button>
-      </DialogActions>
-    </Dialog>
+      </Group>
+    </Modal>
   );
 }
 

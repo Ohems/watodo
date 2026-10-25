@@ -9,6 +9,7 @@ import type {
   EventJobUpdate,
   EventSeriesPush,
   EventSeriesUpdate,
+  OccurrenceFilter,
   RecurrenceInput,
   RescheduleOccurrenceInput,
 } from '../schemas/index.js';
@@ -242,8 +243,10 @@ function validateRange(rangeStart: Date, rangeEnd: Date): void {
   }
 }
 
-// Resolves the timezone for a series: the explicitly given one, or the
-// default timezone of the organization that owns the calendar.
+/**
+ * Resolves the timezone for a series: the explicitly given one, or the
+ * default timezone of the organization that owns the calendar.
+ */
 async function resolveTimezone(calendarId: string, timezone?: string): Promise<string> {
   const calendar = await db
     .selectFrom('calendars')
@@ -432,14 +435,20 @@ export async function deleteEventSeries(seriesId: number): Promise<void> {
   }
 }
 
-// Splits a series at the given occurrence ("edit this and all following"):
-// the edited occurrence begins a new, independent series with the given
-// parameters (fields not provided are inherited from the original series and
-// the start defaults to the split occurrence), the original series is
-// truncated so it ends just before the split occurrence, and all exceptions
-// from the split occurrence onwards are reset. Splitting at the very first
-// occurrence updates the series in place instead, so no empty leftover series
-// is created and series-wide job slots and comments survive.
+/**
+ * Splits a series at the given occurrence ("edit this and all following"):
+ * the edited occurrence begins a new, independent series with the given
+ * parameters (fields not provided are inherited from the original series and
+ * the start defaults to the split occurrence), the original series is
+ * truncated so it ends just before the split occurrence, and all exceptions
+ * from the split occurrence onwards are reset. Splitting at the very first
+ * occurrence updates the series in place instead, so no empty leftover series
+ * is created and series-wide job slots and comments survive.
+ * @param seriesId - The ID of the series to split.
+ * @param occurrenceStart - The occurrence at which to split.
+ * @param data - The updates for the new series.
+ * @returns The newly created series.
+ */
 export async function splitEventSeries(
   seriesId: number,
   occurrenceStart: Date,
@@ -575,25 +584,113 @@ export async function splitEventSeries(
 
 // --- Occurrences ---
 
+interface MyJobAssignments {
+  /** Series with a series-wide job slot assigned to the user. */
+  seriesWide: Set<number>;
+  /** `${seriesId}:${occurrenceStartISO}` keys of occurrence-scoped job slots. */
+  perOccurrence: Set<string>;
+}
+
+/**
+ * Collects the job slots of the given series that are assigned to the user,
+ * split into series-wide slots (applying to every occurrence) and
+ * occurrence-scoped slots (keyed by the original occurrence start).
+ */
+async function fetchMyJobAssignments(
+  seriesIds: number[],
+  userId: string,
+): Promise<MyJobAssignments> {
+  const assignments: MyJobAssignments = { seriesWide: new Set(), perOccurrence: new Set() };
+  if (seriesIds.length === 0) return assignments;
+  const rows = await db
+    .selectFrom('event_jobs')
+    .innerJoin('event_job_assignments', 'event_job_assignments.event_job_id', 'event_jobs.id')
+    .select(['event_jobs.event_series_id', 'event_jobs.occurrence_start'])
+    .where('event_job_assignments.user_id', '=', userId)
+    .where('event_jobs.event_series_id', 'in', seriesIds)
+    .execute();
+  for (const row of rows) {
+    if (row.occurrence_start === null) {
+      assignments.seriesWide.add(row.event_series_id);
+    } else {
+      assignments.perOccurrence.add(`${row.event_series_id}:${row.occurrence_start.toISOString()}`);
+    }
+  }
+  return assignments;
+}
+
+/**
+ * Lists the occurrences of all visible series within a time range, optionally
+ * narrowed down by calendar, location, team and scope. The `mine` scope keeps
+ * only occurrences the user is assigned to (via a series-wide or
+ * occurrence-scoped job slot); the `team` scope keeps only series linked to a
+ * team the user belongs to.
+ * @param rangeStart - Start of the range (inclusive).
+ * @param rangeEnd - End of the range (inclusive).
+ * @param calendarId - Optional calendar to restrict the series to.
+ * @param filter - Optional location, team and scope filters.
+ * @param userId - The current user, required for the `mine` and `team` scopes.
+ * @returns The occurrences in the range, sorted by start.
+ */
 export async function getOccurrences(
   rangeStart: Date,
   rangeEnd: Date,
   calendarId?: string,
+  filter?: OccurrenceFilter,
+  userId?: string,
 ): Promise<EventOccurrenceResponse[]> {
   logger.trace('eventService.getOccurrences');
   validateRange(rangeStart, rangeEnd);
+  if (filter?.scope && filter.scope !== 'all' && !userId) {
+    throw badRequest('A user is required for the selected scope!');
+  }
 
-  let query = db.selectFrom('event_series').selectAll().where('is_visible', '=', true);
+  let query = db
+    .selectFrom('event_series')
+    .selectAll('event_series')
+    .where('is_visible', '=', true);
   if (calendarId) {
     query = query.where('calendar_id', '=', calendarId);
   }
-  const series = await query.orderBy('start', 'asc').execute();
+  if (filter?.locationId) {
+    query = query.where('location_id', '=', filter.locationId);
+  }
+  if (filter?.teamId) {
+    query = query
+      .innerJoin('event_series_teams', 'event_series_teams.event_series_id', 'event_series.id')
+      .where('event_series_teams.team_id', '=', filter.teamId);
+  }
+  if (filter?.scope === 'team' && userId) {
+    query = query
+      .innerJoin(
+        'event_series_teams as scope_teams',
+        'scope_teams.event_series_id',
+        'event_series.id',
+      )
+      .innerJoin('team_members', 'team_members.team_id', 'scope_teams.team_id')
+      .where('team_members.user_id', '=', userId)
+      .groupBy('event_series.id');
+  }
+  const series = await query.orderBy('event_series.start', 'asc').execute();
   const exceptionsBySeries = await fetchExceptionRules(series.map(row => row.id));
+  const myAssignments =
+    filter?.scope === 'mine' && userId
+      ? await fetchMyJobAssignments(
+          series.map(row => row.id),
+          userId,
+        )
+      : null;
 
   const occurrences: EventOccurrenceResponse[] = [];
   for (const row of series) {
     const exceptions = exceptionsBySeries.get(row.id) ?? [];
     for (const occurrence of expandOccurrences(toRule(row), exceptions, rangeStart, rangeEnd)) {
+      if (myAssignments) {
+        const key = `${row.id}:${occurrence.occurrenceStart.toISOString()}`;
+        if (!myAssignments.seriesWide.has(row.id) && !myAssignments.perOccurrence.has(key)) {
+          continue;
+        }
+      }
       occurrences.push(serializeOccurrence(row, occurrence));
     }
   }
@@ -1038,4 +1135,263 @@ export async function deleteEventComment(
   }
 
   await db.deleteFrom('event_comments').where('id', '=', commentId).execute();
+}
+// --- Event series management (location, teams, paginated listing) ---
+
+export interface EventSeriesTeamResponse {
+  id: string;
+  name: string;
+}
+
+export interface EventSeriesManagementResponse extends EventSeriesResponse {
+  locationId: string | null;
+  locationName: string | null;
+  teams: EventSeriesTeamResponse[];
+}
+
+export interface PaginatedEventSeries {
+  items: EventSeriesManagementResponse[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+async function getLocationNames(locationIds: (string | null)[]): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  const ids = [...new Set(locationIds.filter((id): id is string => id !== null))];
+  if (ids.length === 0) return result;
+  const rows = await db
+    .selectFrom('locations')
+    .select(['id', 'name'])
+    .where('id', 'in', ids)
+    .execute();
+  for (const row of rows) {
+    result.set(row.id, row.name);
+  }
+  return result;
+}
+
+async function getSeriesTeamsMap(
+  seriesIds: number[],
+): Promise<Map<number, EventSeriesTeamResponse[]>> {
+  const result = new Map<number, EventSeriesTeamResponse[]>();
+  if (seriesIds.length === 0) return result;
+  const rows = await db
+    .selectFrom('event_series_teams')
+    .innerJoin('teams', 'teams.id', 'event_series_teams.team_id')
+    .select([
+      'event_series_teams.event_series_id',
+      'teams.id as team_id',
+      'teams.name as team_name',
+    ])
+    .where('event_series_teams.event_series_id', 'in', seriesIds)
+    .orderBy('teams.name', 'asc')
+    .execute();
+  for (const row of rows) {
+    const list = result.get(row.event_series_id) ?? [];
+    list.push({ id: row.team_id, name: row.team_name });
+    result.set(row.event_series_id, list);
+  }
+  return result;
+}
+
+function serializeSeriesManagement(
+  series: EventSeries,
+  locationName: string | null,
+  teams: EventSeriesTeamResponse[],
+): EventSeriesManagementResponse {
+  return {
+    ...serializeSeries(series),
+    locationId: series.location_id,
+    locationName,
+    teams,
+  };
+}
+
+/**
+ * Lists event series with pagination, search and filters for the management view.
+ * @param query - The filter and pagination parameters.
+ * @returns Paginated event series.
+ */
+export async function listEventSeriesPaginated(query: {
+  page?: number;
+  limit?: number;
+  search?: string;
+  startFrom?: string;
+  startTo?: string;
+  locationId?: string;
+  teamId?: string;
+  hasTeam?: boolean;
+}): Promise<PaginatedEventSeries> {
+  logger.trace('eventService.listEventSeriesPaginated');
+  const page = query.page ?? 0;
+  const limit = query.limit ?? 50;
+  const search = query.search?.trim();
+
+  let baseQuery = db.selectFrom('event_series').selectAll('event_series');
+  let countQuery = db.selectFrom('event_series').select(db.fn.countAll().as('count'));
+
+  if (search) {
+    baseQuery = baseQuery.where('event_series.title', 'ilike', `%${search}%`);
+    countQuery = countQuery.where('event_series.title', 'ilike', `%${search}%`);
+  }
+
+  if (query.startFrom) {
+    const from = new Date(query.startFrom);
+    baseQuery = baseQuery.where('event_series.start', '>=', from);
+    countQuery = countQuery.where('event_series.start', '>=', from);
+  }
+
+  if (query.startTo) {
+    const to = new Date(query.startTo);
+    baseQuery = baseQuery.where('event_series.start', '<=', to);
+    countQuery = countQuery.where('event_series.start', '<=', to);
+  }
+
+  if (query.locationId) {
+    baseQuery = baseQuery.where('event_series.location_id', '=', query.locationId);
+    countQuery = countQuery.where('event_series.location_id', '=', query.locationId);
+  }
+
+  if (query.teamId) {
+    baseQuery = baseQuery
+      .innerJoin('event_series_teams', 'event_series_teams.event_series_id', 'event_series.id')
+      .where('event_series_teams.team_id', '=', query.teamId)
+      .groupBy('event_series.id');
+    countQuery = countQuery
+      .innerJoin('event_series_teams', 'event_series_teams.event_series_id', 'event_series.id')
+      .where('event_series_teams.team_id', '=', query.teamId);
+  }
+
+  if (query.hasTeam !== undefined) {
+    if (query.hasTeam) {
+      baseQuery = baseQuery
+        .innerJoin('event_series_teams', 'event_series_teams.event_series_id', 'event_series.id')
+        .groupBy('event_series.id');
+      countQuery = countQuery.innerJoin(
+        'event_series_teams',
+        'event_series_teams.event_series_id',
+        'event_series.id',
+      );
+    } else {
+      baseQuery = baseQuery
+        .leftJoin('event_series_teams', 'event_series_teams.event_series_id', 'event_series.id')
+        .where('event_series_teams.id', 'is', null)
+        .groupBy('event_series.id');
+      countQuery = countQuery
+        .leftJoin('event_series_teams', 'event_series_teams.event_series_id', 'event_series.id')
+        .where('event_series_teams.id', 'is', null);
+    }
+  }
+
+  const [rows, countRow] = await Promise.all([
+    baseQuery
+      .orderBy('event_series.title', 'asc')
+      .limit(limit)
+      .offset(page * limit)
+      .execute(),
+    countQuery.executeTakeFirstOrThrow(),
+  ]);
+
+  const locationNames = await getLocationNames(rows.map(r => r.location_id));
+  const teamsMap = await getSeriesTeamsMap(rows.map(r => r.id));
+
+  const items = rows.map(row =>
+    serializeSeriesManagement(
+      row as EventSeries,
+      row.location_id ? (locationNames.get(row.location_id) ?? null) : null,
+      teamsMap.get(row.id) ?? [],
+    ),
+  );
+
+  return {
+    items,
+    total: Number(countRow.count),
+    page,
+    limit,
+  };
+}
+
+/**
+ * Gets a single event series with its location and teams for the management view.
+ * @param seriesId - The series ID.
+ * @returns The series with location and teams.
+ */
+export async function getEventSeriesManagement(
+  seriesId: number,
+): Promise<EventSeriesManagementResponse> {
+  logger.trace('eventService.getEventSeriesManagement');
+  const series = await getSeriesRowOrThrow(seriesId);
+  const locationName = series.location_id
+    ? ((await getLocationNames([series.location_id])).get(series.location_id) ?? null)
+    : null;
+  const teamsMap = await getSeriesTeamsMap([seriesId]);
+  return serializeSeriesManagement(series, locationName, teamsMap.get(seriesId) ?? []);
+}
+
+/**
+ * Updates the location and team assignments of an event series.
+ * @param seriesId - The series ID.
+ * @param data - The location and team IDs.
+ * @returns The updated series with location and teams.
+ */
+export async function updateEventSeriesConfig(
+  seriesId: number,
+  data: { locationId?: string | null; teamIds?: string[] },
+): Promise<EventSeriesManagementResponse> {
+  logger.trace('eventService.updateEventSeriesConfig');
+  await getSeriesRowOrThrow(seriesId);
+
+  if (data.locationId !== undefined && data.locationId !== null) {
+    const location = await db
+      .selectFrom('locations')
+      .select('id')
+      .where('id', '=', data.locationId)
+      .executeTakeFirst();
+    if (!location) {
+      throw notFound(`Location ${data.locationId} not found!`);
+    }
+  }
+
+  return db.transaction().execute(async tx => {
+    if (data.locationId !== undefined) {
+      await tx
+        .updateTable('event_series')
+        .set({ location_id: data.locationId, updated_at: new Date() })
+        .where('id', '=', seriesId)
+        .execute();
+    }
+
+    if (data.teamIds !== undefined) {
+      if (data.teamIds.length > 0) {
+        const teams = await tx
+          .selectFrom('teams')
+          .select('id')
+          .where('id', 'in', data.teamIds)
+          .execute();
+        if (teams.length !== data.teamIds.length) {
+          throw notFound('One or more teams not found!');
+        }
+      }
+      await tx.deleteFrom('event_series_teams').where('event_series_id', '=', seriesId).execute();
+      if (data.teamIds.length > 0) {
+        await tx
+          .insertInto('event_series_teams')
+          .values(data.teamIds.map(teamId => ({ event_series_id: seriesId, team_id: teamId })))
+          .execute();
+      }
+    }
+
+    const updated = await tx
+      .selectFrom('event_series')
+      .selectAll()
+      .where('id', '=', seriesId)
+      .executeTakeFirstOrThrow();
+
+    const locationName = updated.location_id
+      ? ((await getLocationNames([updated.location_id])).get(updated.location_id) ?? null)
+      : null;
+    const teamsMap = await getSeriesTeamsMap([seriesId]);
+    return serializeSeriesManagement(updated, locationName, teamsMap.get(seriesId) ?? []);
+  });
 }

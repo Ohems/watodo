@@ -6,6 +6,14 @@ export const updatedAtSchema = z.coerce.date();
 
 export const userStateSchema = z.enum(['active', 'inactive']);
 
+/**
+ * E.164 phone number: a plus sign followed by the country code and the
+ * national number (7-15 digits in total).
+ */
+export const phoneNumberSchema = z
+  .string()
+  .regex(/^\+[1-9]\d{6,14}$/, 'Phone number must include the country code (e.g. +358401234567)');
+
 export const userPushSchema = z.object({
   name: z.string().optional(),
   email: z.email().optional(),
@@ -17,6 +25,22 @@ export const userSchema = userPushSchema.extend({
   id: z.string(),
   createdAt: createdAtSchema,
   updatedAt: updatedAtSchema,
+});
+
+/**
+ * Fields a user may change on their own account. Unlike userPushSchema this
+ * deliberately has no `state` field: account state stays an administrative
+ * concern.
+ */
+export const userSelfUpdateSchema = z.object({
+  name: z.string().min(1).optional(),
+  email: z.email().optional(),
+  description: z.string().nullable().optional(),
+  phoneNumber: phoneNumberSchema.nullable().optional(),
+});
+
+export const linkRequestSchema = z.object({
+  returnUrl: z.string().min(1).optional(),
 });
 
 export const userQuerySchema = z.object({
@@ -67,6 +91,12 @@ export const roleAssignmentSchema = z.object({
   eventTypeId: z.number().int().optional(),
 });
 
+export const organizationUpdateSchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().optional(),
+  defaultTimezone: z.string().min(1).max(64).optional(),
+});
+
 export const operationSchema = z.object({
   id: z.number().int().optional(),
   name: z.string(),
@@ -95,12 +125,14 @@ export const calendarPushSchema = z.object({
   googleCalendarId: z.string().nullable().optional(),
 });
 
-// ISO 8601 weekday: 1 = Monday .. 7 = Sunday.
+/** ISO 8601 weekday: 1 = Monday .. 7 = Sunday. */
 export const isoWeekdaySchema = z.number().int().min(1).max(7);
 
-// Recurrence rule for an event series. The backend serializes this to a
-// canonical RRULE string with the rrule library; `until` is an instant and is
-// stored as the wall-clock time in the series' timezone.
+/**
+ * Recurrence rule for an event series. The backend serializes this to a
+ * canonical RRULE string with the rrule library; `until` is an instant and is
+ * stored as the wall-clock time in the series' timezone.
+ */
 const recurrenceBaseSchema = {
   interval: z.number().int().min(1).max(366).optional(),
   until: z.iso.datetime().optional(),
@@ -145,11 +177,23 @@ export const eventSeriesPushSchema = z.object({
 
 export const eventSeriesUpdateSchema = eventSeriesPushSchema.partial();
 
-export const occurrenceRangeQuerySchema = z.object({
-  start: z.iso.datetime(),
-  end: z.iso.datetime(),
-  calendarId: z.uuid().optional(),
+// --- Occurrence filter ---
+
+export const occurrenceFilterSchema = z.object({
+  scope: z.enum(['all', 'team', 'mine']).optional(),
+  locationId: z.uuid().optional(),
+  teamId: z.uuid().optional(),
 });
+
+export type OccurrenceFilter = z.infer<typeof occurrenceFilterSchema>;
+
+export const occurrenceRangeQuerySchema = z
+  .object({
+    start: z.iso.datetime(),
+    end: z.iso.datetime(),
+    calendarId: z.uuid().optional(),
+  })
+  .extend(occurrenceFilterSchema.shape);
 
 export const occurrenceStartSchema = z.iso.datetime();
 
@@ -188,11 +232,14 @@ export const eventJobsQuerySchema = z.object({
 });
 
 export type UserPush = z.infer<typeof userPushSchema>;
+export type UserSelfUpdate = z.infer<typeof userSelfUpdateSchema>;
+export type LinkRequest = z.infer<typeof linkRequestSchema>;
 export type UserQuery = z.infer<typeof userQuerySchema>;
 export type AuthProviderParam = z.infer<typeof providerSchema>;
 export type RolePush = z.infer<typeof rolePushSchema>;
 export type RoleUpdate = z.infer<typeof roleUpdateSchema>;
 export type RoleAssignmentInput = z.infer<typeof roleAssignmentSchema>;
+export type OrganizationUpdate = z.infer<typeof organizationUpdateSchema>;
 export type OperationInput = z.infer<typeof operationSchema>;
 export type OpAssignmentInput = z.infer<typeof opAssignmentSchema>;
 export type CalendarPush = z.infer<typeof calendarPushSchema>;
@@ -208,3 +255,90 @@ export type EventCommentPush = z.infer<typeof eventCommentPushSchema>;
 export type EventCommentUpdate = z.infer<typeof eventCommentUpdateSchema>;
 export type EventCommentsQuery = z.infer<typeof eventCommentsQuerySchema>;
 export type EventJobsQuery = z.infer<typeof eventJobsQuerySchema>;
+
+// --- Teams ---
+
+export const teamPushSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  organizationId: z.uuid(),
+});
+
+export const teamUpdateSchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().optional(),
+});
+
+export const teamMemberSchema = z.object({
+  userId: z.uuid(),
+});
+
+// --- Locations ---
+
+export const locationPushSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  organizationId: z.uuid(),
+});
+
+export const locationUpdateSchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().optional(),
+});
+
+// --- Jobs ---
+
+export const jobPushSchema = z.object({
+  name: z.string().min(1),
+  organizationId: z.uuid(),
+});
+
+export const jobUpdateSchema = z.object({
+  name: z.string().min(1).optional(),
+});
+
+// --- Notifications ---
+
+export const notificationUpdateSchema = z.object({
+  isRead: z.boolean().optional(),
+});
+
+// --- Paginated table query ---
+
+export const tableQuerySchema = z.object({
+  page: z.coerce.number().int().min(0).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  search: z.string().optional(),
+});
+
+// --- Event series management query ---
+
+export const eventSeriesListQuerySchema = z.object({
+  page: z.coerce.number().int().min(0).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  search: z.string().optional(),
+  startFrom: z.iso.datetime().optional(),
+  startTo: z.iso.datetime().optional(),
+  locationId: z.uuid().optional(),
+  teamId: z.uuid().optional(),
+  hasTeam: z.coerce.boolean().optional(),
+});
+
+// --- Event series location/team update ---
+
+export const eventSeriesConfigSchema = z.object({
+  locationId: z.uuid().nullable().optional(),
+  teamIds: z.array(z.uuid()).optional(),
+});
+
+export type TeamPush = z.infer<typeof teamPushSchema>;
+export type TeamUpdate = z.infer<typeof teamUpdateSchema>;
+export type TeamMemberInput = z.infer<typeof teamMemberSchema>;
+export type LocationPush = z.infer<typeof locationPushSchema>;
+export type LocationUpdate = z.infer<typeof locationUpdateSchema>;
+export type JobPush = z.infer<typeof jobPushSchema>;
+export type JobUpdate = z.infer<typeof jobUpdateSchema>;
+export type NotificationUpdate = z.infer<typeof notificationUpdateSchema>;
+export type TableQuery = z.infer<typeof tableQuerySchema>;
+export type EventSeriesListQuery = z.infer<typeof eventSeriesListQuerySchema>;
+export type EventSeriesConfig = z.infer<typeof eventSeriesConfigSchema>;

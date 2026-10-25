@@ -27,9 +27,13 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
   }
 }
 
-// Requires an authenticated user. When permissions are given, the user must
-// have at least one of them (the admin permission bypasses all checks).
-// With no permissions given, any authenticated user is allowed.
+/**
+ * Requires an authenticated user. When permissions are given, the user must
+ * have at least one of them (the admin permission bypasses all checks).
+ * With no permissions given, any authenticated user is allowed.
+ * @param requiredPermissions - The permissions the user must have at least one of.
+ * @returns A Fastify preHandler that enforces authentication and permissions.
+ */
 export function requirePermissions(...requiredPermissions: string[]) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     await authenticate(request, reply);

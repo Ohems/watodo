@@ -361,6 +361,193 @@ describe('Events API', () => {
     expect(response.statusCode).toBe(400);
   });
 
+  it('filters occurrences by location, team and scope', async () => {
+    if (!seedData) return;
+    const seed = seedData;
+    const suffix = randomUUID();
+    const calendarId = randomUUID();
+    await db
+      .insertInto('calendars')
+      .values({
+        id: calendarId,
+        name: `Filter Calendar ${suffix}`,
+        organization_id: seed.organizationId,
+      })
+      .execute();
+
+    const locationAId = randomUUID();
+    const locationBId = randomUUID();
+    await db
+      .insertInto('locations')
+      .values([
+        {
+          id: locationAId,
+          name: `Location A ${suffix}`,
+          description: '',
+          organization_id: seed.organizationId,
+        },
+        {
+          id: locationBId,
+          name: `Location B ${suffix}`,
+          description: '',
+          organization_id: seed.organizationId,
+        },
+      ])
+      .execute();
+
+    const teamAId = randomUUID();
+    const teamBId = randomUUID();
+    await db
+      .insertInto('teams')
+      .values([
+        {
+          id: teamAId,
+          name: `Team A ${suffix}`,
+          description: '',
+          organization_id: seed.organizationId,
+        },
+        {
+          id: teamBId,
+          name: `Team B ${suffix}`,
+          description: '',
+          organization_id: seed.organizationId,
+        },
+      ])
+      .execute();
+
+    // The reader user belongs to team A only.
+    await db
+      .insertInto('team_members')
+      .values({ team_id: teamAId, user_id: seed.readerUserId })
+      .execute();
+
+    const createSeries = async (title: string) => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/event-series',
+        headers: auth(seed.adminToken),
+        payload: {
+          title,
+          calendarId,
+          start: '2026-10-21T16:00:00.000Z', // Wednesday 16:00 UTC
+          durationMinutes: 60,
+          timezone: 'UTC',
+          recurrence: { freq: 'WEEKLY', byWeekdays: [3] },
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      return (response.json() as EventSeriesResponse).id;
+    };
+
+    // Series A: location A, team A. Series B: location B, team B. Series C:
+    // location A, no team.
+    const seriesAId = await createSeries(`Filter series A ${suffix}`);
+    const seriesBId = await createSeries(`Filter series B ${suffix}`);
+    const seriesCId = await createSeries(`Filter series C ${suffix}`);
+    const mySeriesIds = [seriesAId, seriesBId, seriesCId];
+
+    const configure = async (id: number, locationId: string, teamIds: string[]) => {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-series/${id}/config`,
+        headers: auth(seed.adminToken),
+        payload: { locationId, teamIds },
+      });
+      expect(response.statusCode).toBe(200);
+    };
+    await configure(seriesAId, locationAId, [teamAId]);
+    await configure(seriesBId, locationBId, [teamBId]);
+    await configure(seriesCId, locationAId, []);
+
+    // The reader is assigned to a series-wide job on series A (covering all
+    // its occurrences) and to an occurrence-scoped job on series C.
+    const jobA = await app.inject({
+      method: 'POST',
+      url: `/api/v1/event-series/${seriesAId}/jobs`,
+      headers: auth(seed.adminToken),
+      payload: { title: 'Series-wide job' },
+    });
+    expect(jobA.statusCode).toBe(200);
+    const assignedA = await app.inject({
+      method: 'POST',
+      url: `/api/v1/event-series/${seriesAId}/jobs/${(jobA.json() as { id: number }).id}/assignments`,
+      headers: auth(seed.adminToken),
+      payload: { userId: seed.readerUserId },
+    });
+    expect(assignedA.statusCode).toBe(200);
+
+    const jobC = await app.inject({
+      method: 'POST',
+      url: `/api/v1/event-series/${seriesCId}/jobs`,
+      headers: auth(seed.adminToken),
+      payload: { title: 'Scoped job', occurrenceStart: '2026-10-28T16:00:00.000Z' },
+    });
+    expect(jobC.statusCode).toBe(200);
+    const assignedC = await app.inject({
+      method: 'POST',
+      url: `/api/v1/event-series/${seriesCId}/jobs/${(jobC.json() as { id: number }).id}/assignments`,
+      headers: auth(seed.adminToken),
+      payload: { userId: seed.readerUserId },
+    });
+    expect(assignedC.statusCode).toBe(200);
+
+    const range = 'start=2026-10-21T00:00:00.000Z&end=2026-11-05T00:00:00.000Z';
+    const getOccurrences = async (token: string, query = '') => {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series/occurrences?${range}${query}`,
+        headers: auth(token),
+      });
+      expect(response.statusCode).toBe(200);
+      return (response.json() as OccurrenceResponse[]).filter(o =>
+        mySeriesIds.includes(o.seriesId),
+      );
+    };
+    const seriesIdsOf = (occurrences: OccurrenceResponse[]) =>
+      [...new Set(occurrences.map(o => o.seriesId))].sort((a, b) => a - b);
+
+    // Baseline: all three series show up (three Wednesdays each).
+    const all = await getOccurrences(seed.readerToken);
+    expect(seriesIdsOf(all)).toEqual(mySeriesIds);
+    expect(all).toHaveLength(9);
+
+    // Location filter.
+    const byLocation = await getOccurrences(seed.readerToken, `&locationId=${locationAId}`);
+    expect(seriesIdsOf(byLocation)).toEqual([seriesAId, seriesCId]);
+
+    // Team filter.
+    const byTeam = await getOccurrences(seed.readerToken, `&teamId=${teamAId}`);
+    expect(seriesIdsOf(byTeam)).toEqual([seriesAId]);
+
+    // Combined location + team filter.
+    const combined = await getOccurrences(
+      seed.readerToken,
+      `&locationId=${locationAId}&teamId=${teamAId}`,
+    );
+    expect(seriesIdsOf(combined)).toEqual([seriesAId]);
+
+    // Scope "my team's events": only series linked to a team of the reader.
+    const teamScope = await getOccurrences(seed.readerToken, '&scope=team');
+    expect(seriesIdsOf(teamScope)).toEqual([seriesAId]);
+
+    // Scope "my events": all occurrences of series A (series-wide job) and
+    // only the 2026-10-28 occurrence of series C (occurrence-scoped job).
+    const mine = await getOccurrences(seed.readerToken, '&scope=mine');
+    expect(seriesIdsOf(mine)).toEqual([seriesAId, seriesCId]);
+    const mineBySeries = new Map<number, string[]>();
+    for (const occurrence of mine) {
+      const starts = mineBySeries.get(occurrence.seriesId) ?? [];
+      starts.push(occurrence.occurrenceStart);
+      mineBySeries.set(occurrence.seriesId, starts);
+    }
+    expect(mineBySeries.get(seriesAId)).toHaveLength(3);
+    expect(mineBySeries.get(seriesCId)).toEqual(['2026-10-28T16:00:00.000Z']);
+
+    // The admin has no job assignments, so "my events" is empty for them.
+    const adminMine = await getOccurrences(seed.adminToken, '&scope=mine');
+    expect(adminMine).toHaveLength(0);
+  });
+
   it('cancels an occurrence', async () => {
     if (!seedData) return;
     const occurrenceStart = encodeURIComponent('2026-10-28T17:00:00.000Z');

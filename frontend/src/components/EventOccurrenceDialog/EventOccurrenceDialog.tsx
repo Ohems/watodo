@@ -1,20 +1,20 @@
-import AddIcon from '@mui/icons-material/Add';
-import DeleteIcon from '@mui/icons-material/Delete';
-import EditIcon from '@mui/icons-material/Edit';
-import Alert from '@mui/material/Alert';
-import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
-import Chip from '@mui/material/Chip';
-import CircularProgress from '@mui/material/CircularProgress';
-import Dialog from '@mui/material/Dialog';
-import DialogActions from '@mui/material/DialogActions';
-import DialogContent from '@mui/material/DialogContent';
-import DialogTitle from '@mui/material/DialogTitle';
-import Divider from '@mui/material/Divider';
-import IconButton from '@mui/material/IconButton';
-import MenuItem from '@mui/material/MenuItem';
-import TextField from '@mui/material/TextField';
-import Typography from '@mui/material/Typography';
+import {
+  ActionIcon,
+  Alert,
+  Badge,
+  Box,
+  Button,
+  Divider,
+  Group,
+  Loader,
+  Modal,
+  Select,
+  Stack,
+  Text,
+  TextInput,
+  Title,
+} from '@mantine/core';
+import { IconEdit, IconPlus, IconTrash } from '@tabler/icons-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { calendarsApi, eventsApi, organizationsApi, usersApi } from '../../api/index.js';
@@ -185,340 +185,336 @@ function EventOccurrenceDialog({
 
   return (
     <>
-      <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-        <DialogTitle>
-          {occurrence
+      <Modal
+        opened={open}
+        onClose={onClose}
+        title={
+          occurrence
             ? `${occurrence.title} - ${formatDateTime(occurrence.start)}`
-            : t('events.occurrence')}
-        </DialogTitle>
-        <DialogContent dividers>
-          {loading && !detail && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', p: 2 }}>
-              <CircularProgress />
-            </Box>
-          )}
-          {error && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {error}
-            </Alert>
-          )}
-          {detail && occurrence && series && (
-            <>
-              {occurrence.isCancelled && (
-                <Alert severity="warning" sx={{ mb: 2 }}>
-                  {t('events.occurrenceCancelled')}
-                </Alert>
-              )}
-              {occurrence.isRescheduled && (
-                <Alert severity="info" sx={{ mb: 2 }}>
-                  {t('events.occurrenceRescheduled', {
-                    original: formatDateTime(occurrence.occurrenceStart),
-                    start: formatDateTime(occurrence.start),
-                  })}
-                </Alert>
-              )}
-              {series.description && (
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                  {series.description}
-                </Typography>
-              )}
-              <Typography variant="body2">
-                {t('events.timeRange', {
+            : t('events.occurrence')
+        }
+        size="lg"
+      >
+        {loading && !detail && (
+          <Box style={{ display: 'flex', justifyContent: 'center', padding: 16 }}>
+            <Loader />
+          </Box>
+        )}
+        {error && (
+          <Alert color="red" variant="light" mb="sm">
+            {error}
+          </Alert>
+        )}
+        {detail && occurrence && series && (
+          <Stack gap="sm">
+            {occurrence.isCancelled && (
+              <Alert color="yellow" variant="light">
+                {t('events.occurrenceCancelled')}
+              </Alert>
+            )}
+            {occurrence.isRescheduled && (
+              <Alert color="blue" variant="light">
+                {t('events.occurrenceRescheduled', {
+                  original: formatDateTime(occurrence.occurrenceStart),
                   start: formatDateTime(occurrence.start),
-                  end: formatDateTime(occurrence.end),
                 })}
-              </Typography>
-              <Typography variant="body2">
-                {t('events.timezone')}: {series.timezone}
-              </Typography>
-              <Typography variant="body2" sx={{ mb: 2 }}>
-                {t('events.recurrence')}: {describeRecurrence(series.recurrence)}
-              </Typography>
+              </Alert>
+            )}
+            {series.description && (
+              <Text size="sm" c="dimmed">
+                {series.description}
+              </Text>
+            )}
+            <Text size="sm">
+              {t('events.timeRange', {
+                start: formatDateTime(occurrence.start),
+                end: formatDateTime(occurrence.end),
+              })}
+            </Text>
+            <Text size="sm">
+              {t('events.timezone')}: {series.timezone}
+            </Text>
+            <Text size="sm" mb="sm">
+              {t('events.recurrence')}: {describeRecurrence(series.recurrence)}
+            </Text>
 
-              <Divider sx={{ my: 2 }} />
-              <Typography variant="h6">{t('events.jobs')}</Typography>
-              {detail.jobs.map(job => (
-                <Box key={job.id} sx={{ mt: 1 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                    <Typography variant="body1">{job.title}</Typography>
-                    <Chip
-                      size="small"
-                      label={
-                        job.occurrenceStart
-                          ? t('events.occurrenceSpecific')
-                          : t('events.seriesWide')
-                      }
-                    />
-                    {canWrite && (
-                      <IconButton
-                        size="small"
-                        aria-label={t('events.deleteJob')}
-                        onClick={() => run(() => eventsApi.deleteJob(series.id, job.id))}
-                      >
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
-                    )}
-                  </Box>
-                  {job.description && (
-                    <Typography variant="body2" color="text.secondary">
-                      {job.description}
-                    </Typography>
-                  )}
-                  <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 0.5 }}>
-                    {job.assignments.map(assignment => (
-                      <Chip
-                        key={assignment.id}
-                        label={assignment.userName}
-                        size="small"
-                        onDelete={
-                          canWrite
-                            ? () =>
-                                run(() =>
-                                  eventsApi.unassignUserFromJob(series.id, job.id, assignment.id),
-                                )
-                            : undefined
-                        }
-                      />
-                    ))}
-                  </Box>
+            <Divider my="sm" />
+            <Title order={5}>{t('events.jobs')}</Title>
+            {detail.jobs.map(job => (
+              <Box key={job.id} mt="xs">
+                <Group gap="xs" wrap="wrap">
+                  <Text size="sm" fw={500}>
+                    {job.title}
+                  </Text>
+                  <Badge size="sm" variant="light">
+                    {job.occurrenceStart ? t('events.occurrenceSpecific') : t('events.seriesWide')}
+                  </Badge>
                   {canWrite && (
-                    <Box sx={{ display: 'flex', gap: 1, mt: 0.5, alignItems: 'center' }}>
-                      <TextField
-                        select
-                        size="small"
-                        label={t('events.assignUser')}
-                        value={assignUserIds[job.id] ?? ''}
-                        onChange={event =>
-                          setAssignUserIds(previous => ({
-                            ...previous,
-                            [job.id]: event.target.value,
-                          }))
-                        }
-                        sx={{ minWidth: 200 }}
-                      >
-                        {userList
-                          .filter(
-                            user =>
-                              !job.assignments.some(assignment => assignment.userId === user.id),
-                          )
-                          .map(user => (
-                            <MenuItem key={user.id} value={user.id}>
-                              {user.name}
-                            </MenuItem>
-                          ))}
-                      </TextField>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        startIcon={<AddIcon />}
-                        disabled={!assignUserIds[job.id]}
-                        onClick={() =>
-                          run(async () => {
-                            await eventsApi.assignUserToJob(
-                              series.id,
-                              job.id,
-                              assignUserIds[job.id],
-                            );
-                            setAssignUserIds(previous => ({ ...previous, [job.id]: '' }));
-                          })
-                        }
-                      >
-                        {t('events.assign')}
-                      </Button>
-                    </Box>
+                    <ActionIcon
+                      size="sm"
+                      variant="subtle"
+                      color="red"
+                      aria-label={t('events.deleteJob')}
+                      onClick={() => run(() => eventsApi.deleteJob(series.id, job.id))}
+                    >
+                      <IconTrash size={14} />
+                    </ActionIcon>
                   )}
-                </Box>
-              ))}
-              {canWrite && (
-                <Box sx={{ display: 'flex', gap: 1, mt: 2, flexWrap: 'wrap' }}>
-                  <TextField
-                    size="small"
-                    label={t('events.jobTitle')}
-                    value={jobTitle}
-                    onChange={event => setJobTitle(event.target.value)}
-                  />
-                  <TextField
-                    size="small"
-                    label={t('common.description')}
-                    value={jobDescription}
-                    onChange={event => setJobDescription(event.target.value)}
-                  />
-                  <Button
-                    variant="contained"
-                    disabled={!jobTitle.trim()}
-                    onClick={() =>
-                      run(async () => {
-                        await eventsApi.createJob(series.id, {
-                          title: jobTitle.trim(),
-                          description: jobDescription.trim(),
-                          occurrenceStart: occurrence.occurrenceStart,
-                        });
-                        setJobTitle('');
-                        setJobDescription('');
-                      })
-                    }
-                  >
-                    {t('events.addJob')}
-                  </Button>
-                </Box>
-              )}
-
-              <Divider sx={{ my: 2 }} />
-              <Typography variant="h6">{t('events.comments')}</Typography>
-              {detail.comments.map(comment => (
-                <Box key={comment.id} sx={{ mt: 1 }}>
-                  {editingCommentId === comment.id ? (
-                    <Box sx={{ display: 'flex', gap: 1 }}>
-                      <TextField
-                        fullWidth
-                        size="small"
-                        value={editingCommentBody}
-                        onChange={event => setEditingCommentBody(event.target.value)}
-                      />
-                      <Button
-                        size="small"
-                        variant="contained"
-                        disabled={!editingCommentBody.trim()}
-                        onClick={() =>
-                          run(async () => {
-                            await eventsApi.updateComment(
-                              series.id,
-                              comment.id,
-                              editingCommentBody.trim(),
-                            );
-                            setEditingCommentId(null);
-                          })
-                        }
-                      >
-                        {t('common.save')}
-                      </Button>
-                      <Button size="small" onClick={() => setEditingCommentId(null)}>
-                        {t('common.cancel')}
-                      </Button>
-                    </Box>
-                  ) : (
-                    <Typography variant="body2">
-                      <strong>{comment.userName}</strong> ({formatDateTime(comment.createdAt)}):{' '}
-                      {comment.body}
-                    </Typography>
-                  )}
-                  {canWrite && comment.userId === currentUser?.id && (
-                    <Box sx={{ display: 'flex', gap: 0.5 }}>
-                      <IconButton
-                        size="small"
-                        aria-label={t('common.edit')}
-                        onClick={() => {
-                          setEditingCommentId(comment.id);
-                          setEditingCommentBody(comment.body);
-                        }}
-                      >
-                        <EditIcon fontSize="small" />
-                      </IconButton>
-                      <IconButton
-                        size="small"
-                        aria-label={t('events.deleteComment')}
-                        onClick={() => run(() => eventsApi.deleteComment(series.id, comment.id))}
-                      >
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
-                    </Box>
-                  )}
-                </Box>
-              ))}
-              {canWrite && (
-                <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
-                  <TextField
-                    fullWidth
-                    size="small"
-                    label={t('events.addComment')}
-                    value={commentBody}
-                    onChange={event => setCommentBody(event.target.value)}
-                  />
-                  <Button
-                    variant="contained"
-                    disabled={!commentBody.trim()}
-                    onClick={() =>
-                      run(async () => {
-                        await eventsApi.createComment(series.id, {
-                          body: commentBody.trim(),
-                          occurrenceStart: occurrence.occurrenceStart,
-                        });
-                        setCommentBody('');
-                      })
-                    }
-                  >
-                    {t('events.addComment')}
-                  </Button>
-                </Box>
-              )}
-
-              {canWrite && (
-                <>
-                  <Divider sx={{ my: 2 }} />
-                  <Typography variant="h6">{t('events.occurrenceActions')}</Typography>
-                  <Box
-                    sx={{ display: 'flex', gap: 1, mt: 1, flexWrap: 'wrap', alignItems: 'center' }}
-                  >
-                    <Button variant="outlined" onClick={openSplitDialog}>
-                      {t('events.editFollowing')}
-                    </Button>
-                    {!occurrence.isCancelled && (
-                      <Button
-                        color="warning"
-                        variant="outlined"
-                        onClick={() =>
-                          run(() =>
-                            eventsApi.cancelOccurrence(series.id, occurrence.occurrenceStart),
-                          )
-                        }
-                      >
-                        {t('events.cancelOccurrence')}
-                      </Button>
-                    )}
-                    {occurrence.exceptionId !== null && (
-                      <Button
-                        color="success"
-                        variant="outlined"
-                        onClick={() =>
-                          run(() =>
-                            eventsApi.deleteException(series.id, occurrence.occurrenceStart),
-                          )
-                        }
-                      >
-                        {t('events.restoreOccurrence')}
-                      </Button>
-                    )}
-                    <TextField
-                      size="small"
-                      type="datetime-local"
-                      label={t('events.rescheduleTo')}
-                      value={rescheduleStart}
-                      onChange={event => setRescheduleStart(event.target.value)}
-                      slotProps={{ inputLabel: { shrink: true } }}
-                    />
-                    <Button
-                      variant="outlined"
-                      disabled={!rescheduleStart}
-                      onClick={() =>
-                        run(() =>
-                          eventsApi.rescheduleOccurrence(series.id, occurrence.occurrenceStart, {
-                            start: new Date(rescheduleStart).toISOString(),
-                          }),
-                        )
+                </Group>
+                {job.description && (
+                  <Text size="sm" c="dimmed">
+                    {job.description}
+                  </Text>
+                )}
+                <Group gap="xs" mt={4} wrap="wrap">
+                  {job.assignments.map(assignment => (
+                    <Badge
+                      key={assignment.id}
+                      size="sm"
+                      variant="outline"
+                      rightSection={
+                        canWrite ? (
+                          <ActionIcon
+                            size="xs"
+                            variant="transparent"
+                            onClick={() =>
+                              run(() =>
+                                eventsApi.unassignUserFromJob(series.id, job.id, assignment.id),
+                              )
+                            }
+                          >
+                            <IconTrash size={10} />
+                          </ActionIcon>
+                        ) : undefined
                       }
                     >
-                      {t('events.rescheduleOccurrence')}
+                      {assignment.userName}
+                    </Badge>
+                  ))}
+                </Group>
+                {canWrite && (
+                  <Group gap="xs" mt={4} wrap="nowrap">
+                    <Select
+                      size="sm"
+                      placeholder={t('events.assignUser')}
+                      data={userList
+                        .filter(
+                          user =>
+                            !job.assignments.some(assignment => assignment.userId === user.id),
+                        )
+                        .map(user => ({ value: user.id, label: user.name }))}
+                      value={assignUserIds[job.id] ?? null}
+                      onChange={value =>
+                        setAssignUserIds(previous => ({
+                          ...previous,
+                          [job.id]: value ?? '',
+                        }))
+                      }
+                      style={{ minWidth: 200 }}
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      leftSection={<IconPlus size={14} />}
+                      disabled={!assignUserIds[job.id]}
+                      onClick={() =>
+                        run(async () => {
+                          await eventsApi.assignUserToJob(series.id, job.id, assignUserIds[job.id]);
+                          setAssignUserIds(previous => ({ ...previous, [job.id]: '' }));
+                        })
+                      }
+                    >
+                      {t('events.assign')}
                     </Button>
-                  </Box>
-                </>
-              )}
-            </>
-          )}
-        </DialogContent>
-        <DialogActions>
+                  </Group>
+                )}
+              </Box>
+            ))}
+            {canWrite && (
+              <Group gap="xs" mt="sm" wrap="wrap">
+                <TextInput
+                  size="sm"
+                  placeholder={t('events.jobTitle')}
+                  value={jobTitle}
+                  onChange={event => setJobTitle(event.target.value)}
+                />
+                <TextInput
+                  size="sm"
+                  placeholder={t('common.description')}
+                  value={jobDescription}
+                  onChange={event => setJobDescription(event.target.value)}
+                />
+                <Button
+                  variant="filled"
+                  disabled={!jobTitle.trim()}
+                  onClick={() =>
+                    run(async () => {
+                      await eventsApi.createJob(series.id, {
+                        title: jobTitle.trim(),
+                        description: jobDescription.trim(),
+                        occurrenceStart: occurrence.occurrenceStart,
+                      });
+                      setJobTitle('');
+                      setJobDescription('');
+                    })
+                  }
+                >
+                  {t('events.addJob')}
+                </Button>
+              </Group>
+            )}
+
+            <Divider my="sm" />
+            <Title order={5}>{t('events.comments')}</Title>
+            {detail.comments.map(comment => (
+              <Box key={comment.id} mt="xs">
+                {editingCommentId === comment.id ? (
+                  <Group gap="xs">
+                    <TextInput
+                      size="sm"
+                      value={editingCommentBody}
+                      onChange={event => setEditingCommentBody(event.target.value)}
+                      style={{ flex: 1 }}
+                    />
+                    <Button
+                      size="sm"
+                      variant="filled"
+                      disabled={!editingCommentBody.trim()}
+                      onClick={() =>
+                        run(async () => {
+                          await eventsApi.updateComment(
+                            series.id,
+                            comment.id,
+                            editingCommentBody.trim(),
+                          );
+                          setEditingCommentId(null);
+                        })
+                      }
+                    >
+                      {t('common.save')}
+                    </Button>
+                    <Button size="sm" variant="subtle" onClick={() => setEditingCommentId(null)}>
+                      {t('common.cancel')}
+                    </Button>
+                  </Group>
+                ) : (
+                  <Text size="sm">
+                    <strong>{comment.userName}</strong> ({formatDateTime(comment.createdAt)}):{' '}
+                    {comment.body}
+                  </Text>
+                )}
+                {canWrite && comment.userId === currentUser?.id && (
+                  <Group gap={4}>
+                    <ActionIcon
+                      size="sm"
+                      variant="subtle"
+                      aria-label={t('common.edit')}
+                      onClick={() => {
+                        setEditingCommentId(comment.id);
+                        setEditingCommentBody(comment.body);
+                      }}
+                    >
+                      <IconEdit size={14} />
+                    </ActionIcon>
+                    <ActionIcon
+                      size="sm"
+                      variant="subtle"
+                      color="red"
+                      aria-label={t('events.deleteComment')}
+                      onClick={() => run(() => eventsApi.deleteComment(series.id, comment.id))}
+                    >
+                      <IconTrash size={14} />
+                    </ActionIcon>
+                  </Group>
+                )}
+              </Box>
+            ))}
+            {canWrite && (
+              <Group gap="xs" mt="sm">
+                <TextInput
+                  size="sm"
+                  placeholder={t('events.addComment')}
+                  value={commentBody}
+                  onChange={event => setCommentBody(event.target.value)}
+                  style={{ flex: 1 }}
+                />
+                <Button
+                  variant="filled"
+                  disabled={!commentBody.trim()}
+                  onClick={() =>
+                    run(async () => {
+                      await eventsApi.createComment(series.id, {
+                        body: commentBody.trim(),
+                        occurrenceStart: occurrence.occurrenceStart,
+                      });
+                      setCommentBody('');
+                    })
+                  }
+                >
+                  {t('events.addComment')}
+                </Button>
+              </Group>
+            )}
+
+            {canWrite && (
+              <>
+                <Divider my="sm" />
+                <Title order={5}>{t('events.occurrenceActions')}</Title>
+                <Group gap="xs" mt="xs" wrap="wrap">
+                  <Button variant="outline" onClick={openSplitDialog}>
+                    {t('events.editFollowing')}
+                  </Button>
+                  {!occurrence.isCancelled && (
+                    <Button
+                      color="yellow"
+                      variant="outline"
+                      onClick={() =>
+                        run(() => eventsApi.cancelOccurrence(series.id, occurrence.occurrenceStart))
+                      }
+                    >
+                      {t('events.cancelOccurrence')}
+                    </Button>
+                  )}
+                  {occurrence.exceptionId !== null && (
+                    <Button
+                      color="green"
+                      variant="outline"
+                      onClick={() =>
+                        run(() => eventsApi.deleteException(series.id, occurrence.occurrenceStart))
+                      }
+                    >
+                      {t('events.restoreOccurrence')}
+                    </Button>
+                  )}
+                  <TextInput
+                    size="sm"
+                    type="datetime-local"
+                    label={t('events.rescheduleTo')}
+                    value={rescheduleStart}
+                    onChange={event => setRescheduleStart(event.target.value)}
+                  />
+                  <Button
+                    variant="outline"
+                    disabled={!rescheduleStart}
+                    onClick={() =>
+                      run(() =>
+                        eventsApi.rescheduleOccurrence(series.id, occurrence.occurrenceStart, {
+                          start: new Date(rescheduleStart).toISOString(),
+                        }),
+                      )
+                    }
+                  >
+                    {t('events.rescheduleOccurrence')}
+                  </Button>
+                </Group>
+              </>
+            )}
+          </Stack>
+        )}
+        <Group justify="flex-end" mt="md">
           <Button onClick={onClose}>{t('common.close')}</Button>
-        </DialogActions>
-      </Dialog>
+        </Group>
+      </Modal>
       {series && occurrence && (
         <EventSeriesDialog
           open={splitOpen}

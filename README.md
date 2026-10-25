@@ -46,6 +46,7 @@ npm run dev
 | `npm run lint` | Lint all code with Biome |
 | `npm run format:write` | Format all code with Biome |
 | `npm run check:fix` | Lint + format fix all code |
+| `npm run seed:data -w backend` | Generate semi-realistic test data (fresh database only: exactly one user and one organization) |
 
 ## Documentation
 

@@ -3,6 +3,8 @@ export interface User {
   name: string;
   email: string;
   description: string;
+  /** Optional contact number in E.164 format (includes the country code). */
+  phoneNumber: string | null;
   permissions: string[];
   state: 'active' | 'inactive';
   isEmployed: boolean;
@@ -17,6 +19,22 @@ export interface UserPush {
   email?: string;
   description?: string | null;
   state?: 'active' | 'inactive';
+}
+
+/** Fields a user may change on their own account (no `state`). */
+export interface UserSelfUpdate {
+  name?: string;
+  email?: string;
+  description?: string | null;
+  /** E.164 format (includes the country code); null clears the number. */
+  phoneNumber?: string | null;
+}
+
+/** A login method (OAuth provider account) connected to the user's account. */
+export interface AuthAccount {
+  provider: string;
+  providerAccountId: string;
+  createdAt: string;
 }
 
 export interface UserListItem {
@@ -59,15 +77,22 @@ export interface OperationInput {
   assignments?: Array<{ id?: number; name: string; description?: string }>;
 }
 
-export interface ApiError {
-  error: string;
-  statusCode: number;
-}
+/** Maps field names to their validation error messages. */
+export type FieldErrors = Record<string, string>;
 
 export interface Organization {
   id: string;
   name: string;
+  description: string;
   defaultTimezone: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OrganizationUpdate {
+  name?: string;
+  description?: string;
+  defaultTimezone?: string;
 }
 
 export interface Calendar {
@@ -85,7 +110,7 @@ export interface CalendarPush {
   googleCalendarId?: string | null;
 }
 
-// ISO 8601 weekday: 1 = Monday .. 7 = Sunday.
+/** ISO 8601 weekday: 1 = Monday .. 7 = Sunday. */
 export type RecurrenceFreq = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
 
 export interface RecurrenceInput {
@@ -194,4 +219,158 @@ export interface EventOccurrenceDetail {
   occurrence: EventOccurrence;
   jobs: EventJob[];
   comments: EventComment[];
+}
+
+// --- Teams ---
+
+export interface Team {
+  id: string;
+  name: string;
+  description: string;
+  organizationId: string;
+  memberCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TeamPush {
+  name: string;
+  description?: string;
+  organizationId: string;
+}
+
+export interface TeamUpdate {
+  name?: string;
+  description?: string;
+}
+
+export interface TeamMember {
+  id: number;
+  teamId: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  createdAt: string;
+}
+
+// --- Locations ---
+
+export interface Location {
+  id: string;
+  name: string;
+  description: string;
+  organizationId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LocationPush {
+  name: string;
+  description?: string;
+  organizationId: string;
+}
+
+export interface LocationUpdate {
+  name?: string;
+  description?: string;
+}
+
+// --- Jobs ---
+
+export interface Job {
+  id: number;
+  name: string;
+  organizationId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface JobPush {
+  name: string;
+  organizationId: string;
+}
+
+export interface JobUpdate {
+  name?: string;
+}
+
+// --- Notifications ---
+
+export interface Notification {
+  id: number;
+  userId: string;
+  title: string;
+  body: string;
+  isRead: boolean;
+  createdAt: string;
+}
+
+// --- Paginated responses ---
+
+export interface Paginated<T> {
+  items: T[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface PaginatedNotifications extends Paginated<Notification> {
+  unreadCount: number;
+}
+
+// --- Organization users ---
+
+export interface OrganizationUser {
+  id: string;
+  name: string;
+  email: string;
+  description: string;
+  isEmployed: boolean;
+  isSuspended: boolean;
+  isBlocked: boolean;
+  state: string;
+  createdAt: string;
+}
+
+// --- Event series management ---
+
+export interface EventSeriesTeam {
+  id: string;
+  name: string;
+}
+
+export interface EventSeriesManagement extends EventSeries {
+  locationId: string | null;
+  locationName: string | null;
+  teams: EventSeriesTeam[];
+}
+
+export interface EventSeriesConfigUpdate {
+  locationId?: string | null;
+  teamIds?: string[];
+}
+
+export interface EventSeriesListQuery {
+  page?: number;
+  limit?: number;
+  search?: string;
+  startFrom?: string;
+  startTo?: string;
+  locationId?: string;
+  teamId?: string;
+  hasTeam?: boolean;
+}
+
+export interface OccurrenceFilter {
+  scope?: 'all' | 'team' | 'mine';
+  locationId?: string;
+  teamId?: string;
+}
+
+// --- Table query ---
+
+export interface TableQuery {
+  page?: number;
+  limit?: number;
+  search?: string;
 }

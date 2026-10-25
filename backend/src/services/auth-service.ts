@@ -1,11 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { sql, type Transaction } from 'kysely';
 import { db } from '../database.js';
-import type { AuthProvider, Database, User } from '../db/types.js';
+import type { AuthAccount, AuthProvider, Database, User } from '../db/types.js';
+import { badRequest, notFound } from '../http-error.js';
 import { createLogger } from '../logger.js';
 import { PERMISSIONS } from '../permissions.js';
 import { getRedisClient } from '../redis.js';
-import { getProvider } from './auth-providers/index.js';
+import {
+  getProvider,
+  PROVIDER_NAMES,
+  type ProviderProfile,
+  type ProviderTokenResponse,
+} from './auth-providers/index.js';
 import { getEffectivePermissions } from './permission-service.js';
 
 const logger = createLogger('auth-service');
@@ -16,15 +22,21 @@ export interface AuthContext {
   permissions: string[];
 }
 
+/**
+ * Stores the state of a login (or account-linking) flow. When `linkToken` is
+ * given, the flow connects the provider account to the user owning that
+ * access token instead of starting a new login session.
+ */
 export async function startLogin(
   stateId: string,
   returnUrl: string,
   userAgent: string,
+  linkToken?: string,
 ): Promise<void> {
   const redis = getRedisClient();
   await redis.set(
     `login:state:${stateId}`,
-    JSON.stringify({ returnUrl, userAgent }),
+    JSON.stringify({ returnUrl, userAgent, linkToken }),
     'EX',
     20 * 60,
   );
@@ -33,6 +45,7 @@ export async function startLogin(
 async function retrieveLoginSessionState(stateId: string): Promise<{
   returnUrl: string;
   userAgent: string;
+  linkToken?: string;
 }> {
   const redis = getRedisClient();
   const key = `login:state:${stateId}`;
@@ -45,8 +58,10 @@ async function retrieveLoginSessionState(stateId: string): Promise<{
   return JSON.parse(stateStr as string);
 }
 
-// The very first user of the system gets an organization of their own and
-// full admin rights over it.
+/**
+ * The very first user of the system gets an organization of their own and
+ * full admin rights over it.
+ */
 async function bootstrapFirstUser(tx: Transaction<Database>, userId: string): Promise<void> {
   logger.info(`Bootstrapping first user ${userId} with an organization and admin role`);
 
@@ -91,17 +106,105 @@ async function bootstrapFirstUser(tx: Transaction<Database>, userId: string): Pr
   logger.info(`Created organization ${organization.id} with an admin role for user ${userId}`);
 }
 
+export interface LoginResult {
+  /** The new access token, or null for account-linking flows. */
+  token: string | null;
+  returnUrl: string;
+  /** Set when an account-linking flow failed; the user is redirected back with this message. */
+  error?: string;
+}
+
+/**
+ * Connects a provider account to the user owning the given access token
+ * (the account-linking flow started from the account page) instead of
+ * starting a new login session. Never issues a token and never creates users.
+ */
+async function linkProviderAccount(
+  provider: AuthProvider,
+  profile: ProviderProfile,
+  providerToken: ProviderTokenResponse,
+  linkToken: string,
+  returnUrl: string,
+): Promise<LoginResult> {
+  const session = await db
+    .selectFrom('access_tokens')
+    .innerJoin('users', 'users.id', 'access_tokens.user_id')
+    .selectAll('users')
+    .where('access_tokens.token', '=', linkToken)
+    .executeTakeFirst();
+
+  if (session?.state !== 'active') {
+    return {
+      token: null,
+      returnUrl,
+      error: 'The account linking session has expired. Please try again.',
+    };
+  }
+
+  const userId = session.id;
+
+  return db.transaction().execute(async tx => {
+    const existing = await tx
+      .selectFrom('auth_accounts')
+      .selectAll()
+      .where('provider', '=', provider)
+      .where('provider_account_id', '=', profile.id)
+      .executeTakeFirst();
+
+    if (existing && existing.user_id !== userId) {
+      return {
+        token: null,
+        returnUrl,
+        error: `This ${PROVIDER_NAMES[provider]} account is already connected to a different user.`,
+      };
+    }
+
+    if (existing) {
+      await tx
+        .updateTable('auth_accounts')
+        .set({
+          access_token: providerToken.access_token,
+          refresh_token: providerToken.refresh_token ?? null,
+          expires_in: providerToken.expires_in,
+          updated_at: new Date(),
+        })
+        .where('id', '=', existing.id)
+        .execute();
+      logger.info(`Refreshed ${provider} account link for user ${userId}`);
+    } else {
+      logger.info(`Linking ${provider} account ${profile.id} to user ${userId}`);
+      await tx
+        .insertInto('auth_accounts')
+        .values({
+          user_id: userId,
+          provider,
+          provider_account_id: profile.id,
+          access_token: providerToken.access_token,
+          refresh_token: providerToken.refresh_token ?? null,
+          expires_in: providerToken.expires_in,
+        })
+        .execute();
+    }
+
+    return { token: null, returnUrl };
+  });
+}
+
 export async function handleNewLogin(
   provider: AuthProvider,
   loginCode: string,
   stateId: string,
-): Promise<{ token: string; returnUrl: string }> {
+): Promise<LoginResult> {
   logger.debug(`Handling new ${provider} login`);
 
   const providerDefinition = getProvider(provider);
-  const { returnUrl, userAgent } = await retrieveLoginSessionState(stateId);
+  const { returnUrl, userAgent, linkToken } = await retrieveLoginSessionState(stateId);
   const providerToken = await providerDefinition.exchangeCode(loginCode);
   const profile = await providerDefinition.getProfile(providerToken.access_token);
+
+  if (linkToken) {
+    return linkProviderAccount(provider, profile, providerToken, linkToken, returnUrl);
+  }
 
   const email = profile.email ?? `${profile.id}@${provider}.local`;
 
@@ -292,5 +395,92 @@ export async function logout(tokenString: string): Promise<void> {
         .where('id', '=', account.id)
         .execute();
     }
+  }
+}
+
+/** Best-effort revocation of a stored provider token; failures are logged, not thrown. */
+async function revokeProviderToken(account: AuthAccount): Promise<void> {
+  const provider = getProvider(account.provider);
+  if (account.access_token && provider.revokeToken) {
+    await provider
+      .revokeToken(account.access_token)
+      .catch(error => logger.warn({ error }, `Failed to revoke ${account.provider} token`));
+  }
+}
+
+export interface AuthAccountInfo {
+  provider: AuthProvider;
+  providerAccountId: string;
+  createdAt: string;
+}
+
+/**
+ * Lists the login methods connected to a user's account. Never exposes the
+ * stored provider tokens.
+ */
+export async function getAuthAccounts(userId: string): Promise<AuthAccountInfo[]> {
+  logger.trace('authService.getAuthAccounts');
+
+  const accounts = await db
+    .selectFrom('auth_accounts')
+    .select(['provider', 'provider_account_id', 'created_at'])
+    .where('user_id', '=', userId)
+    .orderBy('created_at', 'asc')
+    .execute();
+
+  return accounts.map(account => ({
+    provider: account.provider,
+    providerAccountId: account.provider_account_id,
+    createdAt: account.created_at.toISOString(),
+  }));
+}
+
+/**
+ * Disconnects a login method from the user's account. The last remaining
+ * login method cannot be removed, otherwise the user could not log in again.
+ */
+export async function unlinkAuthAccount(userId: string, provider: AuthProvider): Promise<void> {
+  logger.trace('authService.unlinkAuthAccount');
+
+  const accounts = await db
+    .selectFrom('auth_accounts')
+    .selectAll()
+    .where('user_id', '=', userId)
+    .execute();
+
+  const account = accounts.find(row => row.provider === provider);
+  if (!account) {
+    throw notFound(`No ${PROVIDER_NAMES[provider]} account is connected!`);
+  }
+  if (accounts.length <= 1) {
+    throw badRequest('You cannot disconnect your last login method!');
+  }
+
+  await revokeProviderToken(account);
+  await db.deleteFrom('auth_accounts').where('id', '=', account.id).execute();
+}
+
+/**
+ * Permanently deletes a user's account. Provider tokens are revoked
+ * best-effort; deleting the user cascades to their login methods, access
+ * tokens and other user-owned rows.
+ */
+export async function deleteAccount(userId: string): Promise<void> {
+  logger.info(`Deleting account of user ${userId}`);
+
+  const accounts = await db
+    .selectFrom('auth_accounts')
+    .selectAll()
+    .where('user_id', '=', userId)
+    .execute();
+
+  for (const account of accounts) {
+    await revokeProviderToken(account);
+  }
+
+  const result = await db.deleteFrom('users').where('id', '=', userId).executeTakeFirst();
+
+  if (result.numDeletedRows === 0n) {
+    throw notFound(`User ${userId} not found!`);
   }
 }

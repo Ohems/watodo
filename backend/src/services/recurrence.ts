@@ -10,13 +10,15 @@ import type { RecurrenceInput } from '../schemas/index.js';
 
 const { RRule } = rrule;
 
-// Maximum span of an occurrence range query. Chosen to comfortably cover
-// series that repeat 5-10 years into the future.
+/**
+ * Maximum span of an occurrence range query. Chosen to comfortably cover
+ * series that repeat 5-10 years into the future.
+ */
 export const MAX_OCCURRENCE_RANGE_MS = 3700 * 24 * 60 * 60 * 1000; // ~10.1 years
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// The part of an event series needed to expand occurrences.
+/** The part of an event series needed to expand occurrences. */
 export interface RecurrenceSeriesRule {
   start: Date;
   durationMinutes: number;
@@ -24,7 +26,7 @@ export interface RecurrenceSeriesRule {
   timezone: string;
 }
 
-// A per-occurrence override (cancel / reschedule).
+/** A per-occurrence override (cancel / reschedule). */
 export interface OccurrenceExceptionRule {
   id: number;
   occurrenceStart: Date;
@@ -76,9 +78,14 @@ export function isValidTimezone(timezone: string): boolean {
   }
 }
 
-// Returns a Date whose UTC components equal the wall-clock time of `date` in
-// `timezone`. rrule (running in wall-clock mode, see below) works with Dates
-// shaped exactly like this.
+/**
+ * Returns a Date whose UTC components equal the wall-clock time of `date` in
+ * `timezone`. rrule (running in wall-clock mode, see below) works with Dates
+ * shaped exactly like this.
+ * @param date - The real UTC instant.
+ * @param timezone - The IANA timezone name.
+ * @returns A Date whose UTC components represent the wall-clock time.
+ */
 export function toWallClockDate(date: Date, timezone: string): Date {
   const zoned = toZonedTime(date, timezone);
   return new Date(
@@ -93,9 +100,14 @@ export function toWallClockDate(date: Date, timezone: string): Date {
   );
 }
 
-// Inverse of toWallClockDate: interprets the UTC components of `wallClock`
-// as a wall-clock time in `timezone` and returns the real UTC instant.
-// DST-correct and independent of the server's process timezone.
+/**
+ * Inverse of toWallClockDate: interprets the UTC components of `wallClock`
+ * as a wall-clock time in `timezone` and returns the real UTC instant.
+ * DST-correct and independent of the server's process timezone.
+ * @param wallClock - A Date whose UTC components are the wall-clock time.
+ * @param timezone - The IANA timezone name.
+ * @returns The real UTC instant.
+ */
 export function fromWallClockDate(wallClock: Date, timezone: string): Date {
   const local = new Date(
     wallClock.getUTCFullYear(),
@@ -109,15 +121,20 @@ export function fromWallClockDate(wallClock: Date, timezone: string): Date {
   return fromZonedTime(local, timezone);
 }
 
-// ISO weekday (1 = Monday .. 7 = Sunday) of a wall-clock Date.
+/** ISO weekday (1 = Monday .. 7 = Sunday) of a wall-clock Date. */
 function isoWeekdayOf(wallClock: Date): number {
   return ((wallClock.getUTCDay() + 6) % 7) + 1;
 }
 
-// Builds the canonical RRULE property string for a series from the structured
-// recurrence input, using the rrule library as the serializer. `until` is an
-// instant and is stored as the wall-clock time in the series' timezone,
-// because the rule is evaluated in wall-clock space.
+/**
+ * Builds the canonical RRULE property string for a series from the structured
+ * recurrence input, using the rrule library as the serializer. `until` is an
+ * instant and is stored as the wall-clock time in the series' timezone,
+ * because the rule is evaluated in wall-clock space.
+ * @param series - The series start and timezone.
+ * @param recurrence - The structured recurrence input.
+ * @returns The canonical RRULE property string.
+ */
 export function buildRruleString(
   series: { start: Date; timezone: string },
   recurrence: NonNullable<RecurrenceInput>,
@@ -165,14 +182,19 @@ export function buildRruleString(
   return line;
 }
 
-// Ensures a recurrence rule contains the given wall-clock start as an
-// occurrence. Used when a series is split and re-anchored at a new start:
-// rrule does not generate a dtstart that does not match the BYxxx filters,
-// so for WEEKLY/DAILY rules the start's weekday is added to byWeekdays and
-// for MONTHLY rules the start's day is added to byMonthDays. Rules without
-// the respective filter already contain every start (the builder defaults
-// them to the start's weekday/day), and YEARLY rules always contain their
-// start.
+/**
+ * Ensures a recurrence rule contains the given wall-clock start as an
+ * occurrence. Used when a series is split and re-anchored at a new start:
+ * rrule does not generate a dtstart that does not match the BYxxx filters,
+ * so for WEEKLY/DAILY rules the start's weekday is added to byWeekdays and
+ * for MONTHLY rules the start's day is added to byMonthDays. Rules without
+ * the respective filter already contain every start (the builder defaults
+ * them to the start's weekday/day), and YEARLY rules always contain their
+ * start.
+ * @param recurrence - The recurrence input to adjust.
+ * @param startWallClock - The wall-clock start that must be an occurrence.
+ * @returns The adjusted recurrence input.
+ */
 export function anchorRecurrenceAtStart(
   recurrence: NonNullable<RecurrenceInput>,
   startWallClock: Date,
@@ -203,11 +225,17 @@ export function anchorRecurrenceAtStart(
   return recurrence;
 }
 
-// Truncates a series' stored RRULE string so the series ends just before the
-// given occurrence (used when splitting a series at an occurrence): the rule
-// gets an UNTIL one millisecond before the occurrence, and any COUNT is
-// dropped because the UNTIL always caps earlier (the occurrence itself is
-// within the original rule).
+/**
+ * Truncates a series' stored RRULE string so the series ends just before the
+ * given occurrence (used when splitting a series at an occurrence): the rule
+ * gets an UNTIL one millisecond before the occurrence, and any COUNT is
+ * dropped because the UNTIL always caps earlier (the occurrence itself is
+ * within the original rule).
+ * @param series - The series start and timezone.
+ * @param rruleString - The stored RRULE string to truncate.
+ * @param occurrenceStart - The occurrence at which to truncate.
+ * @returns The truncated RRULE string.
+ */
 export function truncateRruleString(
   series: { start: Date; timezone: string },
   rruleString: string,
@@ -222,7 +250,12 @@ export function truncateRruleString(
   return buildRruleString(series, truncated);
 }
 
-// Rebuilds the structured recurrence input from the stored RRULE string.
+/**
+ * Rebuilds the structured recurrence input from the stored RRULE string.
+ * @param series - The series start and timezone.
+ * @param rruleString - The stored RRULE string.
+ * @returns The structured recurrence input.
+ */
 export function recurrenceFromRruleString(
   series: { start: Date; timezone: string },
   rruleString: string,
@@ -258,11 +291,13 @@ export function recurrenceFromRruleString(
   return recurrence as NonNullable<RecurrenceInput>;
 }
 
-// Parses the stored RRULE string and rebuilds the rrule instance in wall-clock
-// mode: no `tzid` option, because rrule's own timezone rezoning depends on the
-// server's process timezone. The rule therefore generates wall-clock dates
-// (Dates whose UTC components are the wall-clock in the series timezone),
-// which are converted to real instants with date-fns-tz afterwards.
+/**
+ * Parses the stored RRULE string and rebuilds the rrule instance in wall-clock
+ * mode: no `tzid` option, because rrule's own timezone rezoning depends on the
+ * server's process timezone. The rule therefore generates wall-clock dates
+ * (Dates whose UTC components are the wall-clock in the series timezone),
+ * which are converted to real instants with date-fns-tz afterwards.
+ */
 function parseStoredRrule(
   series: { start: Date; timezone: string },
   rruleString: string,
@@ -302,10 +337,17 @@ function byWeekdayToIso(byweekday: ByWeekday): number {
   return byweekday.weekday + 1;
 }
 
-// Expands the occurrences of a series that overlap [rangeStart, rangeEnd),
-// applying per-occurrence exceptions (cancel / reschedule). Occurrences are
-// computed on demand; nothing is materialized, so series repeating years or
-// indefinitely into the future are expanded in bounded time.
+/**
+ * Expands the occurrences of a series that overlap [rangeStart, rangeEnd),
+ * applying per-occurrence exceptions (cancel / reschedule). Occurrences are
+ * computed on demand; nothing is materialized, so series repeating years or
+ * indefinitely into the future are expanded in bounded time.
+ * @param series - The series rule to expand.
+ * @param exceptions - Per-occurrence overrides to apply.
+ * @param rangeStart - The start of the range (inclusive).
+ * @param rangeEnd - The end of the range (exclusive).
+ * @returns The occurrences overlapping the range, sorted by start time.
+ */
 export function expandOccurrences(
   series: RecurrenceSeriesRule,
   exceptions: OccurrenceExceptionRule[],
@@ -368,8 +410,13 @@ export function expandOccurrences(
   return results;
 }
 
-// Whether `date` is an occurrence of the series (used to validate
-// occurrence-scoped operations).
+/**
+ * Whether `date` is an occurrence of the series (used to validate
+ * occurrence-scoped operations).
+ * @param series - The series rule.
+ * @param date - The date to check.
+ * @returns True if `date` is an occurrence of the series.
+ */
 export function isOccurrence(series: RecurrenceSeriesRule, date: Date): boolean {
   if (!series.rrule) {
     return date.getTime() === series.start.getTime();
