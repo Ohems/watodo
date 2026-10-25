@@ -361,7 +361,7 @@ describe('Events API', () => {
     expect(response.statusCode).toBe(400);
   });
 
-  it('filters occurrences by location, team and scope', async () => {
+  it('filters occurrences by site, room, team and scope', async () => {
     if (!seedData) return;
     const seed = seedData;
     const suffix = randomUUID();
@@ -375,21 +375,42 @@ describe('Events API', () => {
       })
       .execute();
 
-    const locationAId = randomUUID();
-    const locationBId = randomUUID();
+    // Create two sites, each with one room.
+    const siteAId = randomUUID();
+    const siteBId = randomUUID();
     await db
-      .insertInto('locations')
+      .insertInto('sites')
       .values([
         {
-          id: locationAId,
-          name: `Location A ${suffix}`,
-          description: '',
+          id: siteAId,
+          name: `Site A ${suffix}`,
           organization_id: seed.organizationId,
         },
         {
-          id: locationBId,
-          name: `Location B ${suffix}`,
+          id: siteBId,
+          name: `Site B ${suffix}`,
+          organization_id: seed.organizationId,
+        },
+      ])
+      .execute();
+
+    const roomAId = randomUUID();
+    const roomBId = randomUUID();
+    await db
+      .insertInto('rooms')
+      .values([
+        {
+          id: roomAId,
+          name: `Room A ${suffix}`,
           description: '',
+          site_id: siteAId,
+          organization_id: seed.organizationId,
+        },
+        {
+          id: roomBId,
+          name: `Room B ${suffix}`,
+          description: '',
+          site_id: siteBId,
           organization_id: seed.organizationId,
         },
       ])
@@ -439,25 +460,28 @@ describe('Events API', () => {
       return (response.json() as EventSeriesResponse).id;
     };
 
-    // Series A: location A, team A. Series B: location B, team B. Series C:
-    // location A, no team.
+    // Series A: site A + room A, team A. Series B: site B + room B, team B.
+    // Series C: site A only (no room), no team.
     const seriesAId = await createSeries(`Filter series A ${suffix}`);
     const seriesBId = await createSeries(`Filter series B ${suffix}`);
     const seriesCId = await createSeries(`Filter series C ${suffix}`);
     const mySeriesIds = [seriesAId, seriesBId, seriesCId];
 
-    const configure = async (id: number, locationId: string, teamIds: string[]) => {
+    const configure = async (
+      id: number,
+      config: { siteId?: string; roomId?: string; teamIds: string[] },
+    ) => {
       const response = await app.inject({
         method: 'PATCH',
         url: `/api/v1/event-series/${id}/config`,
         headers: auth(seed.adminToken),
-        payload: { locationId, teamIds },
+        payload: config,
       });
       expect(response.statusCode).toBe(200);
     };
-    await configure(seriesAId, locationAId, [teamAId]);
-    await configure(seriesBId, locationBId, [teamBId]);
-    await configure(seriesCId, locationAId, []);
+    await configure(seriesAId, { siteId: siteAId, roomId: roomAId, teamIds: [teamAId] });
+    await configure(seriesBId, { siteId: siteBId, roomId: roomBId, teamIds: [teamBId] });
+    await configure(seriesCId, { siteId: siteAId, teamIds: [] });
 
     // The reader is assigned to a series-wide job on series A (covering all
     // its occurrences) and to an occurrence-scoped job on series C.
@@ -511,19 +535,20 @@ describe('Events API', () => {
     expect(seriesIdsOf(all)).toEqual(mySeriesIds);
     expect(all).toHaveLength(9);
 
-    // Location filter.
-    const byLocation = await getOccurrences(seed.readerToken, `&locationId=${locationAId}`);
-    expect(seriesIdsOf(byLocation)).toEqual([seriesAId, seriesCId]);
+    // Site filter.
+    const bySite = await getOccurrences(seed.readerToken, `&siteId=${siteAId}`);
+    expect(seriesIdsOf(bySite)).toEqual([seriesAId, seriesCId]);
+
+    // Room filter.
+    const byRoom = await getOccurrences(seed.readerToken, `&roomId=${roomAId}`);
+    expect(seriesIdsOf(byRoom)).toEqual([seriesAId]);
 
     // Team filter.
     const byTeam = await getOccurrences(seed.readerToken, `&teamId=${teamAId}`);
     expect(seriesIdsOf(byTeam)).toEqual([seriesAId]);
 
-    // Combined location + team filter.
-    const combined = await getOccurrences(
-      seed.readerToken,
-      `&locationId=${locationAId}&teamId=${teamAId}`,
-    );
+    // Combined site + team filter.
+    const combined = await getOccurrences(seed.readerToken, `&siteId=${siteAId}&teamId=${teamAId}`);
     expect(seriesIdsOf(combined)).toEqual([seriesAId]);
 
     // Scope "my team's events": only series linked to a team of the reader.

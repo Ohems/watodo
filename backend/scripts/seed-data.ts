@@ -5,9 +5,9 @@
 // exactly one user and one organization, because those are created by the
 // first login (see handleNewLogin in src/services/auth-service.ts). It then
 // creates a second organization and fills both organizations with mock users
-// (no login accounts attached), roles, teams, calendars, event types, event
-// series across the previous, current and next month (with exceptions, job
-// slots, assignments and comments), and a set of operations.
+// (no login accounts attached), roles, teams, sites with rooms, calendars,
+// event types, event series across the previous, current and next month (with
+// exceptions, job slots, assignments and comments), and a set of operations.
 //
 // When a feature that persists data is added, extend this script so the seed
 // data keeps covering it (see AGENTS.md).
@@ -21,6 +21,8 @@ import type {
   EventSeries,
   NewEventSeries,
   Role,
+  Room,
+  Site,
   User,
 } from '../src/db/types.js';
 import { createLogger } from '../src/logger.js';
@@ -294,7 +296,8 @@ const SUMMARY_TABLES = [
   'user_roles',
   'teams',
   'team_members',
-  'locations',
+  'sites',
+  'rooms',
   'jobs',
   'notifications',
   'calendars',
@@ -523,21 +526,47 @@ async function addComment(
     .execute();
 }
 
-async function createLocations(
+interface SiteSeed {
+  name: string;
+  description: string | null;
+  address: string | null;
+  rooms: { name: string; description: string }[];
+}
+
+async function createSites(
   tx: Tx,
   organizationId: string,
-  seeds: { name: string; description: string }[],
-) {
-  const locations = [];
+  seeds: SiteSeed[],
+): Promise<{ sites: Site[]; rooms: Room[] }> {
+  const sites: Site[] = [];
+  const rooms: Room[] = [];
   for (const seed of seeds) {
-    const location = await tx
-      .insertInto('locations')
-      .values({ name: seed.name, description: seed.description, organization_id: organizationId })
+    const site = await tx
+      .insertInto('sites')
+      .values({
+        name: seed.name,
+        description: seed.description,
+        address: seed.address,
+        organization_id: organizationId,
+      })
       .returningAll()
       .executeTakeFirstOrThrow();
-    locations.push(location);
+    sites.push(site);
+    for (const roomSeed of seed.rooms) {
+      const room = await tx
+        .insertInto('rooms')
+        .values({
+          name: roomSeed.name,
+          description: roomSeed.description,
+          site_id: site.id,
+          organization_id: organizationId,
+        })
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      rooms.push(room);
+    }
   }
-  return locations;
+  return { sites, rooms };
 }
 
 async function createJobs(tx: Tx, organizationId: string, seeds: { name: string }[]) {
@@ -841,12 +870,36 @@ async function main(): Promise<void> {
       await addTeamMembers(tx, teamsOne[1].id, [mockUsersOne[1].id, mockUsersOne[4].id]);
       await addTeamMembers(tx, teamsOne[2].id, [mockUsersOne[2].id, mockUsersOne[7].id]);
 
-      // Locations for the first organization.
-      const locationsOne = await createLocations(tx, firstOrganization.id, [
-        { name: 'Community Hall', description: 'The main community hall with a kitchen.' },
-        { name: 'Central Park', description: 'Outdoor park area with a stage.' },
-        { name: 'Sports Grounds', description: 'Sports fields and courts.' },
-        { name: 'Community Kitchen', description: 'Shared kitchen for events.' },
+      // Sites and rooms for the first organization.
+      const { sites: sitesOne, rooms: roomsOne } = await createSites(tx, firstOrganization.id, [
+        {
+          name: 'Downtown Community Center',
+          description: 'The main community center in the city center.',
+          address: '123 Main Street, Downtown',
+          rooms: [
+            { name: 'Main Hall', description: 'The main hall with stage and seating for 200.' },
+            { name: 'Community Kitchen', description: 'Shared kitchen for events.' },
+            { name: 'Meeting Room A', description: 'Small meeting room for up to 20 people.' },
+          ],
+        },
+        {
+          name: 'Central Park',
+          description: 'Outdoor park area with a stage and open green space.',
+          address: 'Park Avenue, City Center',
+          rooms: [
+            { name: 'Stage Area', description: 'Covered stage for outdoor performances.' },
+            { name: 'Picnic Area', description: 'Open grass area for gatherings.' },
+          ],
+        },
+        {
+          name: 'Sports Grounds',
+          description: 'Sports fields and courts for outdoor activities.',
+          address: null,
+          rooms: [
+            { name: 'Main Field', description: 'Grass field for football and other sports.' },
+            { name: 'Tennis Court', description: 'Hard surface tennis court.' },
+          ],
+        },
       ]);
 
       // Jobs for the first organization.
@@ -1107,25 +1160,29 @@ async function main(): Promise<void> {
       );
       await assignUser(tx, webinarJob.id, realUser.id);
 
-      // Set locations and assign teams to event series.
+      // Set site/room assignments and assign teams to event series.
+      // cleanupDay: Downtown Community Center, Main Hall
       await tx
         .updateTable('event_series')
-        .set({ location_id: locationsOne[0].id })
+        .set({ site_id: sitesOne[0].id, room_id: roomsOne[0].id })
         .where('id', '=', cleanupDay.id)
         .execute();
+      // generalMeeting: Downtown Community Center, Meeting Room A
       await tx
         .updateTable('event_series')
-        .set({ location_id: locationsOne[0].id })
+        .set({ site_id: sitesOne[0].id, room_id: roomsOne[2].id })
         .where('id', '=', generalMeeting.id)
         .execute();
+      // festivalPlanning: Central Park (whole site reserved, no specific room)
       await tx
         .updateTable('event_series')
-        .set({ location_id: locationsOne[1].id })
+        .set({ site_id: sitesOne[1].id, reserve_whole_site: true })
         .where('id', '=', festivalPlanning.id)
         .execute();
+      // kickoff: Sports Grounds, Main Field
       await tx
         .updateTable('event_series')
-        .set({ location_id: locationsOne[2].id })
+        .set({ site_id: sitesOne[2].id, room_id: roomsOne[3].id })
         .where('id', '=', kickoff.id)
         .execute();
       await assignTeamsToSeries(tx, cleanupDay.id, [teamsOne[0].id]);
@@ -1215,11 +1272,32 @@ async function main(): Promise<void> {
         mockUsersTwo[5].id,
       ]);
 
-      // Locations for the second organization.
-      const locationsTwo = await createLocations(tx, secondOrganization.id, [
-        { name: 'Association Hall', description: 'The main association hall.' },
-        { name: 'Riverside Beach', description: 'Beach area along the river.' },
-        { name: 'Sports Field', description: 'Outdoor sports field with changing rooms.' },
+      // Sites and rooms for the second organization.
+      const { sites: sitesTwo, rooms: roomsTwo } = await createSites(tx, secondOrganization.id, [
+        {
+          name: 'Riverside Association Hall',
+          description: 'The main hall of the riverside community association.',
+          address: '45 River Road, Riverside',
+          rooms: [
+            { name: 'Main Hall', description: 'Large hall for meetings and events.' },
+            { name: 'Kitchen', description: 'Small kitchen for coffee and snacks.' },
+          ],
+        },
+        {
+          name: 'Riverside Beach',
+          description: 'Beach area along the river, great for outdoor gatherings.',
+          address: null,
+          rooms: [{ name: 'Beach Front', description: 'Sandy area along the water.' }],
+        },
+        {
+          name: 'Sports Field',
+          description: 'Outdoor sports field with changing rooms.',
+          address: '78 Sports Lane, Riverside',
+          rooms: [
+            { name: 'Football Field', description: 'Grass field for football.' },
+            { name: 'Running Track', description: '400m running track.' },
+          ],
+        },
       ]);
 
       // Jobs for the second organization.
@@ -1472,25 +1550,30 @@ async function main(): Promise<void> {
       );
       await assignUser(tx, moderatorJob.id, realUser.id);
 
-      // Set locations and assign teams to event series for the second org.
+      // Set site/room assignments and assign teams to event series for the
+      // second org.
+      // beachCleanup: Riverside Beach (whole site)
       await tx
         .updateTable('event_series')
-        .set({ location_id: locationsTwo[1].id })
+        .set({ site_id: sitesTwo[1].id, reserve_whole_site: true })
         .where('id', '=', beachCleanup.id)
         .execute();
+      // boardMeeting: Riverside Association Hall, Main Hall
       await tx
         .updateTable('event_series')
-        .set({ location_id: locationsTwo[0].id })
+        .set({ site_id: sitesTwo[0].id, room_id: roomsTwo[0].id })
         .where('id', '=', boardMeeting.id)
         .execute();
+      // potluck: Riverside Association Hall, Kitchen
       await tx
         .updateTable('event_series')
-        .set({ location_id: locationsTwo[0].id })
+        .set({ site_id: sitesTwo[0].id, room_id: roomsTwo[1].id })
         .where('id', '=', potluck.id)
         .execute();
+      // seasonKickoff: Sports Field, Football Field
       await tx
         .updateTable('event_series')
-        .set({ location_id: locationsTwo[2].id })
+        .set({ site_id: sitesTwo[2].id, room_id: roomsTwo[2].id })
         .where('id', '=', seasonKickoff.id)
         .execute();
       await assignTeamsToSeries(tx, beachCleanup.id, [teamsTwo[0].id]);

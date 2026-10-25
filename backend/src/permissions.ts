@@ -20,8 +20,10 @@ export const PERMISSIONS = {
   EVENTS_WRITE: 'events:write',
   TEAM_MANAGEMENT_READ: 'team-management:read',
   TEAM_MANAGEMENT_WRITE: 'team-management:write',
-  LOCATION_MANAGEMENT_READ: 'location-management:read',
-  LOCATION_MANAGEMENT_WRITE: 'location-management:write',
+  SITE_MANAGEMENT_READ: 'site-management:read',
+  SITE_MANAGEMENT_WRITE: 'site-management:write',
+  ROOM_MANAGEMENT_READ: 'room-management:read',
+  ROOM_MANAGEMENT_WRITE: 'room-management:write',
   JOB_MANAGEMENT_READ: 'job-management:read',
   JOB_MANAGEMENT_WRITE: 'job-management:write',
 } as const;
@@ -58,7 +60,7 @@ export const PERMISSION_DEFINITIONS: { code: Permission; description: string }[]
   },
   {
     code: PERMISSIONS.ORGANIZATION_READ,
-    description: 'View organization members, teams, locations and jobs.',
+    description: 'View organization members, teams, sites, rooms and jobs.',
   },
   { code: PERMISSIONS.OPERATIONS_READ, description: 'View operations.' },
   {
@@ -80,12 +82,20 @@ export const PERMISSION_DEFINITIONS: { code: Permission; description: string }[]
     description: 'Create, update and delete teams, and manage team members.',
   },
   {
-    code: PERMISSIONS.LOCATION_MANAGEMENT_READ,
-    description: 'View locations.',
+    code: PERMISSIONS.SITE_MANAGEMENT_READ,
+    description: 'View sites (physical locations).',
   },
   {
-    code: PERMISSIONS.LOCATION_MANAGEMENT_WRITE,
-    description: 'Create, update and delete locations.',
+    code: PERMISSIONS.SITE_MANAGEMENT_WRITE,
+    description: 'Create, update and delete sites (physical locations).',
+  },
+  {
+    code: PERMISSIONS.ROOM_MANAGEMENT_READ,
+    description: 'View rooms.',
+  },
+  {
+    code: PERMISSIONS.ROOM_MANAGEMENT_WRITE,
+    description: 'Create, update and delete rooms.',
   },
   {
     code: PERMISSIONS.JOB_MANAGEMENT_READ,

@@ -39,7 +39,10 @@ async function mockApi(page: Page) {
   // Playwright matches routes in reverse registration order.
   await page.route('**/api/v1/users/@me', route => route.fulfill({ json: mockUser }));
   await page.route('**/api/v1/organizations', route => route.fulfill({ json: [mockOrganization] }));
-  await page.route(`**/api/v1/organizations/${ORG_ID}/locations/all`, route =>
+  await page.route(`**/api/v1/organizations/${ORG_ID}/sites/all`, route =>
+    route.fulfill({ json: [] }),
+  );
+  await page.route(`**/api/v1/organizations/${ORG_ID}/rooms/all*`, route =>
     route.fulfill({ json: [] }),
   );
   await page.route(`**/api/v1/organizations/${ORG_ID}/teams?*`, route =>

@@ -43,7 +43,7 @@ function NavBar() {
       label: t('nav.organization'),
       children: [
         { label: t('nav.orgGeneral'), path: '/organization/general' },
-        { label: t('nav.orgLocations'), path: '/organization/locations' },
+        { label: t('nav.orgSites'), path: '/organization/sites' },
         { label: t('nav.orgJobs'), path: '/organization/jobs' },
         { label: t('nav.orgUsers'), path: '/organization/users' },
       ],

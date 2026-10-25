@@ -214,6 +214,20 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 - `GET /api/v1/organizations/:organizationId/roles/:roleId/assignments` - List role assignments (`role-management:read`)
 - `POST /api/v1/organizations/:organizationId/roles/:roleId/assignments` - Assign role to user, optionally scoped to a team/event type (`role-management:write`)
 - `DELETE /api/v1/organizations/:organizationId/roles/:roleId/assignments/:assignmentId` - Remove role assignment (`role-management:write`)
+- `GET /api/v1/organizations/:organizationId/sites` - List sites (paginated, `site-management:read`)
+- `GET /api/v1/organizations/:organizationId/sites/all` - List all sites (no pagination, `site-management:read`)
+- `POST /api/v1/organizations/:organizationId/sites` - Create site (`site-management:write`)
+- `GET /api/v1/organizations/:organizationId/sites/:siteId` - Get site (`site-management:read`)
+- `PATCH /api/v1/organizations/:organizationId/sites/:siteId` - Update site (`site-management:write`)
+- `DELETE /api/v1/organizations/:organizationId/sites/:siteId` - Delete site and its rooms (`site-management:write`)
+- `GET /api/v1/organizations/:organizationId/sites/:siteId/rooms` - List rooms in a site (paginated, `room-management:read`)
+- `GET /api/v1/organizations/:organizationId/sites/:siteId/rooms/all` - List all rooms in a site (`room-management:read`)
+- `POST /api/v1/organizations/:organizationId/sites/:siteId/rooms` - Create room (`room-management:write`)
+- `GET /api/v1/organizations/:organizationId/sites/:siteId/rooms/:roomId` - Get room (`room-management:read`)
+- `PATCH /api/v1/organizations/:organizationId/sites/:siteId/rooms/:roomId` - Update room (`room-management:write`)
+- `DELETE /api/v1/organizations/:organizationId/sites/:siteId/rooms/:roomId` - Delete room (`room-management:write`)
+- `GET /api/v1/organizations/:organizationId/rooms` - List all rooms in an organization, optionally filtered by `siteId` (`room-management:read`)
+- `GET /api/v1/organizations/:organizationId/rooms/all` - List all rooms in an organization, optionally filtered by `siteId` (`room-management:read`)
 
 ## Frontend Architecture
 
@@ -267,8 +281,10 @@ frontend/src/
 - **Migrations**: node-pg-migrate. Migration files live in `backend/migrations/`.
 - **Schema**: tables covering users, authentication accounts (multi-provider),
   access tokens, records, permissions, roles, role permissions, user roles,
-  organizations, teams, calendars, event types, jobs, events, responsibilities,
-  assignments, operations, and operation assignments.
+  organizations, teams, sites (physical locations), rooms (within sites),
+  calendars, event types, jobs, events, responsibilities, assignments,
+  operations, and operation assignments. Events can be assigned to a site
+  (optionally reserving the whole site) and/or a specific room within a site.
 - **Auth tables**: `permissions` holds the system-defined permission codes;
   `auth_accounts` links users to provider accounts (discord, google, microsoft);
   `roles` belong to an organization and are granted permissions via

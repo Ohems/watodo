@@ -109,10 +109,24 @@ export interface TeamMembers {
   created_at: Generated<Date>;
 }
 
-export interface Locations {
+export interface Sites {
+  id: Generated<string>;
+  name: string;
+  /** Optional description of the site (a building, park, or other place). */
+  description: string | null;
+  /** Optional postal address of the site. */
+  address: string | null;
+  organization_id: string;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface Rooms {
   id: Generated<string>;
   name: string;
   description: Generated<string>;
+  /** The site this room belongs to. */
+  site_id: string;
   organization_id: string;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
@@ -168,7 +182,12 @@ export interface EventSeriesTable {
   title: string;
   description: string | null;
   calendar_id: string;
-  location_id: string | null;
+  /** The site the event is assigned to (nullable). */
+  site_id: string | null;
+  /** The specific room within the site (nullable). */
+  room_id: string | null;
+  /** When true and a site is assigned without a room, the whole site is reserved. */
+  reserve_whole_site: Generated<boolean>;
   start: Date;
   duration_minutes: number;
   is_all_day: Generated<boolean>;
@@ -256,7 +275,8 @@ export interface Database {
   user_organizations: UserOrganizations;
   teams: Teams;
   team_members: TeamMembers;
-  locations: Locations;
+  sites: Sites;
+  rooms: Rooms;
   jobs: Jobs;
   notifications: Notifications;
   calendars: Calendars;
@@ -306,9 +326,13 @@ export type TeamUpdate = Updateable<Teams>;
 export type TeamMember = Selectable<TeamMembers>;
 export type NewTeamMember = Insertable<TeamMembers>;
 
-export type Location = Selectable<Locations>;
-export type NewLocation = Insertable<Locations>;
-export type LocationUpdate = Updateable<Locations>;
+export type Site = Selectable<Sites>;
+export type NewSite = Insertable<Sites>;
+export type SiteUpdate = Updateable<Sites>;
+
+export type Room = Selectable<Rooms>;
+export type NewRoom = Insertable<Rooms>;
+export type RoomUpdate = Updateable<Rooms>;
 
 export type Job = Selectable<Jobs>;
 export type NewJob = Insertable<Jobs>;

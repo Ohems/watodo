@@ -37,6 +37,9 @@ export interface EventSeriesResponse {
   title: string;
   description: string | null;
   calendarId: string;
+  siteId: string | null;
+  roomId: string | null;
+  reserveWholeSite: boolean;
   start: string;
   durationMinutes: number;
   isAllDay: boolean;
@@ -53,6 +56,9 @@ export interface EventOccurrenceResponse {
   title: string;
   description: string | null;
   isAllDay: boolean;
+  siteId: string | null;
+  roomId: string | null;
+  reserveWholeSite: boolean;
   occurrenceStart: string;
   start: string;
   end: string;
@@ -136,6 +142,9 @@ function serializeSeries(series: EventSeries): EventSeriesResponse {
     title: series.title,
     description: series.description,
     calendarId: series.calendar_id,
+    siteId: series.site_id,
+    roomId: series.room_id,
+    reserveWholeSite: series.reserve_whole_site,
     start: series.start.toISOString(),
     durationMinutes: series.duration_minutes,
     isAllDay: series.is_all_day,
@@ -157,6 +166,9 @@ function serializeOccurrence(
     title: series.title,
     description: series.description,
     isAllDay: series.is_all_day,
+    siteId: series.site_id,
+    roomId: series.room_id,
+    reserveWholeSite: series.reserve_whole_site,
     occurrenceStart: occurrence.occurrenceStart.toISOString(),
     start: occurrence.start.toISOString(),
     end: occurrence.end.toISOString(),
@@ -528,6 +540,9 @@ export async function splitEventSeries(
           title,
           description,
           calendar_id: calendarId,
+          site_id: series.site_id,
+          room_id: series.room_id,
+          reserve_whole_site: series.reserve_whole_site,
           start,
           duration_minutes: durationMinutes,
           is_all_day: isAllDay,
@@ -569,6 +584,9 @@ export async function splitEventSeries(
         title,
         description,
         calendar_id: calendarId,
+        site_id: series.site_id,
+        room_id: series.room_id,
+        reserve_whole_site: series.reserve_whole_site,
         start,
         duration_minutes: durationMinutes,
         is_all_day: isAllDay,
@@ -652,8 +670,11 @@ export async function getOccurrences(
   if (calendarId) {
     query = query.where('calendar_id', '=', calendarId);
   }
-  if (filter?.locationId) {
-    query = query.where('location_id', '=', filter.locationId);
+  if (filter?.siteId) {
+    query = query.where('site_id', '=', filter.siteId);
+  }
+  if (filter?.roomId) {
+    query = query.where('room_id', '=', filter.roomId);
   }
   if (filter?.teamId) {
     query = query
@@ -744,6 +765,9 @@ export async function getOccurrenceDetail(
       title: series.title,
       description: series.description,
       isAllDay: series.is_all_day,
+      siteId: series.site_id,
+      roomId: series.room_id,
+      reserveWholeSite: series.reserve_whole_site,
       occurrenceStart: occurrenceStart.toISOString(),
       start: start.toISOString(),
       end: end.toISOString(),
@@ -1136,7 +1160,7 @@ export async function deleteEventComment(
 
   await db.deleteFrom('event_comments').where('id', '=', commentId).execute();
 }
-// --- Event series management (location, teams, paginated listing) ---
+// --- Event series management (site/room, teams, paginated listing) ---
 
 export interface EventSeriesTeamResponse {
   id: string;
@@ -1144,8 +1168,8 @@ export interface EventSeriesTeamResponse {
 }
 
 export interface EventSeriesManagementResponse extends EventSeriesResponse {
-  locationId: string | null;
-  locationName: string | null;
+  siteName: string | null;
+  roomName: string | null;
   teams: EventSeriesTeamResponse[];
 }
 
@@ -1156,15 +1180,22 @@ export interface PaginatedEventSeries {
   limit: number;
 }
 
-async function getLocationNames(locationIds: (string | null)[]): Promise<Map<string, string>> {
+async function getSiteNames(siteIds: (string | null)[]): Promise<Map<string, string>> {
   const result = new Map<string, string>();
-  const ids = [...new Set(locationIds.filter((id): id is string => id !== null))];
+  const ids = [...new Set(siteIds.filter((id): id is string => id !== null))];
   if (ids.length === 0) return result;
-  const rows = await db
-    .selectFrom('locations')
-    .select(['id', 'name'])
-    .where('id', 'in', ids)
-    .execute();
+  const rows = await db.selectFrom('sites').select(['id', 'name']).where('id', 'in', ids).execute();
+  for (const row of rows) {
+    result.set(row.id, row.name);
+  }
+  return result;
+}
+
+async function getRoomNames(roomIds: (string | null)[]): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  const ids = [...new Set(roomIds.filter((id): id is string => id !== null))];
+  if (ids.length === 0) return result;
+  const rows = await db.selectFrom('rooms').select(['id', 'name']).where('id', 'in', ids).execute();
   for (const row of rows) {
     result.set(row.id, row.name);
   }
@@ -1197,13 +1228,14 @@ async function getSeriesTeamsMap(
 
 function serializeSeriesManagement(
   series: EventSeries,
-  locationName: string | null,
+  siteName: string | null,
+  roomName: string | null,
   teams: EventSeriesTeamResponse[],
 ): EventSeriesManagementResponse {
   return {
     ...serializeSeries(series),
-    locationId: series.location_id,
-    locationName,
+    siteName,
+    roomName,
     teams,
   };
 }
@@ -1219,7 +1251,8 @@ export async function listEventSeriesPaginated(query: {
   search?: string;
   startFrom?: string;
   startTo?: string;
-  locationId?: string;
+  siteId?: string;
+  roomId?: string;
   teamId?: string;
   hasTeam?: boolean;
 }): Promise<PaginatedEventSeries> {
@@ -1248,9 +1281,14 @@ export async function listEventSeriesPaginated(query: {
     countQuery = countQuery.where('event_series.start', '<=', to);
   }
 
-  if (query.locationId) {
-    baseQuery = baseQuery.where('event_series.location_id', '=', query.locationId);
-    countQuery = countQuery.where('event_series.location_id', '=', query.locationId);
+  if (query.siteId) {
+    baseQuery = baseQuery.where('event_series.site_id', '=', query.siteId);
+    countQuery = countQuery.where('event_series.site_id', '=', query.siteId);
+  }
+
+  if (query.roomId) {
+    baseQuery = baseQuery.where('event_series.room_id', '=', query.roomId);
+    countQuery = countQuery.where('event_series.room_id', '=', query.roomId);
   }
 
   if (query.teamId) {
@@ -1293,13 +1331,15 @@ export async function listEventSeriesPaginated(query: {
     countQuery.executeTakeFirstOrThrow(),
   ]);
 
-  const locationNames = await getLocationNames(rows.map(r => r.location_id));
+  const siteNames = await getSiteNames(rows.map(r => r.site_id));
+  const roomNames = await getRoomNames(rows.map(r => r.room_id));
   const teamsMap = await getSeriesTeamsMap(rows.map(r => r.id));
 
   const items = rows.map(row =>
     serializeSeriesManagement(
       row as EventSeries,
-      row.location_id ? (locationNames.get(row.location_id) ?? null) : null,
+      row.site_id ? (siteNames.get(row.site_id) ?? null) : null,
+      row.room_id ? (roomNames.get(row.room_id) ?? null) : null,
       teamsMap.get(row.id) ?? [],
     ),
   );
@@ -1313,53 +1353,103 @@ export async function listEventSeriesPaginated(query: {
 }
 
 /**
- * Gets a single event series with its location and teams for the management view.
+ * Gets a single event series with its site/room and teams for the management view.
  * @param seriesId - The series ID.
- * @returns The series with location and teams.
+ * @returns The series with site/room and teams.
  */
 export async function getEventSeriesManagement(
   seriesId: number,
 ): Promise<EventSeriesManagementResponse> {
   logger.trace('eventService.getEventSeriesManagement');
   const series = await getSeriesRowOrThrow(seriesId);
-  const locationName = series.location_id
-    ? ((await getLocationNames([series.location_id])).get(series.location_id) ?? null)
+  const siteName = series.site_id
+    ? ((await getSiteNames([series.site_id])).get(series.site_id) ?? null)
+    : null;
+  const roomName = series.room_id
+    ? ((await getRoomNames([series.room_id])).get(series.room_id) ?? null)
     : null;
   const teamsMap = await getSeriesTeamsMap([seriesId]);
-  return serializeSeriesManagement(series, locationName, teamsMap.get(seriesId) ?? []);
+  return serializeSeriesManagement(series, siteName, roomName, teamsMap.get(seriesId) ?? []);
 }
 
 /**
- * Updates the location and team assignments of an event series.
+ * Updates the site/room and team assignments of an event series.
+ *
+ * Assignment semantics:
+ * - No site and no room: the event has no location.
+ * - Site only (reserveWholeSite false): the event is at the site, room TBD.
+ * - Site only (reserveWholeSite true): the event reserves the whole site.
+ * - Site and room: the event is in a specific room within the site. When a
+ *   room is set, the site is derived from the room if not given explicitly.
  * @param seriesId - The series ID.
- * @param data - The location and team IDs.
- * @returns The updated series with location and teams.
+ * @param data - The site, room, reserveWholeSite and team IDs.
+ * @returns The updated series with site/room and teams.
  */
 export async function updateEventSeriesConfig(
   seriesId: number,
-  data: { locationId?: string | null; teamIds?: string[] },
+  data: {
+    siteId?: string | null;
+    roomId?: string | null;
+    reserveWholeSite?: boolean;
+    teamIds?: string[];
+  },
 ): Promise<EventSeriesManagementResponse> {
   logger.trace('eventService.updateEventSeriesConfig');
   await getSeriesRowOrThrow(seriesId);
 
-  if (data.locationId !== undefined && data.locationId !== null) {
-    const location = await db
-      .selectFrom('locations')
+  // Validate the site.
+  if (data.siteId !== undefined && data.siteId !== null) {
+    const site = await db
+      .selectFrom('sites')
       .select('id')
-      .where('id', '=', data.locationId)
+      .where('id', '=', data.siteId)
       .executeTakeFirst();
-    if (!location) {
-      throw notFound(`Location ${data.locationId} not found!`);
+    if (!site) {
+      throw notFound(`Site ${data.siteId} not found!`);
+    }
+  }
+
+  // Validate the room and derive its site when a room is given.
+  let resolvedSiteId = data.siteId ?? undefined;
+  if (data.roomId !== undefined && data.roomId !== null) {
+    const room = await db
+      .selectFrom('rooms')
+      .select(['id', 'site_id'])
+      .where('id', '=', data.roomId)
+      .executeTakeFirst();
+    if (!room) {
+      throw notFound(`Room ${data.roomId} not found!`);
+    }
+    // If no explicit site is given, derive it from the room.
+    if (resolvedSiteId === undefined) {
+      resolvedSiteId = room.site_id;
     }
   }
 
   return db.transaction().execute(async tx => {
-    if (data.locationId !== undefined) {
-      await tx
-        .updateTable('event_series')
-        .set({ location_id: data.locationId, updated_at: new Date() })
-        .where('id', '=', seriesId)
-        .execute();
+    if (
+      data.siteId !== undefined ||
+      data.roomId !== undefined ||
+      data.reserveWholeSite !== undefined
+    ) {
+      const updates: Record<string, unknown> = { updated_at: new Date() };
+      if (data.siteId !== undefined) updates.site_id = data.siteId;
+      if (data.roomId !== undefined) updates.room_id = data.roomId;
+      if (data.reserveWholeSite !== undefined) updates.reserve_whole_site = data.reserveWholeSite;
+      // When a room is assigned without an explicit site, derive the site.
+      if (
+        data.siteId === undefined &&
+        data.roomId !== undefined &&
+        data.roomId !== null &&
+        resolvedSiteId !== undefined
+      ) {
+        updates.site_id = resolvedSiteId;
+      }
+      // When the room is cleared, also clear reserve_whole_site.
+      if (data.roomId === null) {
+        updates.reserve_whole_site = false;
+      }
+      await tx.updateTable('event_series').set(updates).where('id', '=', seriesId).execute();
     }
 
     if (data.teamIds !== undefined) {
@@ -1388,10 +1478,13 @@ export async function updateEventSeriesConfig(
       .where('id', '=', seriesId)
       .executeTakeFirstOrThrow();
 
-    const locationName = updated.location_id
-      ? ((await getLocationNames([updated.location_id])).get(updated.location_id) ?? null)
+    const siteName = updated.site_id
+      ? ((await getSiteNames([updated.site_id])).get(updated.site_id) ?? null)
+      : null;
+    const roomName = updated.room_id
+      ? ((await getRoomNames([updated.room_id])).get(updated.room_id) ?? null)
       : null;
     const teamsMap = await getSeriesTeamsMap([seriesId]);
-    return serializeSeriesManagement(updated, locationName, teamsMap.get(seriesId) ?? []);
+    return serializeSeriesManagement(updated, siteName, roomName, teamsMap.get(seriesId) ?? []);
   });
 }

@@ -134,11 +134,12 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
   pgm.addConstraint('team_members', 'team_members_team_user_unique', 'UNIQUE(team_id, user_id)');
   pgm.createIndex('team_members', 'user_id');
 
-  // Locations (organization-scoped venues where events take place)
-  pgm.createTable('locations', {
+  // Sites (organization-scoped physical locations: buildings, parks, etc.)
+  pgm.createTable('sites', {
     id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
     name: { type: 'text', notNull: true },
-    description: { type: 'text', notNull: true, default: '' },
+    description: { type: 'text' },
+    address: { type: 'text' },
     organization_id: {
       type: 'uuid',
       notNull: true,
@@ -148,7 +149,30 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
-  pgm.createIndex('locations', 'organization_id');
+  pgm.createIndex('sites', 'organization_id');
+
+  // Rooms (organization-scoped rooms within a site where events take place)
+  pgm.createTable('rooms', {
+    id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
+    name: { type: 'text', notNull: true },
+    description: { type: 'text', notNull: true, default: '' },
+    site_id: {
+      type: 'uuid',
+      notNull: true,
+      references: 'sites',
+      onDelete: 'CASCADE',
+    },
+    organization_id: {
+      type: 'uuid',
+      notNull: true,
+      references: 'organizations',
+      onDelete: 'CASCADE',
+    },
+    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+    updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+  });
+  pgm.createIndex('rooms', 'organization_id');
+  pgm.createIndex('rooms', 'site_id');
 
   // Jobs (organization-scoped job types, e.g. "Cook", "Driver")
   pgm.createTable('jobs', {
@@ -282,7 +306,9 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     title: { type: 'text', notNull: true },
     description: { type: 'text' },
     calendar_id: { type: 'uuid', notNull: true, references: 'calendars', onDelete: 'CASCADE' },
-    location_id: { type: 'uuid', references: 'locations', onDelete: 'SET NULL' },
+    site_id: { type: 'uuid', references: 'sites', onDelete: 'SET NULL' },
+    room_id: { type: 'uuid', references: 'rooms', onDelete: 'SET NULL' },
+    reserve_whole_site: { type: 'boolean', notNull: true, default: false },
     start: { type: 'timestamptz', notNull: true },
     duration_minutes: { type: 'integer', notNull: true, default: 60 },
     is_all_day: { type: 'boolean', notNull: true, default: false },
@@ -299,7 +325,8 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
   );
   pgm.createIndex('event_series', 'calendar_id');
   pgm.createIndex('event_series', 'start');
-  pgm.createIndex('event_series', 'location_id');
+  pgm.createIndex('event_series', 'site_id');
+  pgm.createIndex('event_series', 'room_id');
 
   // Event series to teams (many-to-many: teams assigned to an event series)
   pgm.createTable('event_series_teams', {
@@ -455,7 +482,8 @@ export async function down(pgm: MigrationBuilder): Promise<void> {
   pgm.dropTable('calendars');
   pgm.dropTable('notifications');
   pgm.dropTable('jobs');
-  pgm.dropTable('locations');
+  pgm.dropTable('rooms');
+  pgm.dropTable('sites');
   pgm.dropTable('team_members');
   pgm.dropTable('teams');
   pgm.dropTable('user_organizations');

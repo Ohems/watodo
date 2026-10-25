@@ -14,21 +14,21 @@ import {
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
-import { locationsApi } from '../../api/index.js';
+import { roomsApi } from '../../api/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
-import type { Location } from '../../types/index.js';
+import type { Room } from '../../types/index.js';
 
-function LocationConfigPage() {
+function RoomConfigPage() {
   const { t } = useTranslation();
-  const { locationId } = useParams<{ locationId: string }>();
+  const { siteId, roomId } = useParams<{ siteId: string; roomId: string }>();
   const navigate = useNavigate();
   const activeOrganizationId = useAppSelector(state => state.organization.activeOrganizationId);
   const currentUser = useAppSelector(state => state.user.currentUser);
   const canWrite =
     currentUser?.permissions?.includes('admin') === true ||
-    currentUser?.permissions?.includes('location-management:write') === true;
+    currentUser?.permissions?.includes('room-management:write') === true;
 
-  const [location, setLocation] = useState<Location | null>(null);
+  const [room, setRoom] = useState<Room | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,12 +38,12 @@ function LocationConfigPage() {
   const [editDescription, setEditDescription] = useState('');
 
   const load = useCallback(async () => {
-    if (!activeOrganizationId || !locationId) return;
+    if (!activeOrganizationId || !siteId || !roomId) return;
     setLoading(true);
     setError(null);
     try {
-      const data = await locationsApi.getLocation(activeOrganizationId, locationId);
-      setLocation(data);
+      const data = await roomsApi.getRoom(activeOrganizationId, siteId, roomId);
+      setRoom(data);
       setEditName(data.name);
       setEditDescription(data.description);
     } catch (err) {
@@ -51,18 +51,18 @@ function LocationConfigPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeOrganizationId, locationId]);
+  }, [activeOrganizationId, siteId, roomId]);
 
   useEffect(() => {
     load();
   }, [load]);
 
   const handleSave = async () => {
-    if (!activeOrganizationId || !locationId) return;
+    if (!activeOrganizationId || !siteId || !roomId) return;
     setSaving(true);
     setError(null);
     try {
-      await locationsApi.updateLocation(activeOrganizationId, locationId, {
+      await roomsApi.updateRoom(activeOrganizationId, siteId, roomId, {
         name: editName,
         description: editDescription,
       });
@@ -83,10 +83,10 @@ function LocationConfigPage() {
     );
   }
 
-  if (!location) {
+  if (!room) {
     return (
       <Box p="md">
-        <Alert color="red">{error ?? 'Location not found'}</Alert>
+        <Alert color="red">{error ?? 'Room not found'}</Alert>
       </Box>
     );
   }
@@ -95,7 +95,7 @@ function LocationConfigPage() {
     <Box p="md" maw={600} mx="auto">
       <Paper shadow="sm" p="lg">
         <Group justify="space-between" mb="md">
-          <Title order={3}>{editing ? t('locations.editLocation') : location.name}</Title>
+          <Title order={3}>{editing ? t('rooms.editRoom') : room.name}</Title>
           {canWrite && (
             <Group>
               {!editing ? (
@@ -108,8 +108,8 @@ function LocationConfigPage() {
                     variant="default"
                     onClick={() => {
                       setEditing(false);
-                      setEditName(location.name);
-                      setEditDescription(location.description);
+                      setEditName(room.name);
+                      setEditDescription(room.description);
                     }}
                   >
                     {t('common.cancel')}
@@ -137,7 +137,7 @@ function LocationConfigPage() {
             {editing ? (
               <TextInput value={editName} onChange={e => setEditName(e.target.value)} />
             ) : (
-              <Text>{location.name}</Text>
+              <Text>{room.name}</Text>
             )}
           </Box>
           <Box>
@@ -151,15 +151,15 @@ function LocationConfigPage() {
               />
             ) : (
               <Text>
-                {location.description || <em style={{ color: '#999' }}>{t('common.notSet')}</em>}
+                {room.description || <em style={{ color: '#999' }}>{t('common.notSet')}</em>}
               </Text>
             )}
           </Box>
         </Stack>
 
         <Box mt="lg">
-          <Button variant="subtle" onClick={() => navigate('/organization/locations')}>
-            {t('locations.backToList')}
+          <Button variant="subtle" onClick={() => navigate(`/organization/sites/${siteId}`)}>
+            {t('rooms.backToSite')}
           </Button>
         </Box>
       </Paper>
@@ -167,4 +167,4 @@ function LocationConfigPage() {
   );
 }
 
-export default LocationConfigPage;
+export default RoomConfigPage;

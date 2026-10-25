@@ -4,6 +4,7 @@ import {
   Box,
   Button,
   Center,
+  Checkbox,
   Group,
   Loader,
   MultiSelect,
@@ -16,9 +17,9 @@ import {
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
-import { eventManagementApi, locationsApi, teamsApi } from '../../api/index.js';
+import { eventManagementApi, roomsApi, sitesApi, teamsApi } from '../../api/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
-import type { EventSeriesManagement, Location, Team } from '../../types/index.js';
+import type { EventSeriesManagement, Room, Site, Team } from '../../types/index.js';
 
 function EventConfigPage() {
   const { t } = useTranslation();
@@ -31,13 +32,16 @@ function EventConfigPage() {
     currentUser?.permissions?.includes('events:write') === true;
 
   const [series, setSeries] = useState<EventSeriesManagement | null>(null);
-  const [locations, setLocations] = useState<Location[]>([]);
+  const [sites, setSites] = useState<Site[]>([]);
+  const [rooms, setRooms] = useState<Room[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
+  const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
+  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
+  const [reserveWholeSite, setReserveWholeSite] = useState(false);
   const [selectedTeamIds, setSelectedTeamIds] = useState<string[]>([]);
 
   const seriesId = Number.parseInt(eventId ?? '', 10);
@@ -51,19 +55,21 @@ function EventConfigPage() {
     setLoading(true);
     setError(null);
     try {
-      const [seriesData, locationsData, teamsData] = await Promise.all([
+      const [seriesData, sitesData, roomsData, teamsData] = await Promise.all([
         eventManagementApi.getEventSeries(seriesId),
-        activeOrganizationId
-          ? locationsApi.listAllLocations(activeOrganizationId)
-          : Promise.resolve([]),
+        activeOrganizationId ? sitesApi.listAllSites(activeOrganizationId) : Promise.resolve([]),
+        activeOrganizationId ? roomsApi.listAllRooms(activeOrganizationId) : Promise.resolve([]),
         activeOrganizationId
           ? teamsApi.listTeams(activeOrganizationId, { limit: 200 })
           : Promise.resolve({ items: [] }),
       ]);
       setSeries(seriesData);
-      setLocations(locationsData);
+      setSites(sitesData);
+      setRooms(roomsData);
       setTeams(teamsData.items);
-      setSelectedLocationId(seriesData.locationId);
+      setSelectedSiteId(seriesData.siteId);
+      setSelectedRoomId(seriesData.roomId);
+      setReserveWholeSite(seriesData.reserveWholeSite);
       setSelectedTeamIds(seriesData.teams.map(team => team.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -76,13 +82,28 @@ function EventConfigPage() {
     load();
   }, [load]);
 
+  // When the site changes, filter rooms to that site and clear the room if it
+  // does not belong to the selected site.
+  useEffect(() => {
+    if (selectedRoomId && selectedSiteId) {
+      const room = rooms.find(r => r.id === selectedRoomId);
+      if (room && room.siteId !== selectedSiteId) {
+        setSelectedRoomId(null);
+      }
+    }
+  }, [selectedSiteId, rooms, selectedRoomId]);
+
+  const availableRooms = selectedSiteId ? rooms.filter(r => r.siteId === selectedSiteId) : rooms;
+
   const handleSave = async () => {
     if (!series) return;
     setSaving(true);
     setError(null);
     try {
       await eventManagementApi.updateConfig(series.id, {
-        locationId: selectedLocationId,
+        siteId: selectedSiteId,
+        roomId: selectedRoomId,
+        reserveWholeSite,
         teamIds: selectedTeamIds,
       });
       await load();
@@ -151,20 +172,58 @@ function EventConfigPage() {
 
           <Box>
             <Text size="sm" fw={500} c="dimmed" mb={4}>
-              {t('events.location')}
+              {t('events.site')}
             </Text>
             {canWrite ? (
               <Select
-                value={selectedLocationId}
-                onChange={setSelectedLocationId}
-                data={locations.map(loc => ({ value: loc.id, label: loc.name }))}
-                placeholder={t('events.noLocation')}
+                value={selectedSiteId}
+                onChange={value => {
+                  setSelectedSiteId(value);
+                  setSelectedRoomId(null);
+                  setReserveWholeSite(false);
+                }}
+                data={sites.map(s => ({ value: s.id, label: s.name }))}
+                placeholder={t('events.noSite')}
                 clearable
               />
             ) : (
-              <Text>{series.locationName ?? t('events.noLocation')}</Text>
+              <Text>{series.siteName ?? t('events.noSite')}</Text>
             )}
           </Box>
+
+          {selectedSiteId && (
+            <>
+              <Box>
+                <Text size="sm" fw={500} c="dimmed" mb={4}>
+                  {t('events.room')}
+                </Text>
+                {canWrite ? (
+                  <Select
+                    value={selectedRoomId}
+                    onChange={setSelectedRoomId}
+                    data={availableRooms.map(r => ({ value: r.id, label: r.name }))}
+                    placeholder={t('events.roomUnclear')}
+                    clearable
+                  />
+                ) : (
+                  <Text>{series.roomName ?? t('events.roomUnclear')}</Text>
+                )}
+              </Box>
+
+              {!selectedRoomId && canWrite && (
+                <Checkbox
+                  label={t('events.reserveWholeSite')}
+                  checked={reserveWholeSite}
+                  onChange={e => setReserveWholeSite(e.currentTarget.checked)}
+                />
+              )}
+              {!canWrite && reserveWholeSite && !series.roomId && (
+                <Badge color="blue" variant="light">
+                  {t('events.wholeSiteReserved')}
+                </Badge>
+              )}
+            </>
+          )}
 
           <Box>
             <Text size="sm" fw={500} c="dimmed" mb={4}>

@@ -164,7 +164,8 @@ export const eventsApi = {
     });
     if (calendarId) params.set('calendarId', calendarId);
     if (filter?.scope) params.set('scope', filter.scope);
-    if (filter?.locationId) params.set('locationId', filter.locationId);
+    if (filter?.siteId) params.set('siteId', filter.siteId);
+    if (filter?.roomId) params.set('roomId', filter.roomId);
     if (filter?.teamId) params.set('teamId', filter.teamId);
     return api.get<EventOccurrence[]>(`/api/v1/event-series/occurrences?${params.toString()}`);
   },
@@ -269,31 +270,79 @@ export const teamsApi = {
     api.delete(`/api/v1/organizations/${organizationId}/teams/${teamId}/members/${userId}`),
 };
 
-// --- Locations ---
+// --- Sites ---
 
-import type { Location, LocationPush, LocationUpdate } from '../types/index.js';
+import type { Site, SitePush, SiteUpdate } from '../types/index.js';
 
-export const locationsApi = {
-  listLocations: (organizationId: string, query?: TableQuery) => {
+export const sitesApi = {
+  listSites: (organizationId: string, query?: TableQuery) => {
     const params = new URLSearchParams();
     if (query?.page !== undefined) params.set('page', String(query.page));
     if (query?.limit !== undefined) params.set('limit', String(query.limit));
     if (query?.search) params.set('search', query.search);
     const qs = params.toString();
-    return api.get<Paginated<Location>>(
-      `/api/v1/organizations/${organizationId}/locations${qs ? `?${qs}` : ''}`,
+    return api.get<Paginated<Site>>(
+      `/api/v1/organizations/${organizationId}/sites${qs ? `?${qs}` : ''}`,
     );
   },
-  listAllLocations: (organizationId: string) =>
-    api.get<Location[]>(`/api/v1/organizations/${organizationId}/locations/all`),
-  getLocation: (organizationId: string, locationId: string) =>
-    api.get<Location>(`/api/v1/organizations/${organizationId}/locations/${locationId}`),
-  createLocation: (organizationId: string, data: LocationPush) =>
-    api.post<Location>(`/api/v1/organizations/${organizationId}/locations`, data),
-  updateLocation: (organizationId: string, locationId: string, data: LocationUpdate) =>
-    api.patch<Location>(`/api/v1/organizations/${organizationId}/locations/${locationId}`, data),
-  deleteLocation: (organizationId: string, locationId: string) =>
-    api.delete(`/api/v1/organizations/${organizationId}/locations/${locationId}`),
+  listAllSites: (organizationId: string) =>
+    api.get<Site[]>(`/api/v1/organizations/${organizationId}/sites/all`),
+  getSite: (organizationId: string, siteId: string) =>
+    api.get<Site>(`/api/v1/organizations/${organizationId}/sites/${siteId}`),
+  createSite: (organizationId: string, data: SitePush) =>
+    api.post<Site>(`/api/v1/organizations/${organizationId}/sites`, data),
+  updateSite: (organizationId: string, siteId: string, data: SiteUpdate) =>
+    api.patch<Site>(`/api/v1/organizations/${organizationId}/sites/${siteId}`, data),
+  deleteSite: (organizationId: string, siteId: string) =>
+    api.delete(`/api/v1/organizations/${organizationId}/sites/${siteId}`),
+};
+
+// --- Rooms ---
+
+import type { Room, RoomPush, RoomUpdate } from '../types/index.js';
+
+export const roomsApi = {
+  listRooms: (organizationId: string, query?: TableQuery & { siteId?: string }) => {
+    const params = new URLSearchParams();
+    if (query?.page !== undefined) params.set('page', String(query.page));
+    if (query?.limit !== undefined) params.set('limit', String(query.limit));
+    if (query?.search) params.set('search', query.search);
+    if (query?.siteId) params.set('siteId', query.siteId);
+    const qs = params.toString();
+    return api.get<Paginated<Room>>(
+      `/api/v1/organizations/${organizationId}/rooms${qs ? `?${qs}` : ''}`,
+    );
+  },
+  listAllRooms: (organizationId: string, siteId?: string) => {
+    const qs = siteId ? `?siteId=${encodeURIComponent(siteId)}` : '';
+    return api.get<Room[]>(`/api/v1/organizations/${organizationId}/rooms/all${qs}`);
+  },
+  listRoomsBySite: (organizationId: string, siteId: string, query?: TableQuery) => {
+    const params = new URLSearchParams();
+    if (query?.page !== undefined) params.set('page', String(query.page));
+    if (query?.limit !== undefined) params.set('limit', String(query.limit));
+    if (query?.search) params.set('search', query.search);
+    const qs = params.toString();
+    return api.get<Paginated<Room>>(
+      `/api/v1/organizations/${organizationId}/sites/${siteId}/rooms${qs ? `?${qs}` : ''}`,
+    );
+  },
+  listAllRoomsBySite: (organizationId: string, siteId: string) =>
+    api.get<Room[]>(`/api/v1/organizations/${organizationId}/sites/${siteId}/rooms/all`),
+  getRoom: (organizationId: string, siteId: string, roomId: string) =>
+    api.get<Room>(`/api/v1/organizations/${organizationId}/sites/${siteId}/rooms/${roomId}`),
+  createRoom: (
+    organizationId: string,
+    siteId: string,
+    data: Omit<RoomPush, 'siteId' | 'organizationId'>,
+  ) => api.post<Room>(`/api/v1/organizations/${organizationId}/sites/${siteId}/rooms`, data),
+  updateRoom: (organizationId: string, siteId: string, roomId: string, data: RoomUpdate) =>
+    api.patch<Room>(
+      `/api/v1/organizations/${organizationId}/sites/${siteId}/rooms/${roomId}`,
+      data,
+    ),
+  deleteRoom: (organizationId: string, siteId: string, roomId: string) =>
+    api.delete(`/api/v1/organizations/${organizationId}/sites/${siteId}/rooms/${roomId}`),
 };
 
 // --- Jobs ---
@@ -373,7 +422,8 @@ export const eventManagementApi = {
     if (query?.search) params.set('search', query.search);
     if (query?.startFrom) params.set('startFrom', query.startFrom);
     if (query?.startTo) params.set('startTo', query.startTo);
-    if (query?.locationId) params.set('locationId', query.locationId);
+    if (query?.siteId) params.set('siteId', query.siteId);
+    if (query?.roomId) params.set('roomId', query.roomId);
     if (query?.teamId) params.set('teamId', query.teamId);
     if (query?.hasTeam !== undefined) params.set('hasTeam', String(query.hasTeam));
     const qs = params.toString();

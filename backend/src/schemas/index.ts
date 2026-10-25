@@ -181,7 +181,8 @@ export const eventSeriesUpdateSchema = eventSeriesPushSchema.partial();
 
 export const occurrenceFilterSchema = z.object({
   scope: z.enum(['all', 'team', 'mine']).optional(),
-  locationId: z.uuid().optional(),
+  siteId: z.uuid().optional(),
+  roomId: z.uuid().optional(),
   teamId: z.uuid().optional(),
 });
 
@@ -273,17 +274,44 @@ export const teamMemberSchema = z.object({
   userId: z.uuid(),
 });
 
-// --- Locations ---
+// --- Sites ---
 
-export const locationPushSchema = z.object({
+export const sitePushSchema = z.object({
   name: z.string().min(1),
-  description: z.string().optional(),
+  description: z.string().nullable().optional(),
+  address: z.string().nullable().optional(),
   organizationId: z.uuid(),
 });
 
-export const locationUpdateSchema = z.object({
+export const siteUpdateSchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().nullable().optional(),
+  address: z.string().nullable().optional(),
+});
+
+export const siteParamsSchema = z.object({
+  organizationId: z.uuid(),
+  siteId: z.uuid(),
+});
+
+// --- Rooms ---
+
+export const roomPushSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  siteId: z.uuid(),
+  organizationId: z.uuid(),
+});
+
+export const roomUpdateSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
+});
+
+export const roomParamsSchema = z.object({
+  organizationId: z.uuid(),
+  siteId: z.uuid(),
+  roomId: z.uuid(),
 });
 
 // --- Jobs ---
@@ -319,23 +347,28 @@ export const eventSeriesListQuerySchema = z.object({
   search: z.string().optional(),
   startFrom: z.iso.datetime().optional(),
   startTo: z.iso.datetime().optional(),
-  locationId: z.uuid().optional(),
+  siteId: z.uuid().optional(),
+  roomId: z.uuid().optional(),
   teamId: z.uuid().optional(),
   hasTeam: z.coerce.boolean().optional(),
 });
 
-// --- Event series location/team update ---
+// --- Event series site/room/team update ---
 
 export const eventSeriesConfigSchema = z.object({
-  locationId: z.uuid().nullable().optional(),
+  siteId: z.uuid().nullable().optional(),
+  roomId: z.uuid().nullable().optional(),
+  reserveWholeSite: z.boolean().optional(),
   teamIds: z.array(z.uuid()).optional(),
 });
 
 export type TeamPush = z.infer<typeof teamPushSchema>;
 export type TeamUpdate = z.infer<typeof teamUpdateSchema>;
 export type TeamMemberInput = z.infer<typeof teamMemberSchema>;
-export type LocationPush = z.infer<typeof locationPushSchema>;
-export type LocationUpdate = z.infer<typeof locationUpdateSchema>;
+export type SitePush = z.infer<typeof sitePushSchema>;
+export type SiteUpdate = z.infer<typeof siteUpdateSchema>;
+export type RoomPush = z.infer<typeof roomPushSchema>;
+export type RoomUpdate = z.infer<typeof roomUpdateSchema>;
 export type JobPush = z.infer<typeof jobPushSchema>;
 export type JobUpdate = z.infer<typeof jobUpdateSchema>;
 export type NotificationUpdate = z.infer<typeof notificationUpdateSchema>;

@@ -2,11 +2,11 @@ import { Box, Group, Loader, Select, Title } from '@mantine/core';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { eventsApi, locationsApi, teamsApi } from '../../api/index.js';
+import { eventsApi, roomsApi, sitesApi, teamsApi } from '../../api/index.js';
 import Calendar, { type CalendarEvent } from '../../components/Calendar/Calendar.js';
 import EventOccurrenceDialog from '../../components/EventOccurrenceDialog/EventOccurrenceDialog.js';
 import { useAppSelector } from '../../hooks/redux.js';
-import type { EventOccurrence, Location, Team } from '../../types/index.js';
+import type { EventOccurrence, Room, Site, Team } from '../../types/index.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -35,17 +35,23 @@ function CalendarPage() {
   } | null>(null);
 
   const [scope, setScope] = useState<FilterScope>('all');
-  const [locationId, setLocationId] = useState<string | null>(null);
+  const [siteId, setSiteId] = useState<string | null>(null);
+  const [roomId, setRoomId] = useState<string | null>(null);
   const [teamId, setTeamId] = useState<string | null>(null);
-  const [locations, setLocations] = useState<Location[]>([]);
+  const [sites, setSites] = useState<Site[]>([]);
+  const [rooms, setRooms] = useState<Room[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
 
   useEffect(() => {
     if (!activeOrganizationId) return;
-    locationsApi
-      .listAllLocations(activeOrganizationId)
-      .then(setLocations)
-      .catch(() => setLocations([]));
+    sitesApi
+      .listAllSites(activeOrganizationId)
+      .then(setSites)
+      .catch(() => setSites([]));
+    roomsApi
+      .listAllRooms(activeOrganizationId)
+      .then(setRooms)
+      .catch(() => setRooms([]));
     teamsApi
       .listTeams(activeOrganizationId, { limit: 200 })
       .then(data => setTeams(data.items))
@@ -60,7 +66,12 @@ function CalendarPage() {
           new Date(start.getTime() - DAY_MS),
           new Date(end.getTime() + 2 * DAY_MS),
           undefined,
-          { scope, locationId: locationId ?? undefined, teamId: teamId ?? undefined },
+          {
+            scope,
+            siteId: siteId ?? undefined,
+            roomId: roomId ?? undefined,
+            teamId: teamId ?? undefined,
+          },
         );
         setOccurrences(data);
       } catch {
@@ -69,7 +80,7 @@ function CalendarPage() {
         setLoading(false);
       }
     },
-    [scope, locationId, teamId],
+    [scope, siteId, roomId, teamId],
   );
 
   useEffect(() => {
@@ -114,10 +125,24 @@ function CalendarPage() {
         />
         <Select
           size="sm"
-          placeholder={t('events.filterByLocation')}
-          value={locationId}
-          onChange={setLocationId}
-          data={locations.map(loc => ({ value: loc.id, label: loc.name }))}
+          placeholder={t('events.filterBySite')}
+          value={siteId}
+          onChange={value => {
+            setSiteId(value);
+            setRoomId(null);
+          }}
+          data={sites.map(s => ({ value: s.id, label: s.name }))}
+          clearable
+          style={{ minWidth: 180 }}
+        />
+        <Select
+          size="sm"
+          placeholder={t('events.filterByRoom')}
+          value={roomId}
+          onChange={setRoomId}
+          data={rooms
+            .filter(r => !siteId || r.siteId === siteId)
+            .map(r => ({ value: r.id, label: r.name }))}
           clearable
           style={{ minWidth: 180 }}
         />

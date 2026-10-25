@@ -1,22 +1,22 @@
-import { Button, Group, Modal, TextInput } from '@mantine/core';
+import { Button, Group, Modal, Textarea, TextInput } from '@mantine/core';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { locationsApi } from '../../api/index.js';
+import { sitesApi } from '../../api/index.js';
 import DataTable, { type DataTableColumn } from '../../components/DataTable/DataTable.js';
 import { useAppSelector } from '../../hooks/redux.js';
-import type { Location, TableQuery } from '../../types/index.js';
+import type { Site, TableQuery } from '../../types/index.js';
 
-function OrgLocationsPage() {
+function OrgSitesPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const activeOrganizationId = useAppSelector(state => state.organization.activeOrganizationId);
   const currentUser = useAppSelector(state => state.user.currentUser);
   const canWrite =
     currentUser?.permissions?.includes('admin') === true ||
-    currentUser?.permissions?.includes('location-management:write') === true;
+    currentUser?.permissions?.includes('site-management:write') === true;
 
-  const [data, setData] = useState<Location[]>([]);
+  const [data, setData] = useState<Site[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [limit, setLimit] = useState(50);
@@ -26,13 +26,14 @@ function OrgLocationsPage() {
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newDescription, setNewDescription] = useState('');
+  const [newAddress, setNewAddress] = useState('');
 
   const load = useCallback(async () => {
     if (!activeOrganizationId) return;
     setLoading(true);
     try {
       const query: TableQuery = { page, limit, search: search || undefined };
-      const result = await locationsApi.listLocations(activeOrganizationId, query);
+      const result = await sitesApi.listSites(activeOrganizationId, query);
       setData(result.items);
       setTotal(result.total);
     } catch {
@@ -50,25 +51,32 @@ function OrgLocationsPage() {
   const handleAdd = async () => {
     if (!activeOrganizationId || !newName.trim()) return;
     try {
-      await locationsApi.createLocation(activeOrganizationId, {
+      await sitesApi.createSite(activeOrganizationId, {
         name: newName.trim(),
-        description: newDescription.trim(),
+        description: newDescription.trim() || null,
+        address: newAddress.trim() || null,
         organizationId: activeOrganizationId,
       });
       setAddModalOpen(false);
       setNewName('');
       setNewDescription('');
+      setNewAddress('');
       await load();
     } catch {
       // Ignore
     }
   };
 
-  const columns: DataTableColumn<Location>[] = [
+  const columns: DataTableColumn<Site>[] = [
     {
       key: 'name',
       label: t('common.name'),
       render: item => <span style={{ fontWeight: 500 }}>{item.name}</span>,
+    },
+    {
+      key: 'address',
+      label: t('sites.address'),
+      render: item => item.address || <span style={{ color: '#999' }}>-</span>,
     },
     {
       key: 'description',
@@ -80,7 +88,7 @@ function OrgLocationsPage() {
   return (
     <>
       <DataTable
-        title={t('nav.orgLocations')}
+        title={t('nav.orgSites')}
         columns={columns}
         data={data}
         total={total}
@@ -92,12 +100,12 @@ function OrgLocationsPage() {
         onPageChange={setPage}
         onLimitChange={setLimit}
         onSearch={setSearch}
-        onRowClick={item => navigate(`/organization/locations/${item.id}`)}
+        onRowClick={item => navigate(`/organization/sites/${item.id}`)}
       />
       <Modal
         opened={addModalOpen}
         onClose={() => setAddModalOpen(false)}
-        title={t('locations.newLocation')}
+        title={t('sites.newSite')}
       >
         <TextInput
           label={t('common.name')}
@@ -105,10 +113,18 @@ function OrgLocationsPage() {
           onChange={e => setNewName(e.target.value)}
           mb="sm"
         />
-        <TextInput
+        <Textarea
           label={t('common.description')}
           value={newDescription}
           onChange={e => setNewDescription(e.target.value)}
+          mb="sm"
+          autosize
+          minRows={2}
+        />
+        <TextInput
+          label={t('sites.address')}
+          value={newAddress}
+          onChange={e => setNewAddress(e.target.value)}
           mb="md"
         />
         <Group justify="flex-end">
@@ -124,4 +140,4 @@ function OrgLocationsPage() {
   );
 }
 
-export default OrgLocationsPage;
+export default OrgSitesPage;

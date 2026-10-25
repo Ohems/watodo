@@ -30,7 +30,7 @@
     "teams": "Teams",
     "organization": "Organization",
     "orgGeneral": "General",
-    "orgLocations": "Locations",
+    "orgSites": "Sites",
     "orgJobs": "Jobs",
     "orgUsers": "Users",
     "profile": "Profile",
@@ -69,7 +69,7 @@
     "editOrganization": "Edit organization",
     "defaultTimezone": "Default timezone",
     "general": "General",
-    "locations": "Locations",
+    "sites": "Sites",
     "jobs": "Jobs",
     "users": "Users"
   },
@@ -87,15 +87,24 @@
     "deleteTeamConfirm": "Delete the team \"{{name}}\"?",
     "backToList": "Back to teams"
   },
-  "locations": {
-    "title": "Locations",
-    "addNew": "Add location",
-    "newLocation": "New location",
-    "editLocation": "Edit location",
-    "noLocations": "No locations yet",
-    "deleteLocation": "Delete location",
-    "deleteLocationConfirm": "Delete the location \"{{name}}\"?",
-    "backToList": "Back to locations"
+  "sites": {
+    "title": "Sites",
+    "addNew": "Add site",
+    "newSite": "New site",
+    "editSite": "Edit site",
+    "noSites": "No sites yet",
+    "deleteSite": "Delete site",
+    "deleteSiteConfirm": "Delete the site \"{{name}}\" and all its rooms?",
+    "backToList": "Back to sites",
+    "address": "Address"
+  },
+  "rooms": {
+    "title": "Rooms",
+    "addNew": "Add room",
+    "newRoom": "New room",
+    "editRoom": "Edit room",
+    "noRooms": "No rooms yet",
+    "backToSite": "Back to site"
   },
   "jobs": {
     "title": "Jobs",
@@ -203,7 +212,14 @@
     "filterAll": "All events",
     "filterTeam": "My team's events",
     "filterMine": "My events",
-    "filterByLocation": "Filter by location",
+    "site": "Site",
+    "room": "Room",
+    "noSite": "No site",
+    "roomUnclear": "Room to be determined",
+    "reserveWholeSite": "Reserve the whole site",
+    "wholeSiteReserved": "Whole site reserved",
+    "filterBySite": "Filter by site",
+    "filterByRoom": "Filter by room",
     "filterByTeam": "Filter by team",
     "filterDateFrom": "From",
     "filterDateTo": "To",

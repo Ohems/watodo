@@ -127,6 +127,9 @@ export interface EventSeries {
   title: string;
   description: string | null;
   calendarId: string;
+  siteId: string | null;
+  roomId: string | null;
+  reserveWholeSite: boolean;
   start: string;
   durationMinutes: number;
   isAllDay: boolean;
@@ -157,6 +160,9 @@ export interface EventOccurrence {
   title: string;
   description: string | null;
   isAllDay: boolean;
+  siteId: string | null;
+  roomId: string | null;
+  reserveWholeSite: boolean;
   occurrenceStart: string;
   start: string;
   end: string;
@@ -253,24 +259,51 @@ export interface TeamMember {
   createdAt: string;
 }
 
-// --- Locations ---
+// --- Sites ---
 
-export interface Location {
+export interface Site {
   id: string;
   name: string;
-  description: string;
+  description: string | null;
+  address: string | null;
   organizationId: string;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface LocationPush {
+export interface SitePush {
   name: string;
-  description?: string;
+  description?: string | null;
+  address?: string | null;
   organizationId: string;
 }
 
-export interface LocationUpdate {
+export interface SiteUpdate {
+  name?: string;
+  description?: string | null;
+  address?: string | null;
+}
+
+// --- Rooms ---
+
+export interface Room {
+  id: string;
+  name: string;
+  description: string;
+  siteId: string;
+  organizationId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RoomPush {
+  name: string;
+  description?: string;
+  siteId: string;
+  organizationId: string;
+}
+
+export interface RoomUpdate {
   name?: string;
   description?: string;
 }
@@ -340,13 +373,15 @@ export interface EventSeriesTeam {
 }
 
 export interface EventSeriesManagement extends EventSeries {
-  locationId: string | null;
-  locationName: string | null;
+  siteName: string | null;
+  roomName: string | null;
   teams: EventSeriesTeam[];
 }
 
 export interface EventSeriesConfigUpdate {
-  locationId?: string | null;
+  siteId?: string | null;
+  roomId?: string | null;
+  reserveWholeSite?: boolean;
   teamIds?: string[];
 }
 
@@ -356,14 +391,16 @@ export interface EventSeriesListQuery {
   search?: string;
   startFrom?: string;
   startTo?: string;
-  locationId?: string;
+  siteId?: string;
+  roomId?: string;
   teamId?: string;
   hasTeam?: boolean;
 }
 
 export interface OccurrenceFilter {
   scope?: 'all' | 'team' | 'mine';
-  locationId?: string;
+  siteId?: string;
+  roomId?: string;
   teamId?: string;
 }
 
