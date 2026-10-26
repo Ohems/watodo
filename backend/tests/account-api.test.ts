@@ -166,7 +166,7 @@ describe('Account API', () => {
     await app.close();
   });
 
-  describe('profile self-service', () => {
+  describe('PATCH /api/v1/users/@me', () => {
     it('lets a user update their own personal information without user-management permissions', async () => {
       if (!dbAvailable) return;
 
@@ -247,29 +247,6 @@ describe('Account API', () => {
       expect(row.phone_number).toBeNull();
     });
 
-    it('returns the current user in the serialized shape', async () => {
-      if (!dbAvailable) return;
-
-      const response = await app.inject({
-        method: 'GET',
-        url: '/api/v1/users/@me',
-        headers: { 'x-token': token },
-      });
-
-      expect(response.statusCode).toBe(200);
-      const body = response.json();
-      expect(body.id).toBe(userId);
-      expect(body.name).toBeTruthy();
-      expect(body.email).toBeTruthy();
-      expect(body.phoneNumber).toBeNull();
-      expect(body.isEmployed).toBe(false);
-      expect(body.isSuspended).toBe(false);
-      expect(body.isBlocked).toBe(false);
-      expect(body.createdAt).toBeTruthy();
-      expect(body.updatedAt).toBeTruthy();
-      expect(body.permissions).toEqual([]);
-    });
-
     it('does not let a user change their own account state', async () => {
       if (!dbAvailable) return;
 
@@ -337,7 +314,32 @@ describe('Account API', () => {
     });
   });
 
-  describe('login methods', () => {
+  describe('GET /api/v1/users/@me', () => {
+    it('returns the current user in the serialized shape', async () => {
+      if (!dbAvailable) return;
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/users/@me',
+        headers: { 'x-token': token },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.id).toBe(userId);
+      expect(body.name).toBeTruthy();
+      expect(body.email).toBeTruthy();
+      expect(body.phoneNumber).toBeNull();
+      expect(body.isEmployed).toBe(false);
+      expect(body.isSuspended).toBe(false);
+      expect(body.isBlocked).toBe(false);
+      expect(body.createdAt).toBeTruthy();
+      expect(body.updatedAt).toBeTruthy();
+      expect(body.permissions).toEqual([]);
+    });
+  });
+
+  describe('GET /api/v1/users/@me/auth-accounts', () => {
     it('lists the connected login methods without exposing tokens', async () => {
       if (!dbAvailable) return;
 
@@ -381,7 +383,9 @@ describe('Account API', () => {
       const response = await app.inject({ method: 'GET', url: '/api/v1/users/@me/auth-accounts' });
       expect(response.statusCode).toBe(401);
     });
+  });
 
+  describe('DELETE /api/v1/users/@me/auth-accounts/:provider', () => {
     it('disconnects a login method', async () => {
       if (!dbAvailable) return;
 
@@ -436,7 +440,7 @@ describe('Account API', () => {
     });
   });
 
-  describe('connecting a login method', () => {
+  describe('POST /api/v1/auth/:provider/link', () => {
     it('requires authentication', async () => {
       if (!dbAvailable) return;
 
@@ -471,7 +475,9 @@ describe('Account API', () => {
       expect(parsed.returnUrl).toBe('/account');
       expect(parsed.linkToken).toBe(token);
     });
+  });
 
+  describe('GET /api/v1/auth/:provider/callback', () => {
     it('links the provider account to the current user after the OAuth callback', async () => {
       if (!dbAvailable) return;
 
@@ -569,7 +575,7 @@ describe('Account API', () => {
     });
   });
 
-  describe('deleting the account', () => {
+  describe('DELETE /api/v1/users/@me', () => {
     it('requires authentication', async () => {
       if (!dbAvailable) return;
 

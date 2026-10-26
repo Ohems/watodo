@@ -105,46 +105,50 @@ describe('Notifications API', () => {
     await app.close();
   });
 
-  it('lists notifications with their organization', async () => {
-    if (!seedData) return;
-    const response = await app.inject({
-      method: 'GET',
-      url: '/api/v1/notifications',
-      headers: auth(seedData.token),
+  describe('GET /api/v1/notifications', () => {
+    it('lists notifications with their organization', async () => {
+      if (!seedData) return;
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/notifications',
+        headers: auth(seedData.token),
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as { items: NotificationResponse[] };
+      const seed = seedData;
+      const organizationNotification = body.items.find(
+        item => item.id === seed.organizationNotificationId,
+      );
+      const personalNotification = body.items.find(item => item.id === seed.personalNotificationId);
+      expect(organizationNotification).toBeDefined();
+      expect(organizationNotification?.organizationId).toBe(seedData.organizationId);
+      expect(organizationNotification?.organizationName).toBe(seedData.organizationName);
+      expect(personalNotification).toBeDefined();
+      expect(personalNotification?.organizationId).toBeNull();
+      expect(personalNotification?.organizationName).toBeNull();
     });
-    expect(response.statusCode).toBe(200);
-    const body = response.json() as { items: NotificationResponse[] };
-    const seed = seedData;
-    const organizationNotification = body.items.find(
-      item => item.id === seed.organizationNotificationId,
-    );
-    const personalNotification = body.items.find(item => item.id === seed.personalNotificationId);
-    expect(organizationNotification).toBeDefined();
-    expect(organizationNotification?.organizationId).toBe(seedData.organizationId);
-    expect(organizationNotification?.organizationName).toBe(seedData.organizationName);
-    expect(personalNotification).toBeDefined();
-    expect(personalNotification?.organizationId).toBeNull();
-    expect(personalNotification?.organizationName).toBeNull();
+
+    it('returns 401 without a token', async () => {
+      if (!seedData) return;
+      const response = await app.inject({ method: 'GET', url: '/api/v1/notifications' });
+      expect(response.statusCode).toBe(401);
+    });
   });
 
-  it('returns the organization when a notification is updated', async () => {
-    if (!seedData) return;
-    const response = await app.inject({
-      method: 'PATCH',
-      url: `/api/v1/notifications/${seedData.organizationNotificationId}`,
-      headers: auth(seedData.token),
-      payload: { isRead: true },
+  describe('PATCH /api/v1/notifications/:notificationId', () => {
+    it('returns the organization when a notification is updated', async () => {
+      if (!seedData) return;
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/notifications/${seedData.organizationNotificationId}`,
+        headers: auth(seedData.token),
+        payload: { isRead: true },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as NotificationResponse;
+      expect(body.isRead).toBe(true);
+      expect(body.organizationId).toBe(seedData.organizationId);
+      expect(body.organizationName).toBe(seedData.organizationName);
     });
-    expect(response.statusCode).toBe(200);
-    const body = response.json() as NotificationResponse;
-    expect(body.isRead).toBe(true);
-    expect(body.organizationId).toBe(seedData.organizationId);
-    expect(body.organizationName).toBe(seedData.organizationName);
-  });
-
-  it('returns 401 without a token', async () => {
-    if (!seedData) return;
-    const response = await app.inject({ method: 'GET', url: '/api/v1/notifications' });
-    expect(response.statusCode).toBe(401);
   });
 });

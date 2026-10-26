@@ -4,15 +4,17 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { db } from '../src/database.js';
 
-// Integration test for the authentication context: seeds an organization with
-// roles and users, then verifies that requests are authorized based on the
-// permissions resolved from role assignments. Skipped when the database is
-// not available.
+// Integration tests for the authentication context: seed an organization
+// with roles and users, then verify that requests are authorized based on
+// the permissions resolved from role assignments. Skipped when the database
+// is not available.
 
 interface Seed {
   organizationId: string;
   memberUserId: string;
   memberToken: string;
+  plainMemberUserId: string;
+  plainMemberToken: string;
   adminUserId: string;
   adminToken: string;
 }
@@ -20,8 +22,10 @@ interface Seed {
 async function seed(): Promise<Seed> {
   const organizationId = randomUUID();
   const memberUserId = randomUUID();
+  const plainMemberUserId = randomUUID();
   const adminUserId = randomUUID();
   const memberToken = randomUUID();
+  const plainMemberToken = randomUUID();
   const adminToken = randomUUID();
 
   await db
@@ -34,6 +38,7 @@ async function seed(): Promise<Seed> {
     .insertInto('users')
     .values([
       { id: memberUserId, name: 'Member User', email: `member-${suffix}@example.com` },
+      { id: plainMemberUserId, name: 'Plain Member User', email: `plain-${suffix}@example.com` },
       { id: adminUserId, name: 'Admin User', email: `admin-${suffix}@example.com` },
     ])
     .execute();
@@ -42,6 +47,7 @@ async function seed(): Promise<Seed> {
     .insertInto('user_organizations')
     .values([
       { user_id: memberUserId, organization_id: organizationId },
+      { user_id: plainMemberUserId, organization_id: organizationId },
       { user_id: adminUserId, organization_id: organizationId },
     ])
     .execute();
@@ -50,6 +56,7 @@ async function seed(): Promise<Seed> {
     .insertInto('access_tokens')
     .values([
       { user_id: memberUserId, token: memberToken },
+      { user_id: plainMemberUserId, token: plainMemberToken },
       { user_id: adminUserId, token: adminToken },
     ])
     .execute();
@@ -65,6 +72,9 @@ async function seed(): Promise<Seed> {
     return row.id;
   };
 
+  // Both members share the same role (operations:read only). The plain member
+  // never receives additional roles, so permission checks that must keep
+  // failing can use it regardless of the order the tests run in.
   const memberRole = await db
     .insertInto('roles')
     .values({ organization_id: organizationId, name: 'Member Role' })
@@ -76,7 +86,10 @@ async function seed(): Promise<Seed> {
     .execute();
   await db
     .insertInto('user_roles')
-    .values({ user_id: memberUserId, role_id: memberRole.id })
+    .values([
+      { user_id: memberUserId, role_id: memberRole.id },
+      { user_id: plainMemberUserId, role_id: memberRole.id },
+    ])
     .execute();
 
   const adminRole = await db
@@ -93,16 +106,27 @@ async function seed(): Promise<Seed> {
     .values({ user_id: adminUserId, role_id: adminRole.id })
     .execute();
 
-  return { organizationId, memberUserId, memberToken, adminUserId, adminToken };
+  return {
+    organizationId,
+    memberUserId,
+    memberToken,
+    plainMemberUserId,
+    plainMemberToken,
+    adminUserId,
+    adminToken,
+  };
 }
 
 async function cleanup(seed: Seed): Promise<void> {
-  await db.deleteFrom('users').where('id', 'in', [seed.memberUserId, seed.adminUserId]).execute();
+  await db
+    .deleteFrom('users')
+    .where('id', 'in', [seed.memberUserId, seed.plainMemberUserId, seed.adminUserId])
+    .execute();
   await db.deleteFrom('roles').where('organization_id', '=', seed.organizationId).execute();
   await db.deleteFrom('organizations').where('id', '=', seed.organizationId).execute();
 }
 
-describe('Auth context', () => {
+describe('Users API', () => {
   let app: FastifyInstance;
   let seedData: Seed | null = null;
 
@@ -121,124 +145,189 @@ describe('Auth context', () => {
     await app.close();
   });
 
-  it('attaches the user and their role-based permissions to the context', async () => {
-    if (!seedData) return;
-    const response = await app.inject({
-      method: 'GET',
-      url: '/api/v1/users/@me',
-      headers: { 'x-token': seedData.memberToken },
-    });
+  describe('GET /api/v1/users/@me', () => {
+    it('attaches the user and their role-based permissions to the context', async () => {
+      if (!seedData) return;
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/users/@me',
+        headers: { 'x-token': seedData.memberToken },
+      });
 
-    expect(response.statusCode).toBe(200);
-    const body = response.json();
-    expect(body.id).toBe(seedData.memberUserId);
-    expect(body.permissions).toContain('operations:read');
-    expect(body.permissions).not.toContain('user-management:write');
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.id).toBe(seedData.memberUserId);
+      expect(body.permissions).toContain('operations:read');
+      expect(body.permissions).not.toContain('user-management:write');
+    });
   });
 
-  it('allows reading operations with operations:read', async () => {
-    if (!seedData) return;
-    const response = await app.inject({
-      method: 'GET',
-      url: '/api/v1/operations',
-      headers: { 'x-token': seedData.memberToken },
+  describe('PATCH /api/v1/users/:userId', () => {
+    it('denies user management without user-management permissions', async () => {
+      if (!seedData) return;
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/users/${seedData.memberUserId}`,
+        headers: { 'x-token': seedData.memberToken },
+        payload: { name: 'Renamed User' },
+      });
+
+      expect(response.statusCode).toBe(403);
     });
 
-    expect(response.statusCode).toBe(200);
+    it('lets the admin permission bypass permission checks', async () => {
+      if (!seedData) return;
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/users/${seedData.memberUserId}`,
+        headers: { 'x-token': seedData.adminToken },
+        payload: { name: 'Renamed User' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().name).toBe('Renamed User');
+    });
+  });
+});
+
+describe('Operations API', () => {
+  let app: FastifyInstance;
+  let seedData: Seed | null = null;
+
+  beforeAll(async () => {
+    app = await buildApp();
+    await app.ready();
+    try {
+      seedData = await seed();
+    } catch {
+      seedData = null;
+    }
   });
 
-  it('denies writing operations without operations:write', async () => {
-    if (!seedData) return;
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/v1/operations',
-      headers: { 'x-token': seedData.memberToken },
-      payload: { name: 'Forbidden Operation' },
-    });
-
-    expect(response.statusCode).toBe(403);
+  afterAll(async () => {
+    if (seedData) await cleanup(seedData).catch(() => {});
+    await app.close();
   });
 
-  it('denies user management without user-management permissions', async () => {
-    if (!seedData) return;
-    const response = await app.inject({
-      method: 'PATCH',
-      url: `/api/v1/users/${seedData.memberUserId}`,
-      headers: { 'x-token': seedData.memberToken },
-      payload: { name: 'Renamed User' },
-    });
+  describe('GET /api/v1/operations', () => {
+    it('allows reading operations with operations:read', async () => {
+      if (!seedData) return;
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/operations',
+        headers: { 'x-token': seedData.memberToken },
+      });
 
-    expect(response.statusCode).toBe(403);
+      expect(response.statusCode).toBe(200);
+    });
   });
 
-  it('lets the admin permission bypass permission checks', async () => {
-    if (!seedData) return;
-    const response = await app.inject({
-      method: 'PATCH',
-      url: `/api/v1/users/${seedData.memberUserId}`,
-      headers: { 'x-token': seedData.adminToken },
-      payload: { name: 'Renamed User' },
-    });
+  describe('POST /api/v1/operations', () => {
+    it('denies writing operations without operations:write', async () => {
+      if (!seedData) return;
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/operations',
+        headers: { 'x-token': seedData.memberToken },
+        payload: { name: 'Forbidden Operation' },
+      });
 
-    expect(response.statusCode).toBe(200);
-    expect(response.json().name).toBe('Renamed User');
+      expect(response.statusCode).toBe(403);
+    });
+  });
+});
+
+describe('Roles API', () => {
+  let app: FastifyInstance;
+  let seedData: Seed | null = null;
+  let roleId = 0;
+
+  beforeAll(async () => {
+    app = await buildApp();
+    await app.ready();
+    try {
+      seedData = await seed();
+    } catch {
+      seedData = null;
+    }
   });
 
-  it('supports managing roles and assignments through the API', async () => {
-    if (!seedData) return;
+  afterAll(async () => {
+    if (seedData) await cleanup(seedData).catch(() => {});
+    await app.close();
+  });
 
-    // The member cannot manage roles yet.
-    const denied = await app.inject({
-      method: 'GET',
-      url: `/api/v1/organizations/${seedData.organizationId}/roles`,
-      headers: { 'x-token': seedData.memberToken },
+  describe('POST /api/v1/organizations/:organizationId/roles', () => {
+    it('lets an admin create a role with permissions', async () => {
+      if (!seedData) return;
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/organizations/${seedData.organizationId}/roles`,
+        headers: { 'x-token': seedData.adminToken },
+        payload: { name: 'Role Manager', permissions: ['role-management:read'] },
+      });
+      expect(response.statusCode).toBe(201);
+      const role = response.json();
+      expect(role.permissions).toEqual(['role-management:read']);
+      roleId = role.id;
     });
-    expect(denied.statusCode).toBe(403);
 
-    // The admin creates a role with a permission.
-    const created = await app.inject({
-      method: 'POST',
-      url: `/api/v1/organizations/${seedData.organizationId}/roles`,
-      headers: { 'x-token': seedData.adminToken },
-      payload: { name: 'Role Manager', permissions: ['role-management:read'] },
+    it('rejects unknown permission codes', async () => {
+      if (!seedData) return;
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/organizations/${seedData.organizationId}/roles`,
+        headers: { 'x-token': seedData.adminToken },
+        payload: { name: 'Broken Role', permissions: ['not-a-permission'] },
+      });
+      expect(response.statusCode).toBe(400);
     });
-    expect(created.statusCode).toBe(201);
-    const role = created.json();
-    expect(role.permissions).toEqual(['role-management:read']);
+  });
 
-    // The admin assigns the role to the member.
-    const assigned = await app.inject({
-      method: 'POST',
-      url: `/api/v1/organizations/${seedData.organizationId}/roles/${role.id}/assignments`,
-      headers: { 'x-token': seedData.adminToken },
-      payload: { userId: seedData.memberUserId },
+  describe('POST /api/v1/organizations/:organizationId/roles/:roleId/assignments', () => {
+    it('assigns a role to a user', async () => {
+      if (!seedData) return;
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/organizations/${seedData.organizationId}/roles/${roleId}/assignments`,
+        headers: { 'x-token': seedData.adminToken },
+        payload: { userId: seedData.memberUserId },
+      });
+      expect(response.statusCode).toBe(201);
     });
-    expect(assigned.statusCode).toBe(201);
 
-    // The member now has the new permission.
-    const me = await app.inject({
-      method: 'GET',
-      url: '/api/v1/users/@me',
-      headers: { 'x-token': seedData.memberToken },
+    it('grants the permissions of the assigned role to the user', async () => {
+      if (!seedData) return;
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/users/@me',
+        headers: { 'x-token': seedData.memberToken },
+      });
+      expect(response.json().permissions).toContain('role-management:read');
     });
-    expect(me.json().permissions).toContain('role-management:read');
+  });
 
-    const roles = await app.inject({
-      method: 'GET',
-      url: `/api/v1/organizations/${seedData.organizationId}/roles`,
-      headers: { 'x-token': seedData.memberToken },
+  describe('GET /api/v1/organizations/:organizationId/roles', () => {
+    it('denies listing roles without role-management:read', async () => {
+      if (!seedData) return;
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/organizations/${seedData.organizationId}/roles`,
+        headers: { 'x-token': seedData.plainMemberToken },
+      });
+      expect(response.statusCode).toBe(403);
     });
-    expect(roles.statusCode).toBe(200);
-    const roleNames = roles.json().map((r: { name: string }) => r.name);
-    expect(roleNames).toContain('Role Manager');
 
-    // Unknown permission codes are rejected.
-    const invalid = await app.inject({
-      method: 'POST',
-      url: `/api/v1/organizations/${seedData.organizationId}/roles`,
-      headers: { 'x-token': seedData.adminToken },
-      payload: { name: 'Broken Role', permissions: ['not-a-permission'] },
+    it('lists roles for a member with role-management:read', async () => {
+      if (!seedData) return;
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/organizations/${seedData.organizationId}/roles`,
+        headers: { 'x-token': seedData.memberToken },
+      });
+      expect(response.statusCode).toBe(200);
+      const roleNames = response.json().map((r: { name: string }) => r.name);
+      expect(roleNames).toContain('Role Manager');
     });
-    expect(invalid.statusCode).toBe(400);
   });
 });
