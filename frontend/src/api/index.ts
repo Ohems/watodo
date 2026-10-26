@@ -306,8 +306,8 @@ export const api = createApi({
 
     // --- Calendars ---
 
-    getCalendars: build.query<Calendar[], void>({
-      query: () => '/api/v1/calendars',
+    getCalendars: build.query<Calendar[], string>({
+      query: organizationId => withQuery('/api/v1/calendars', { organizationId }),
       providesTags: ['Calendar'],
     }),
     createCalendar: build.mutation<Calendar, CalendarPush>({
@@ -317,10 +317,12 @@ export const api = createApi({
 
     // --- Event series ---
 
-    getEventSeriesList: build.query<EventSeries[], string | undefined>({
-      query: calendarId => withQuery('/api/v1/event-series', { calendarId }),
-      providesTags: ['EventSeries'],
-    }),
+    getEventSeriesList: build.query<EventSeries[], { calendarId?: string; organizationId: string }>(
+      {
+        query: query => withQuery('/api/v1/event-series', query),
+        providesTags: ['EventSeries'],
+      },
+    ),
     getEventSeriesById: build.query<EventSeries, number>({
       query: seriesId => `/api/v1/event-series/${seriesId}`,
       providesTags: (_result, _error, seriesId) => [{ type: 'EventSeries', id: seriesId }],
@@ -354,13 +356,20 @@ export const api = createApi({
 
     getOccurrences: build.query<
       EventOccurrence[],
-      { start: string; end: string; calendarId?: string; filter?: OccurrenceFilter }
+      {
+        start: string;
+        end: string;
+        calendarId?: string;
+        organizationId?: string;
+        filter?: OccurrenceFilter;
+      }
     >({
-      query: ({ start, end, calendarId, filter }) =>
+      query: ({ start, end, calendarId, organizationId, filter }) =>
         withQuery('/api/v1/event-series/occurrences', {
           start,
           end,
           calendarId,
+          organizationId,
           scope: filter?.scope,
           siteId: filter?.siteId,
           roomId: filter?.roomId,

@@ -163,6 +163,8 @@ export interface EventOccurrence {
   siteId: string | null;
   roomId: string | null;
   reserveWholeSite: boolean;
+  organizationId: string;
+  organizationName: string;
   occurrenceStart: string;
   start: string;
   end: string;
@@ -332,6 +334,9 @@ export interface JobUpdate {
 export interface Notification {
   id: number;
   userId: string;
+  /** The organization this notification belongs to, if any. */
+  organizationId: string | null;
+  organizationName: string | null;
   title: string;
   body: string;
   isRead: boolean;
@@ -373,6 +378,8 @@ export interface EventSeriesTeam {
 }
 
 export interface EventSeriesManagement extends EventSeries {
+  organizationId: string;
+  organizationName: string;
   siteName: string | null;
   roomName: string | null;
   teams: EventSeriesTeam[];
@@ -395,6 +402,7 @@ export interface EventSeriesListQuery {
   roomId?: string;
   teamId?: string;
   hasTeam?: boolean;
+  organizationId: string;
 }
 
 export interface OccurrenceFilter {

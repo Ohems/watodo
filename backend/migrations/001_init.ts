@@ -193,12 +193,16 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
   pgm.createTable('notifications', {
     id: { type: 'serial', primaryKey: true },
     user_id: { type: 'uuid', notNull: true, references: 'users', onDelete: 'CASCADE' },
+    // The organization this notification belongs to, if any (null for purely
+    // personal notifications).
+    organization_id: { type: 'uuid', references: 'organizations', onDelete: 'SET NULL' },
     title: { type: 'text', notNull: true },
     body: { type: 'text', notNull: true, default: '' },
     is_read: { type: 'boolean', notNull: true, default: false },
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
   pgm.createIndex('notifications', 'user_id');
+  pgm.createIndex('notifications', 'organization_id');
 
   // Calendars
   pgm.createTable('calendars', {

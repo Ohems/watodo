@@ -37,6 +37,8 @@ import {
   useUpdateEventCommentMutation,
 } from '../../api/index.js';
 import EventSeriesDialog from '../../components/EventSeriesDialog/EventSeriesDialog.js';
+import { useAppSelector } from '../../hooks/redux.js';
+import { selectActiveOrganizationId } from '../../store/organization-slice.js';
 import type { RecurrenceFreq, RecurrenceInput } from '../../types/index.js';
 
 interface EventOccurrenceDialogProps {
@@ -100,7 +102,11 @@ function EventOccurrenceDialog({ seriesId, occurrenceStart, onClose }: EventOccu
   const [rescheduleStart, setRescheduleStart] = useState('');
 
   const [splitOpen, setSplitOpen] = useState(false);
-  const { data: calendars = [] } = useGetCalendarsQuery(splitOpen ? undefined : skipToken);
+  const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
+  // The split dialog offers the calendars of the active organization only.
+  const { data: calendars = [] } = useGetCalendarsQuery(
+    splitOpen && activeOrganizationId ? activeOrganizationId : skipToken,
+  );
   const { data: organizations = [] } = useGetMyOrganizationsQuery(
     splitOpen ? undefined : skipToken,
   );

@@ -313,6 +313,18 @@ frontend/src/
 
 ## Testing
 
+Group backend tests by the endpoint or entity type they test: a top-level `describe`
+block per entity (for example `Events API` or `Calendars API`) containing one
+nested `describe` block per endpoint, named with the exact endpoint path (for
+example `describe('GET /api/v1/event-series/occurrences')`). Do not invent
+plain-text descriptions for endpoint groups, and do not group tests by a
+cross-cutting concern: a test that spans several endpoints (like organization
+scoping across the occurrences, event series, calendar and management
+endpoints) must be split so that each test lives in the describe of the
+endpoint it tests.
+
+Group frontend tests by the page or component being tested, for example `AccountPage`.
+
 ### Backend (Vitest)
 
 - Tests live in `backend/tests/`.
@@ -380,3 +392,8 @@ See `.env.sample` for all variables. Key ones:
 - Backend imports must use `.js` extensions (NodeNext module resolution).
 - The frontend uses `.js` extensions in imports too (for consistency with the backend).
 - Do not use `logger.silly()`; pino uses `logger.trace()` for the most verbose level.
+- Most endpoints must require filtering by organization ID (a required `organizationId` query
+  parameter or path segment, validated by the Zod schema so a missing value returns 400). Only
+  leave the organization filter out when the endpoint is used on the Home page or another page
+  that displays cross-organization data (for example the occurrence and notification lists shown
+  on the Home page). The frontend must pass the active organization's ID from every other view.

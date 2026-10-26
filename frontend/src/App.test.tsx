@@ -7,7 +7,13 @@ import App from './App.js';
 import { api, clearToken } from './api/index.js';
 import { store } from './store/index.js';
 import { type MockApi, mockApi } from './test/api-mock.js';
-import type { EventSeriesManagement, Organization, User } from './types/index.js';
+import type {
+  EventOccurrence,
+  EventSeriesManagement,
+  Notification,
+  Organization,
+  User,
+} from './types/index.js';
 
 const mockUser: User = {
   id: '1',
@@ -41,6 +47,8 @@ const mockSeries: EventSeriesManagement = {
   siteId: null,
   roomId: null,
   reserveWholeSite: false,
+  organizationId: 'org-1',
+  organizationName: 'Community Org',
   start: '2026-06-01T10:00:00.000Z',
   durationMinutes: 120,
   isAllDay: false,
@@ -81,17 +89,47 @@ function mockShellRoutes(mock: MockApi) {
   mock.on('GET', '/api/v1/event-series/occurrences', []);
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function makeOccurrence(partial: Partial<EventOccurrence> & { seriesId: number }) {
+  const start = new Date(Date.now() + DAY_MS).toISOString();
+  return {
+    title: `Event ${partial.seriesId}`,
+    description: null,
+    isAllDay: false,
+    siteId: null,
+    roomId: null,
+    reserveWholeSite: false,
+    organizationId: 'org-1',
+    organizationName: 'Community Org',
+    occurrenceStart: start,
+    start,
+    end: new Date(Date.now() + 2 * DAY_MS).toISOString(),
+    isRescheduled: false,
+    isCancelled: false,
+    exceptionId: null,
+    ...partial,
+  } satisfies EventOccurrence;
+}
+
+function lastCallUrl(mock: MockApi, pathname: string): string | undefined {
+  const call = [...mock.calls]
+    .reverse()
+    .find(c => c.method === 'GET' && new URL(c.url).pathname === pathname);
+  return call?.url;
+}
+
+let mock: MockApi;
+
+beforeEach(() => {
+  mock = mockApi();
+  localStorage.clear();
+  clearToken();
+  store.dispatch(api.util.resetApiState());
+  window.history.pushState({}, '', '/');
+});
+
 describe('App', () => {
-  let mock: MockApi;
-
-  beforeEach(() => {
-    mock = mockApi();
-    localStorage.clear();
-    clearToken();
-    store.dispatch(api.util.resetApiState());
-    window.history.pushState({}, '', '/');
-  });
-
   it('shows the login page when the user is unauthenticated', async () => {
     mock.on('GET', '/api/v1/users/@me', { error: 'Unauthorized' }, 401);
     mock.on('GET', '/api/v1/auth/providers', { providers: [] });
@@ -175,5 +213,129 @@ describe('App', () => {
       expect(mock.callCount('GET', '/api/v1/organizations/org-1/rooms/all')).toBe(1);
       expect(mock.callCount('GET', '/api/v1/organizations/org-1/teams')).toBe(1);
     });
+  });
+});
+
+describe('Home', () => {
+  it('shows upcoming events from all organizations, each labeled with its organization', async () => {
+    mockShellRoutes(mock);
+    const notification: Notification = {
+      id: 1,
+      userId: '1',
+      organizationId: 'org-2',
+      organizationName: 'Other Org',
+      title: 'You have been assigned a job',
+      body: 'You are assigned to "Room setup".',
+      isRead: false,
+      createdAt: new Date().toISOString(),
+    };
+    mock.on('GET', '/api/v1/notifications', {
+      items: [notification],
+      total: 1,
+      page: 0,
+      limit: 10,
+      unreadCount: 1,
+    });
+    mock.on('GET', '/api/v1/event-series/occurrences', [
+      makeOccurrence({
+        seriesId: 1,
+        title: 'Community Cleanup',
+        organizationId: 'org-1',
+        organizationName: 'Community Org',
+      }),
+      makeOccurrence({
+        seriesId: 2,
+        title: 'Riverside Potluck',
+        organizationId: 'org-2',
+        organizationName: 'Other Org',
+      }),
+    ]);
+
+    renderApp('/');
+
+    // Events from both organizations are listed...
+    expect(await screen.findByText('Community Cleanup')).toBeInTheDocument();
+    expect(await screen.findByText('Riverside Potluck')).toBeInTheDocument();
+    // ...each labeled with its organization, as is the notification.
+    expect(screen.getAllByText('Community Org').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Other Org').length).toBeGreaterThanOrEqual(2);
+    expect(await screen.findByText('You have been assigned a job')).toBeInTheDocument();
+    // The Home page is the only view without an organization filter.
+    const url = lastCallUrl(mock, '/api/v1/event-series/occurrences');
+    expect(url).toBeDefined();
+    expect(new URL(url as string).searchParams.has('organizationId')).toBe(false);
+  });
+});
+
+describe('CalendarPage', () => {
+  it("requests only the active organization's occurrences", async () => {
+    mockShellRoutes(mock);
+    mock.on('GET', '/api/v1/organizations/org-1/sites/all', []);
+    mock.on('GET', '/api/v1/organizations/org-1/rooms/all', []);
+    mock.on('GET', '/api/v1/organizations/org-1/teams', {
+      items: [],
+      total: 0,
+      page: 0,
+      limit: 200,
+    });
+
+    renderApp('/events/calendar');
+
+    await waitFor(() => {
+      const url = lastCallUrl(mock, '/api/v1/event-series/occurrences');
+      expect(url).toBeDefined();
+      expect(new URL(url as string).searchParams.get('organizationId')).toBe('org-1');
+    });
+  });
+});
+
+describe('EventManagementPage', () => {
+  it("requests only the active organization's series in the list", async () => {
+    mockShellRoutes(mock);
+    mock.on('GET', '/api/v1/organizations/org-1/sites/all', []);
+    mock.on('GET', '/api/v1/organizations/org-1/rooms/all', []);
+    mock.on('GET', '/api/v1/organizations/org-1/teams', {
+      items: [],
+      total: 0,
+      page: 0,
+      limit: 200,
+    });
+    mock.on('GET', '/api/v1/event-series/management', {
+      items: [],
+      total: 0,
+      page: 0,
+      limit: 50,
+    });
+
+    renderApp('/events/management');
+
+    await waitFor(() => {
+      const url = lastCallUrl(mock, '/api/v1/event-series/management');
+      expect(url).toBeDefined();
+      expect(new URL(url as string).searchParams.get('organizationId')).toBe('org-1');
+    });
+  });
+});
+
+describe('EventConfigPage', () => {
+  it('shows the organization of an event', async () => {
+    mockShellRoutes(mock);
+    mock.on('GET', '/api/v1/event-series/13/management', mockSeries);
+    mock.on('GET', '/api/v1/organizations/org-1/sites/all', []);
+    mock.on('GET', '/api/v1/organizations/org-1/rooms/all', []);
+    mock.on('GET', '/api/v1/organizations/org-1/teams', {
+      items: [],
+      total: 0,
+      page: 0,
+      limit: 200,
+    });
+
+    renderApp('/events/13');
+
+    expect(await screen.findByRole('heading', { name: 'Summer Festival' })).toBeInTheDocument();
+    // The organization label (also present in the navigation) and the
+    // organization name of the event (also the active one in the nav bar).
+    expect(screen.getAllByText('Organization').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('Community Org').length).toBeGreaterThanOrEqual(2);
   });
 });

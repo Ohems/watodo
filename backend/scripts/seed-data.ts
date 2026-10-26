@@ -600,13 +600,14 @@ async function assignTeamsToSeries(tx: Tx, seriesId: number, teamIds: string[]):
 async function addNotification(
   tx: Tx,
   userId: string,
+  organizationId: string,
   title: string,
   body: string,
   isRead: boolean,
 ): Promise<void> {
   await tx
     .insertInto('notifications')
-    .values({ user_id: userId, title, body, is_read: isRead })
+    .values({ user_id: userId, organization_id: organizationId, title, body, is_read: isRead })
     .execute();
 }
 
@@ -1193,6 +1194,7 @@ async function main(): Promise<void> {
       await addNotification(
         tx,
         realUser.id,
+        firstOrganization.id,
         'Welcome to Watodo',
         'Your organization has been set up. Explore the calendar and invite your team.',
         false,
@@ -1200,6 +1202,7 @@ async function main(): Promise<void> {
       await addNotification(
         tx,
         realUser.id,
+        firstOrganization.id,
         'Upcoming event',
         'Summer Festival Planning is happening this month. Check the calendar for details.',
         false,
@@ -1207,6 +1210,7 @@ async function main(): Promise<void> {
       await addNotification(
         tx,
         mockUsersOne[0].id,
+        firstOrganization.id,
         'You have been assigned a job',
         'You are assigned to "Room setup" for the Weekly Community Meeting.',
         true,
@@ -1214,6 +1218,7 @@ async function main(): Promise<void> {
       await addNotification(
         tx,
         mockUsersOne[2].id,
+        firstOrganization.id,
         'New event comment',
         'Someone commented on the Weekly Community Meeting.',
         false,
@@ -1584,6 +1589,7 @@ async function main(): Promise<void> {
       await addNotification(
         tx,
         realUser.id,
+        secondOrganization.id,
         'New organization ready',
         'Riverside Community Association has been created. Start adding events.',
         false,
@@ -1591,6 +1597,7 @@ async function main(): Promise<void> {
       await addNotification(
         tx,
         mockUsersTwo[0].id,
+        secondOrganization.id,
         'You are now an event coordinator',
         'You have been assigned the Event Coordinator role.',
         true,
@@ -1598,6 +1605,7 @@ async function main(): Promise<void> {
       await addNotification(
         tx,
         mockUsersTwo[4].id,
+        secondOrganization.id,
         'Upcoming event',
         'Community Potluck is happening this month. Sign up for a dish.',
         false,

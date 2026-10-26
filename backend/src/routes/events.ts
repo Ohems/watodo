@@ -55,7 +55,7 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
   const write = requirePermissions(PERMISSIONS.EVENTS_WRITE);
 
   // Event series
-  app.get<{ Querystring: { calendarId?: string } }>(
+  app.get<{ Querystring: unknown }>(
     '/api/v1/event-series',
     { preHandler: read },
     listEventSeriesHandler,

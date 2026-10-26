@@ -151,6 +151,13 @@ function EventConfigPage() {
         <Stack gap="md">
           <Box>
             <Text size="sm" fw={500} c="dimmed" mb={4}>
+              {t('events.organization')}
+            </Text>
+            <Text>{series.organizationName}</Text>
+          </Box>
+
+          <Box>
+            <Text size="sm" fw={500} c="dimmed" mb={4}>
               {t('events.seriesTitle')}
             </Text>
             <Text>{series.title}</Text>

@@ -143,6 +143,8 @@ export interface Jobs {
 export interface Notifications {
   id: Generated<number>;
   user_id: string;
+  /** The organization this notification belongs to, if any. */
+  organization_id: string | null;
   title: string;
   body: Generated<string>;
   is_read: Generated<boolean>;

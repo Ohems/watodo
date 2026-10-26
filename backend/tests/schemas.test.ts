@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  calendarListQuerySchema,
   eventCommentPushSchema,
   eventCommentUpdateSchema,
   eventJobPushSchema,
   eventJobUpdateSchema,
+  eventSeriesListQuerySchema,
   eventSeriesPushSchema,
+  eventSeriesQuerySchema,
   eventSeriesUpdateSchema,
   incrementalSchema,
   occurrenceRangeQuerySchema,
@@ -266,6 +269,42 @@ describe('Schemas', () => {
       expect(
         occurrenceRangeQuerySchema.safeParse({ start: '2026-10-21T00:00:00.000Z' }).success,
       ).toBe(false);
+    });
+
+    it('should allow omitting organizationId (the Home page lists all organizations)', () => {
+      expect(
+        occurrenceRangeQuerySchema.safeParse({
+          start: '2026-10-21T00:00:00.000Z',
+          end: '2026-11-21T00:00:00.000Z',
+        }).success,
+      ).toBe(true);
+    });
+  });
+
+  describe('calendarListQuerySchema', () => {
+    it('should require an organizationId', () => {
+      const organizationId = '123e4567-e89b-42d3-a456-426614174000';
+      expect(calendarListQuerySchema.safeParse({ organizationId }).success).toBe(true);
+      expect(calendarListQuerySchema.safeParse({}).success).toBe(false);
+    });
+  });
+
+  describe('eventSeriesQuerySchema', () => {
+    it('should require an organizationId and allow an optional calendarId', () => {
+      const organizationId = '123e4567-e89b-42d3-a456-426614174000';
+      const calendarId = '123e4567-e89b-42d3-a456-426614174001';
+      expect(eventSeriesQuerySchema.safeParse({ organizationId }).success).toBe(true);
+      expect(eventSeriesQuerySchema.safeParse({ organizationId, calendarId }).success).toBe(true);
+      expect(eventSeriesQuerySchema.safeParse({ calendarId }).success).toBe(false);
+      expect(eventSeriesQuerySchema.safeParse({}).success).toBe(false);
+    });
+  });
+
+  describe('eventSeriesListQuerySchema', () => {
+    it('should require an organizationId', () => {
+      const organizationId = '123e4567-e89b-42d3-a456-426614174000';
+      expect(eventSeriesListQuerySchema.safeParse({ organizationId }).success).toBe(true);
+      expect(eventSeriesListQuerySchema.safeParse({}).success).toBe(false);
     });
   });
 

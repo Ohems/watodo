@@ -59,6 +59,8 @@ export interface EventOccurrenceResponse {
   siteId: string | null;
   roomId: string | null;
   reserveWholeSite: boolean;
+  organizationId: string;
+  organizationName: string;
   occurrenceStart: string;
   start: string;
   end: string;
@@ -157,9 +159,57 @@ function serializeSeries(series: EventSeries): EventSeriesResponse {
   };
 }
 
+/** The organization that owns a calendar (resolved via the calendar). */
+export interface CalendarOrganization {
+  organizationId: string;
+  organizationName: string;
+}
+
+/**
+ * Resolves the organization (id and name) of each given calendar, keyed by
+ * calendar id. Every calendar belongs to exactly one organization.
+ */
+async function getCalendarOrganizations(
+  calendarIds: string[],
+): Promise<Map<string, CalendarOrganization>> {
+  const result = new Map<string, CalendarOrganization>();
+  const ids = [...new Set(calendarIds)];
+  if (ids.length === 0) return result;
+  const rows = await db
+    .selectFrom('calendars')
+    .innerJoin('organizations', 'organizations.id', 'calendars.organization_id')
+    .select([
+      'calendars.id as calendar_id',
+      'organizations.id as organization_id',
+      'organizations.name as organization_name',
+    ])
+    .where('calendars.id', 'in', ids)
+    .execute();
+  for (const row of rows) {
+    result.set(row.calendar_id, {
+      organizationId: row.organization_id,
+      organizationName: row.organization_name,
+    });
+  }
+  return result;
+}
+
+/**
+ * Looks up the organization of a single calendar; throws when the calendar
+ * has no organization (a data integrity violation).
+ */
+async function getCalendarOrganizationOrThrow(calendarId: string): Promise<CalendarOrganization> {
+  const organization = (await getCalendarOrganizations([calendarId])).get(calendarId);
+  if (!organization) {
+    throw new Error(`Organization for calendar ${calendarId} not found!`);
+  }
+  return organization;
+}
+
 function serializeOccurrence(
   series: EventSeries,
   occurrence: ExpandedOccurrence,
+  organization: CalendarOrganization,
 ): EventOccurrenceResponse {
   return {
     seriesId: series.id,
@@ -169,6 +219,8 @@ function serializeOccurrence(
     siteId: series.site_id,
     roomId: series.room_id,
     reserveWholeSite: series.reserve_whole_site,
+    organizationId: organization.organizationId,
+    organizationName: organization.organizationName,
     occurrenceStart: occurrence.occurrenceStart.toISOString(),
     start: occurrence.start.toISOString(),
     end: occurrence.end.toISOString(),
@@ -333,9 +385,17 @@ async function attachAssignments(jobs: EventJob[]): Promise<EventJobResponse[]> 
 
 // --- Event series ---
 
-export async function listEventSeries(calendarId?: string): Promise<EventSeriesResponse[]> {
+export async function listEventSeries(
+  organizationId: string,
+  calendarId?: string,
+): Promise<EventSeriesResponse[]> {
   logger.trace('eventService.listEventSeries');
-  let query = db.selectFrom('event_series').selectAll().orderBy('start', 'asc');
+  let query = db
+    .selectFrom('event_series')
+    .innerJoin('calendars', 'calendars.id', 'event_series.calendar_id')
+    .selectAll('event_series')
+    .where('calendars.organization_id', '=', organizationId)
+    .orderBy('start', 'asc');
   if (calendarId) {
     query = query.where('calendar_id', '=', calendarId);
   }
@@ -639,15 +699,16 @@ async function fetchMyJobAssignments(
 
 /**
  * Lists the occurrences of all visible series within a time range, optionally
- * narrowed down by calendar, location, team and scope. The `mine` scope keeps
- * only occurrences the user is assigned to (via a series-wide or
- * occurrence-scoped job slot); the `team` scope keeps only series linked to a
- * team the user belongs to.
+ * narrowed down by organization, calendar, location, team and scope. The
+ * `mine` scope keeps only occurrences the user is assigned to (via a
+ * series-wide or occurrence-scoped job slot); the `team` scope keeps only
+ * series linked to a team the user belongs to.
  * @param rangeStart - Start of the range (inclusive).
  * @param rangeEnd - End of the range (inclusive).
  * @param calendarId - Optional calendar to restrict the series to.
  * @param filter - Optional location, team and scope filters.
  * @param userId - The current user, required for the `mine` and `team` scopes.
+ * @param organizationId - Optional organization to restrict the series to.
  * @returns The occurrences in the range, sorted by start.
  */
 export async function getOccurrences(
@@ -656,6 +717,7 @@ export async function getOccurrences(
   calendarId?: string,
   filter?: OccurrenceFilter,
   userId?: string,
+  organizationId?: string,
 ): Promise<EventOccurrenceResponse[]> {
   logger.trace('eventService.getOccurrences');
   validateRange(rangeStart, rangeEnd);
@@ -669,6 +731,11 @@ export async function getOccurrences(
     .where('is_visible', '=', true);
   if (calendarId) {
     query = query.where('calendar_id', '=', calendarId);
+  }
+  if (organizationId) {
+    query = query
+      .innerJoin('calendars', 'calendars.id', 'event_series.calendar_id')
+      .where('calendars.organization_id', '=', organizationId);
   }
   if (filter?.siteId) {
     query = query.where('site_id', '=', filter.siteId);
@@ -694,6 +761,9 @@ export async function getOccurrences(
   }
   const series = await query.orderBy('event_series.start', 'asc').execute();
   const exceptionsBySeries = await fetchExceptionRules(series.map(row => row.id));
+  const organizationsByCalendar = await getCalendarOrganizations(
+    series.map(row => row.calendar_id),
+  );
   const myAssignments =
     filter?.scope === 'mine' && userId
       ? await fetchMyJobAssignments(
@@ -705,6 +775,10 @@ export async function getOccurrences(
   const occurrences: EventOccurrenceResponse[] = [];
   for (const row of series) {
     const exceptions = exceptionsBySeries.get(row.id) ?? [];
+    const organization = organizationsByCalendar.get(row.calendar_id);
+    if (!organization) {
+      throw new Error(`Organization for calendar ${row.calendar_id} not found!`);
+    }
     for (const occurrence of expandOccurrences(toRule(row), exceptions, rangeStart, rangeEnd)) {
       if (myAssignments) {
         const key = `${row.id}:${occurrence.occurrenceStart.toISOString()}`;
@@ -712,7 +786,7 @@ export async function getOccurrences(
           continue;
         }
       }
-      occurrences.push(serializeOccurrence(row, occurrence));
+      occurrences.push(serializeOccurrence(row, occurrence, organization));
     }
   }
   occurrences.sort((a, b) => a.start.localeCompare(b.start));
@@ -728,9 +802,10 @@ export async function getSeriesOccurrences(
   validateRange(rangeStart, rangeEnd);
 
   const series = await getSeriesRowOrThrow(seriesId);
+  const organization = await getCalendarOrganizationOrThrow(series.calendar_id);
   const exceptions = (await fetchExceptionRules([seriesId])).get(seriesId) ?? [];
   return expandOccurrences(toRule(series), exceptions, rangeStart, rangeEnd).map(occurrence =>
-    serializeOccurrence(series, occurrence),
+    serializeOccurrence(series, occurrence, organization),
   );
 }
 
@@ -742,6 +817,7 @@ export async function getOccurrenceDetail(
 
   const series = await getSeriesRowOrThrow(seriesId);
   assertOccurrence(series, occurrenceStart);
+  const organization = await getCalendarOrganizationOrThrow(series.calendar_id);
 
   const exceptions = (await fetchExceptionRules([seriesId])).get(seriesId) ?? [];
   const exception = exceptions.find(
@@ -768,6 +844,8 @@ export async function getOccurrenceDetail(
       siteId: series.site_id,
       roomId: series.room_id,
       reserveWholeSite: series.reserve_whole_site,
+      organizationId: organization.organizationId,
+      organizationName: organization.organizationName,
       occurrenceStart: occurrenceStart.toISOString(),
       start: start.toISOString(),
       end: end.toISOString(),
@@ -1168,6 +1246,8 @@ export interface EventSeriesTeamResponse {
 }
 
 export interface EventSeriesManagementResponse extends EventSeriesResponse {
+  organizationId: string;
+  organizationName: string;
   siteName: string | null;
   roomName: string | null;
   teams: EventSeriesTeamResponse[];
@@ -1228,12 +1308,15 @@ async function getSeriesTeamsMap(
 
 function serializeSeriesManagement(
   series: EventSeries,
+  organization: CalendarOrganization,
   siteName: string | null,
   roomName: string | null,
   teams: EventSeriesTeamResponse[],
 ): EventSeriesManagementResponse {
   return {
     ...serializeSeries(series),
+    organizationId: organization.organizationId,
+    organizationName: organization.organizationName,
     siteName,
     roomName,
     teams,
@@ -1255,14 +1338,23 @@ export async function listEventSeriesPaginated(query: {
   roomId?: string;
   teamId?: string;
   hasTeam?: boolean;
+  organizationId: string;
 }): Promise<PaginatedEventSeries> {
   logger.trace('eventService.listEventSeriesPaginated');
   const page = query.page ?? 0;
   const limit = query.limit ?? 50;
   const search = query.search?.trim();
 
-  let baseQuery = db.selectFrom('event_series').selectAll('event_series');
-  let countQuery = db.selectFrom('event_series').select(db.fn.countAll().as('count'));
+  let baseQuery = db
+    .selectFrom('event_series')
+    .innerJoin('calendars', 'calendars.id', 'event_series.calendar_id')
+    .selectAll('event_series')
+    .where('calendars.organization_id', '=', query.organizationId);
+  let countQuery = db
+    .selectFrom('event_series')
+    .innerJoin('calendars', 'calendars.id', 'event_series.calendar_id')
+    .select(db.fn.countAll().as('count'))
+    .where('calendars.organization_id', '=', query.organizationId);
 
   if (search) {
     baseQuery = baseQuery.where('event_series.title', 'ilike', `%${search}%`);
@@ -1334,15 +1426,21 @@ export async function listEventSeriesPaginated(query: {
   const siteNames = await getSiteNames(rows.map(r => r.site_id));
   const roomNames = await getRoomNames(rows.map(r => r.room_id));
   const teamsMap = await getSeriesTeamsMap(rows.map(r => r.id));
+  const organizationsByCalendar = await getCalendarOrganizations(rows.map(r => r.calendar_id));
 
-  const items = rows.map(row =>
-    serializeSeriesManagement(
+  const items = rows.map(row => {
+    const organization = organizationsByCalendar.get(row.calendar_id);
+    if (!organization) {
+      throw new Error(`Organization for calendar ${row.calendar_id} not found!`);
+    }
+    return serializeSeriesManagement(
       row as EventSeries,
+      organization,
       row.site_id ? (siteNames.get(row.site_id) ?? null) : null,
       row.room_id ? (roomNames.get(row.room_id) ?? null) : null,
       teamsMap.get(row.id) ?? [],
-    ),
-  );
+    );
+  });
 
   return {
     items,
@@ -1362,6 +1460,7 @@ export async function getEventSeriesManagement(
 ): Promise<EventSeriesManagementResponse> {
   logger.trace('eventService.getEventSeriesManagement');
   const series = await getSeriesRowOrThrow(seriesId);
+  const organization = await getCalendarOrganizationOrThrow(series.calendar_id);
   const siteName = series.site_id
     ? ((await getSiteNames([series.site_id])).get(series.site_id) ?? null)
     : null;
@@ -1369,7 +1468,13 @@ export async function getEventSeriesManagement(
     ? ((await getRoomNames([series.room_id])).get(series.room_id) ?? null)
     : null;
   const teamsMap = await getSeriesTeamsMap([seriesId]);
-  return serializeSeriesManagement(series, siteName, roomName, teamsMap.get(seriesId) ?? []);
+  return serializeSeriesManagement(
+    series,
+    organization,
+    siteName,
+    roomName,
+    teamsMap.get(seriesId) ?? [],
+  );
 }
 
 /**
@@ -1478,6 +1583,7 @@ export async function updateEventSeriesConfig(
       .where('id', '=', seriesId)
       .executeTakeFirstOrThrow();
 
+    const organization = await getCalendarOrganizationOrThrow(updated.calendar_id);
     const siteName = updated.site_id
       ? ((await getSiteNames([updated.site_id])).get(updated.site_id) ?? null)
       : null;
@@ -1485,6 +1591,12 @@ export async function updateEventSeriesConfig(
       ? ((await getRoomNames([updated.room_id])).get(updated.room_id) ?? null)
       : null;
     const teamsMap = await getSeriesTeamsMap([seriesId]);
-    return serializeSeriesManagement(updated, siteName, roomName, teamsMap.get(seriesId) ?? []);
+    return serializeSeriesManagement(
+      updated,
+      organization,
+      siteName,
+      roomName,
+      teamsMap.get(seriesId) ?? [],
+    );
   });
 }

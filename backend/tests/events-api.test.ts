@@ -136,6 +136,132 @@ async function cleanup(seedData: Seed): Promise<void> {
   await db.deleteFrom('organizations').where('id', '=', seedData.organizationId).execute();
 }
 
+// Two organizations, each with one calendar and one event series, and one
+// user who is an admin of both. Used by the tests that verify the organization
+// filter of the list endpoints.
+interface TwoOrgSeed {
+  organizationAId: string;
+  organizationAName: string;
+  organizationBId: string;
+  organizationBName: string;
+  calendarAId: string;
+  calendarBId: string;
+  userId: string;
+  token: string;
+  seriesAId: number;
+  seriesBId: number;
+}
+
+async function seedTwoOrganizations(): Promise<TwoOrgSeed> {
+  const organizationAId = randomUUID();
+  const organizationBId = randomUUID();
+  const calendarAId = randomUUID();
+  const calendarBId = randomUUID();
+  const userId = randomUUID();
+  const suffix = randomUUID();
+  const organizationAName = `Org A ${suffix}`;
+  const organizationBName = `Org B ${suffix}`;
+
+  await db
+    .insertInto('organizations')
+    .values([
+      { id: organizationAId, name: organizationAName, default_timezone: 'UTC' },
+      { id: organizationBId, name: organizationBName, default_timezone: 'UTC' },
+    ])
+    .execute();
+
+  await db
+    .insertInto('calendars')
+    .values([
+      { id: calendarAId, name: 'Calendar A', organization_id: organizationAId },
+      { id: calendarBId, name: 'Calendar B', organization_id: organizationBId },
+    ])
+    .execute();
+
+  await db
+    .insertInto('users')
+    .values({ id: userId, name: 'Multi Org User', email: `multi-${suffix}@example.com` })
+    .execute();
+
+  await db
+    .insertInto('user_organizations')
+    .values([
+      { user_id: userId, organization_id: organizationAId },
+      { user_id: userId, organization_id: organizationBId },
+    ])
+    .execute();
+
+  const token = randomUUID();
+  await db.insertInto('access_tokens').values({ user_id: userId, token }).execute();
+
+  const adminPermission = await db
+    .selectFrom('permissions')
+    .select('id')
+    .where('code', '=', 'admin')
+    .executeTakeFirstOrThrow();
+
+  for (const organizationId of [organizationAId, organizationBId]) {
+    const role = await db
+      .insertInto('roles')
+      .values({ organization_id: organizationId, name: 'Admin Role' })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    await db
+      .insertInto('role_permissions')
+      .values({ role_id: role.id, permission_id: adminPermission.id })
+      .execute();
+    await db.insertInto('user_roles').values({ user_id: userId, role_id: role.id }).execute();
+  }
+
+  const seriesA = await db
+    .insertInto('event_series')
+    .values({
+      title: 'Org A Event',
+      calendar_id: calendarAId,
+      start: new Date('2026-10-21T10:00:00.000Z'),
+      duration_minutes: 60,
+      timezone: 'UTC',
+      is_visible: true,
+    })
+    .returningAll()
+    .executeTakeFirstOrThrow();
+  const seriesB = await db
+    .insertInto('event_series')
+    .values({
+      title: 'Org B Event',
+      calendar_id: calendarBId,
+      start: new Date('2026-10-22T10:00:00.000Z'),
+      duration_minutes: 60,
+      timezone: 'UTC',
+      is_visible: true,
+    })
+    .returningAll()
+    .executeTakeFirstOrThrow();
+
+  return {
+    organizationAId,
+    organizationAName,
+    organizationBId,
+    organizationBName,
+    calendarAId,
+    calendarBId,
+    userId,
+    token,
+    seriesAId: seriesA.id,
+    seriesBId: seriesB.id,
+  };
+}
+
+async function cleanupTwoOrganizations(seedData: TwoOrgSeed): Promise<void> {
+  // Deleting the organizations cascades to calendars, event series and
+  // roles; deleting the user cascades to tokens and memberships.
+  await db.deleteFrom('users').where('id', '=', seedData.userId).execute();
+  await db
+    .deleteFrom('organizations')
+    .where('id', 'in', [seedData.organizationAId, seedData.organizationBId])
+    .execute();
+}
+
 interface EventSeriesResponse {
   id: number;
   title: string;
@@ -164,9 +290,24 @@ interface ExceptionResponse {
   overrideEnd: string | null;
 }
 
+interface OccurrenceWithOrganization {
+  seriesId: number;
+  title: string;
+  organizationId: string;
+  organizationName: string;
+}
+
+interface ManagementItem {
+  id: number;
+  title: string;
+  organizationId: string;
+  organizationName: string;
+}
+
 describe('Events API', () => {
   let app: FastifyInstance;
   let seedData: Seed | null = null;
+  let twoOrgData: TwoOrgSeed | null = null;
   let seriesId = 0;
   let dailySeriesId = 0;
 
@@ -177,13 +318,16 @@ describe('Events API', () => {
     await app.ready();
     try {
       seedData = await seed();
+      twoOrgData = await seedTwoOrganizations();
     } catch {
       seedData = null;
+      twoOrgData = null;
     }
   });
 
   afterAll(async () => {
     if (seedData) await cleanup(seedData).catch(() => {});
+    if (twoOrgData) await cleanupTwoOrganizations(twoOrgData).catch(() => {});
     await app.close();
   });
 
@@ -300,7 +444,7 @@ describe('Events API', () => {
     if (!seedData) return;
     const list = await app.inject({
       method: 'GET',
-      url: '/api/v1/event-series',
+      url: `/api/v1/event-series?organizationId=${seedData.organizationId}`,
       headers: auth(seedData.adminToken),
     });
     expect(list.statusCode).toBe(200);
@@ -920,11 +1064,120 @@ describe('Events API', () => {
       .execute();
     expect(comments).toHaveLength(0);
   });
+
+  describe('GET /api/v1/event-series/occurrences', () => {
+    // The occurrences endpoint is the one exception to the required
+    // organization filter: the Home page aggregates the events of all
+    // organizations.
+    it('lists occurrences of all organizations, each with its organization', async () => {
+      if (!twoOrgData) return;
+      const seed = twoOrgData;
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/event-series/occurrences?start=2026-10-21T00:00:00.000Z&end=2026-10-23T00:00:00.000Z',
+        headers: auth(seed.token),
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as OccurrenceWithOrganization[];
+      const eventA = body.filter(o => o.seriesId === seed.seriesAId);
+      const eventB = body.filter(o => o.seriesId === seed.seriesBId);
+      expect(eventA).toHaveLength(1);
+      expect(eventB).toHaveLength(1);
+      expect(eventA[0].organizationId).toBe(seed.organizationAId);
+      expect(eventA[0].organizationName).toBe(seed.organizationAName);
+      expect(eventB[0].organizationId).toBe(seed.organizationBId);
+      expect(eventB[0].organizationName).toBe(seed.organizationBName);
+    });
+
+    it('restricts occurrences to one organization when organizationId is given', async () => {
+      if (!twoOrgData) return;
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series/occurrences?start=2026-10-21T00:00:00.000Z&end=2026-10-23T00:00:00.000Z&organizationId=${twoOrgData.organizationAId}`,
+        headers: auth(twoOrgData.token),
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as OccurrenceWithOrganization[];
+      expect(body).toHaveLength(1);
+      expect(body[0].seriesId).toBe(twoOrgData.seriesAId);
+      expect(body[0].organizationId).toBe(twoOrgData.organizationAId);
+    });
+  });
+
+  describe('GET /api/v1/event-series', () => {
+    it('restricts the series list to one organization when organizationId is given', async () => {
+      if (!twoOrgData) return;
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series?organizationId=${twoOrgData.organizationAId}`,
+        headers: auth(twoOrgData.token),
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as Array<{ id: number; calendarId: string }>;
+      expect(body).toHaveLength(1);
+      expect(body[0].id).toBe(twoOrgData.seriesAId);
+      expect(body[0].calendarId).toBe(twoOrgData.calendarAId);
+    });
+
+    it('requires organizationId on the series list', async () => {
+      if (!twoOrgData) return;
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/event-series',
+        headers: auth(twoOrgData.token),
+      });
+      expect(response.statusCode).toBe(400);
+    });
+  });
+
+  describe('GET /api/v1/event-series/management', () => {
+    it('restricts the management list to one organization when organizationId is given', async () => {
+      if (!twoOrgData) return;
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series/management?organizationId=${twoOrgData.organizationBId}`,
+        headers: auth(twoOrgData.token),
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as { items: ManagementItem[]; total: number };
+      expect(body.total).toBe(1);
+      expect(body.items).toHaveLength(1);
+      expect(body.items[0].id).toBe(twoOrgData.seriesBId);
+      expect(body.items[0].organizationId).toBe(twoOrgData.organizationBId);
+      expect(body.items[0].organizationName).toBe(twoOrgData.organizationBName);
+    });
+
+    it('requires organizationId on the management list', async () => {
+      if (!twoOrgData) return;
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/event-series/management',
+        headers: auth(twoOrgData.token),
+      });
+      expect(response.statusCode).toBe(400);
+    });
+  });
+
+  describe('GET /api/v1/event-series/:seriesId/management', () => {
+    it('includes the organization in the management detail of a series', async () => {
+      if (!twoOrgData) return;
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series/${twoOrgData.seriesAId}/management`,
+        headers: auth(twoOrgData.token),
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as ManagementItem;
+      expect(body.organizationId).toBe(twoOrgData.organizationAId);
+      expect(body.organizationName).toBe(twoOrgData.organizationAName);
+    });
+  });
 });
 
 describe('Calendars API', () => {
   let app: FastifyInstance;
   let seedData: Seed | null = null;
+  let twoOrgData: TwoOrgSeed | null = null;
   let createdCalendarId: string | null = null;
 
   const auth = (token: string) => ({ 'x-token': token });
@@ -934,8 +1187,10 @@ describe('Calendars API', () => {
     await app.ready();
     try {
       seedData = await seed();
+      twoOrgData = await seedTwoOrganizations();
     } catch {
       seedData = null;
+      twoOrgData = null;
     }
   });
 
@@ -950,6 +1205,7 @@ describe('Calendars API', () => {
       }
       await cleanup(seedData).catch(() => {});
     }
+    if (twoOrgData) await cleanupTwoOrganizations(twoOrgData).catch(() => {});
     await app.close();
   });
 
@@ -957,7 +1213,7 @@ describe('Calendars API', () => {
     if (!seedData) return;
     const response = await app.inject({
       method: 'GET',
-      url: '/api/v1/calendars',
+      url: `/api/v1/calendars?organizationId=${seedData.organizationId}`,
       headers: auth(seedData.readerToken),
     });
     expect(response.statusCode).toBe(200);
@@ -1028,6 +1284,32 @@ describe('Calendars API', () => {
       payload: { name: 'Forbidden Calendar', organizationId: seedData.organizationId },
     });
     expect(response.statusCode).toBe(403);
+  });
+
+  describe('GET /api/v1/calendars', () => {
+    it('restricts the calendar list to one organization when organizationId is given', async () => {
+      if (!twoOrgData) return;
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/calendars?organizationId=${twoOrgData.organizationBId}`,
+        headers: auth(twoOrgData.token),
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as Array<{ id: string; organizationId: string }>;
+      expect(body).toHaveLength(1);
+      expect(body[0].id).toBe(twoOrgData.calendarBId);
+      expect(body[0].organizationId).toBe(twoOrgData.organizationBId);
+    });
+
+    it('requires organizationId on the calendar list', async () => {
+      if (!twoOrgData) return;
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/calendars',
+        headers: auth(twoOrgData.token),
+      });
+      expect(response.statusCode).toBe(400);
+    });
   });
 });
 
@@ -1260,7 +1542,7 @@ describe('Split series (edit this and all following)', () => {
     const newId = (
       await app.inject({
         method: 'GET',
-        url: '/api/v1/event-series',
+        url: `/api/v1/event-series?organizationId=${seedData.organizationId}`,
         headers: auth(seedData.readerToken),
       })
     ).json() as EventSeriesResponse[];

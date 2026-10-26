@@ -9,6 +9,7 @@ import {
   eventJobsQuerySchema,
   eventJobUpdateSchema,
   eventSeriesPushSchema,
+  eventSeriesQuerySchema,
   eventSeriesUpdateSchema,
   occurrenceRangeQuerySchema,
   occurrenceStartSchema,
@@ -81,11 +82,11 @@ function requireAuthUser(request: FastifyRequest): { id: string } {
 }
 
 export async function listEventSeriesHandler(
-  request: FastifyRequest<{ Querystring: { calendarId?: string } }>,
+  request: FastifyRequest<{ Querystring: unknown }>,
   reply: FastifyReply,
 ): Promise<void> {
-  const calendarId = request.query.calendarId;
-  const series = await listEventSeries(calendarId);
+  const query = eventSeriesQuerySchema.parse(request.query);
+  const series = await listEventSeries(query.organizationId, query.calendarId);
   return reply.status(200).send(series);
 }
 
@@ -135,6 +136,7 @@ export async function getOccurrencesHandler(
     query.calendarId,
     query,
     user.id,
+    query.organizationId,
   );
   return reply.status(200).send(occurrences);
 }

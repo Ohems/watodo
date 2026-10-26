@@ -45,17 +45,24 @@ function EventManagementPage() {
   );
   const teams = teamsData?.items ?? [];
 
-  const { data, isLoading: loading } = useGetEventSeriesManagementListQuery({
-    page,
-    limit,
-    search: search || undefined,
-    startFrom: dateFrom ? new Date(dateFrom).toISOString() : undefined,
-    startTo: dateTo ? new Date(dateTo).toISOString() : undefined,
-    siteId: siteId ?? undefined,
-    roomId: roomId ?? undefined,
-    teamId: teamId ?? undefined,
-    hasTeam,
-  });
+  // The management list only shows the active organization's series (the
+  // Home page aggregates all organizations).
+  const { data, isLoading: loading } = useGetEventSeriesManagementListQuery(
+    activeOrganizationId
+      ? {
+          page,
+          limit,
+          search: search || undefined,
+          startFrom: dateFrom ? new Date(dateFrom).toISOString() : undefined,
+          startTo: dateTo ? new Date(dateTo).toISOString() : undefined,
+          siteId: siteId ?? undefined,
+          roomId: roomId ?? undefined,
+          teamId: teamId ?? undefined,
+          hasTeam,
+          organizationId: activeOrganizationId,
+        }
+      : skipToken,
+  );
 
   const locationLabel = (item: EventSeriesManagement): string => {
     if (item.roomName && item.siteName) return `${item.siteName} - ${item.roomName}`;

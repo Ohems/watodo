@@ -188,11 +188,14 @@ export const occurrenceFilterSchema = z.object({
 
 export type OccurrenceFilter = z.infer<typeof occurrenceFilterSchema>;
 
+// The organization filter is optional here because the Home page lists
+// occurrences across all organizations (every other view passes it).
 export const occurrenceRangeQuerySchema = z
   .object({
     start: z.iso.datetime(),
     end: z.iso.datetime(),
     calendarId: z.uuid().optional(),
+    organizationId: z.uuid().optional(),
   })
   .extend(occurrenceFilterSchema.shape);
 
@@ -341,6 +344,8 @@ export const tableQuerySchema = z.object({
 
 // --- Event series management query ---
 
+// The management view only ever shows the active organization, so the
+// organization filter is required.
 export const eventSeriesListQuerySchema = z.object({
   page: z.coerce.number().int().min(0).optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
@@ -351,6 +356,20 @@ export const eventSeriesListQuerySchema = z.object({
   roomId: z.uuid().optional(),
   teamId: z.uuid().optional(),
   hasTeam: z.coerce.boolean().optional(),
+  organizationId: z.uuid(),
+});
+
+// --- Event series list query ---
+
+export const eventSeriesQuerySchema = z.object({
+  calendarId: z.uuid().optional(),
+  organizationId: z.uuid(),
+});
+
+// --- Calendar list query ---
+
+export const calendarListQuerySchema = z.object({
+  organizationId: z.uuid(),
 });
 
 // --- Event series site/room/team update ---
@@ -374,4 +393,6 @@ export type JobUpdate = z.infer<typeof jobUpdateSchema>;
 export type NotificationUpdate = z.infer<typeof notificationUpdateSchema>;
 export type TableQuery = z.infer<typeof tableQuerySchema>;
 export type EventSeriesListQuery = z.infer<typeof eventSeriesListQuerySchema>;
+export type EventSeriesQuery = z.infer<typeof eventSeriesQuerySchema>;
+export type CalendarListQuery = z.infer<typeof calendarListQuerySchema>;
 export type EventSeriesConfig = z.infer<typeof eventSeriesConfigSchema>;

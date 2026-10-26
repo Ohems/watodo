@@ -26,9 +26,14 @@ function serializeCalendar(calendar: Calendar): CalendarResponse {
   };
 }
 
-export async function listCalendars(): Promise<CalendarResponse[]> {
+export async function listCalendars(organizationId: string): Promise<CalendarResponse[]> {
   logger.trace('calendarService.listCalendars');
-  const rows = await db.selectFrom('calendars').selectAll().orderBy('name', 'asc').execute();
+  const rows = await db
+    .selectFrom('calendars')
+    .selectAll()
+    .where('organization_id', '=', organizationId)
+    .orderBy('name', 'asc')
+    .execute();
   return rows.map(serializeCalendar);
 }
 

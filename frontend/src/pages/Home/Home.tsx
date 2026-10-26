@@ -139,9 +139,16 @@ function Home() {
                         {notification.body}
                       </Text>
                     )}
-                    <Text size="xs" c="dimmed">
-                      {new Date(notification.createdAt).toLocaleString()}
-                    </Text>
+                    <Group gap="xs" wrap="nowrap">
+                      <Text size="xs" c="dimmed">
+                        {new Date(notification.createdAt).toLocaleString()}
+                      </Text>
+                      {notification.organizationName && (
+                        <Badge size="xs" variant="light" color="gray">
+                          {notification.organizationName}
+                        </Badge>
+                      )}
+                    </Group>
                   </Box>
                   {!notification.isRead && (
                     <ActionIcon
@@ -197,11 +204,16 @@ function Home() {
                         : new Date(occ.start).toLocaleString()}
                     </Text>
                   </Box>
-                  {occ.isRescheduled && (
-                    <Badge size="sm" variant="light" color="orange">
-                      {t('events.rescheduled')}
+                  <Group gap="xs" wrap="nowrap">
+                    {occ.isRescheduled && (
+                      <Badge size="sm" variant="light" color="orange">
+                        {t('events.rescheduled')}
+                      </Badge>
+                    )}
+                    <Badge size="sm" variant="light" color="blue">
+                      {occ.organizationName}
                     </Badge>
-                  )}
+                  </Group>
                 </Group>
               ))}
             </Stack>

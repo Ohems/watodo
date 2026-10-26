@@ -54,17 +54,23 @@ function CalendarPage() {
   const teams = teamsData?.items ?? [];
 
   // The API is called with a padded range so occurrences just outside the
-  // visible month are included.
-  const { data: occurrencesData, isFetching: loading } = useGetOccurrencesQuery({
-    start: new Date(range.start.getTime() - DAY_MS).toISOString(),
-    end: new Date(range.end.getTime() + 2 * DAY_MS).toISOString(),
-    filter: {
-      scope,
-      siteId: siteId ?? undefined,
-      roomId: roomId ?? undefined,
-      teamId: teamId ?? undefined,
-    },
-  });
+  // visible month are included. The calendar only shows the active
+  // organization's events (the Home page aggregates all organizations).
+  const { data: occurrencesData, isFetching: loading } = useGetOccurrencesQuery(
+    activeOrganizationId
+      ? {
+          start: new Date(range.start.getTime() - DAY_MS).toISOString(),
+          end: new Date(range.end.getTime() + 2 * DAY_MS).toISOString(),
+          organizationId: activeOrganizationId,
+          filter: {
+            scope,
+            siteId: siteId ?? undefined,
+            roomId: roomId ?? undefined,
+            teamId: teamId ?? undefined,
+          },
+        }
+      : skipToken,
+  );
   const occurrences = occurrencesData ?? [];
 
   // The API returns cancelled occurrences with a flag; they are hidden here.
