@@ -81,10 +81,14 @@ async function attachPermissions(
   return roles.map(role => ({ ...role, permissions: byRole.get(role.id) ?? [] }));
 }
 
-async function replaceRolePermissions(roleId: number, permissionIds: number[]): Promise<void> {
-  await db.deleteFrom('role_permissions').where('role_id', '=', roleId).execute();
+async function replaceRolePermissions(
+  executor: Kysely<Database> | Transaction<Database>,
+  roleId: number,
+  permissionIds: number[],
+): Promise<void> {
+  await executor.deleteFrom('role_permissions').where('role_id', '=', roleId).execute();
   if (permissionIds.length === 0) return;
-  await db
+  await executor
     .insertInto('role_permissions')
     .values(permissionIds.map(permissionId => ({ role_id: roleId, permission_id: permissionId })))
     .execute();
@@ -159,7 +163,7 @@ export async function updateRole(
       .execute();
 
     if (permissionIds !== undefined) {
-      await replaceRolePermissions(role.id, permissionIds);
+      await replaceRolePermissions(tx, role.id, permissionIds);
     }
 
     const updated = await tx

@@ -7,6 +7,7 @@ export const config = {
   host: process.env.HOST ?? '0.0.0.0',
   nodeEnv: process.env.NODE_ENV ?? 'development',
   logLevel: process.env.LOG_LEVEL ?? 'info',
+  logEnabled: process.env.LOG_ENABLED !== 'false',
   databaseUrl: process.env.DATABASE_URL ?? '',
   redisUrl: process.env.REDIS_URL ?? 'redis://localhost:6379',
   discordClientId: process.env.DISCORD_CLIENT_ID ?? '',

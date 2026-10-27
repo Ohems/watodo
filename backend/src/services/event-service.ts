@@ -1531,7 +1531,11 @@ export async function updateEventSeriesConfig(
     }
   }
 
-  return db.transaction().execute(async tx => {
+  // The writes run in a transaction; the read-only lookups (organization,
+  // site/room names, team map) run after it on the main db instance. This
+  // avoids using db inside the transaction callback, which deadlocks on
+  // single-connection databases like PGlite.
+  const updated = await db.transaction().execute(async tx => {
     if (
       data.siteId !== undefined ||
       data.roomId !== undefined ||
@@ -1577,26 +1581,26 @@ export async function updateEventSeriesConfig(
       }
     }
 
-    const updated = await tx
+    return tx
       .selectFrom('event_series')
       .selectAll()
       .where('id', '=', seriesId)
       .executeTakeFirstOrThrow();
-
-    const organization = await getCalendarOrganizationOrThrow(updated.calendar_id);
-    const siteName = updated.site_id
-      ? ((await getSiteNames([updated.site_id])).get(updated.site_id) ?? null)
-      : null;
-    const roomName = updated.room_id
-      ? ((await getRoomNames([updated.room_id])).get(updated.room_id) ?? null)
-      : null;
-    const teamsMap = await getSeriesTeamsMap([seriesId]);
-    return serializeSeriesManagement(
-      updated,
-      organization,
-      siteName,
-      roomName,
-      teamsMap.get(seriesId) ?? [],
-    );
   });
+
+  const organization = await getCalendarOrganizationOrThrow(updated.calendar_id);
+  const siteName = updated.site_id
+    ? ((await getSiteNames([updated.site_id])).get(updated.site_id) ?? null)
+    : null;
+  const roomName = updated.room_id
+    ? ((await getRoomNames([updated.room_id])).get(updated.room_id) ?? null)
+    : null;
+  const teamsMap = await getSeriesTeamsMap([seriesId]);
+  return serializeSeriesManagement(
+    updated,
+    organization,
+    siteName,
+    roomName,
+    teamsMap.get(seriesId) ?? [],
+  );
 }

@@ -21,7 +21,7 @@ monorepo with two npm workspaces:
 ## Getting Started
 
 ```sh
-docker compose up -d       # start PostgreSQL, Redis and the test PostgreSQL (port 6432)
+docker compose up -d       # start PostgreSQL and Redis (development only)
 npm install                # install all workspace dependencies
 cp .env.sample .env       # configure environment
 cp .env.sample backend/.env # backend commands run with cwd=backend/ and load .env from there
@@ -29,10 +29,14 @@ npm run migrate -w backend # apply database migrations
 npm run dev                # start both dev servers
 ```
 
-The backend test suite runs against the dedicated test database (`watodo-postgres-test`,
-host port 6432) configured by `backend/.env.test` (committed to Git, placeholder values
-only). It needs no setup beyond `docker compose up -d`: `backend/tests/global-setup.ts`
-applies migrations and seeds the permissions table before the test files run.
+The backend test suite runs against PGlite (in-process WebAssembly Postgres via
+`@electric-sql/pglite`), so no Docker container or external database is needed.
+`backend/tests/global-setup.ts` (Vitest globalSetup) builds a pre-migrated PGlite
+template once and caches it in the OS temp directory (invalidated by mtime when
+migration files change). `backend/tests/setup.ts` loads `backend/.env.test`
+(committed to Git, placeholder values only) and imports `src/database.ts`, which
+loads the cached template per test worker. Any pending migrations are applied
+and the permissions table is seeded before each test file runs.
 ```
 
 The backend runs on port 3000, the frontend on port 5173 (with API proxy to :3000).
@@ -342,7 +346,7 @@ frontend/src/
 1. Create a migration: `npm run migrate:create -w backend -- <name>`
 2. Edit the migration file in `backend/migrations/`
 3. Apply it: `npm run migrate -w backend`
-4. Never edit or delete existing migration files.
+4. Never edit or delete existing migration files. (The PGlite test template is rebuilt automatically by `tests/global-setup.ts` when migration files change.)
 
 ## Testing
 
@@ -363,15 +367,23 @@ Group frontend tests by the page or component being tested, for example `Account
 - Tests live in `backend/tests/`.
 - API tests use Fastify's `app.inject()` for HTTP testing without a running server.
 - Run: `npm run test -w backend`
-- Integration tests run against the dedicated test database (`watodo-postgres-test`,
-  host port 6432). `backend/.env.test` (committed, placeholder values only) configures
-  the connection: `tests/setup.ts` loads it in every test worker and
-  `tests/global-setup.ts` applies migrations and seeds the permissions table once
-  before the test files run (via the node-pg-migrate programmatic API).
-- The test database is required: `tests/global-setup.ts` fails the whole run when it
-  is not reachable (start it with `docker compose up -d`). Tests never skip silently.
+- Integration tests run against PGlite (`@electric-sql/pglite`), an in-process
+  WebAssembly Postgres. No Docker container or external database is needed.
+  `backend/src/database.ts` creates a PGlite instance when `NODE_ENV=test` and
+  wires it into Kysely via the built-in `PGliteDialect`. `tests/global-setup.ts`
+  (Vitest globalSetup) builds a pre-migrated template once and caches it in the
+  OS temp directory; `src/database.ts` loads it via PGlite's `loadDataDir`
+  (~350ms) instead of a fresh initdb + migrations (~1500ms). The cache is
+  invalidated by mtime when migration files or the permissions registry change.
+  `tests/setup.ts` loads `backend/.env.test` (committed, placeholder values
+  only), imports `src/database.ts` (which creates the PGlite instance), applies
+  any pending migrations via node-pg-migrate (using the pg-client adapter in
+  `tests/helpers/pglite-client.ts`) and seeds the permissions table before each
+  test file runs. Both steps are idempotent, so a stale or missing template is
+  self-healing. Each test file gets its own fork (and therefore its own PGlite
+  instance).
 - Shared fixtures live in `backend/tests/helpers/fixtures.ts`: `resetDatabase()`
-  truncates all tables except `permissions` (seeded once by the global setup), and
+  truncates all tables except `permissions` (seeded by `tests/setup.ts`), and
   the `create*` factories insert users, organizations, calendars, roles, tokens and
   login methods. Integration tests reset the database in `beforeEach` and build the
   data each test needs, so tests are independent and a broken seed fails the test.
@@ -400,8 +412,8 @@ Group frontend tests by the page or component being tested, for example `Account
 
 See `.env.sample` for all variables. Key ones:
 
-- `DATABASE_URL` - PostgreSQL connection string (`backend/.env.test` points it at the
-  test database on port 6432 for the backend test suite)
+- `DATABASE_URL` - PostgreSQL connection string (development/production only; the
+  test suite uses PGlite and does not need it)
 - `REDIS_URL` - Redis connection string
 - `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` - Discord OAuth credentials
 - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` - Google OAuth credentials
@@ -409,6 +421,8 @@ See `.env.sample` for all variables. Key ones:
 - `BASE_URL` - Public URL of the backend (used for OAuth redirect)
 - `PORT` / `HOST` - Server bind address (default: 3000 / 0.0.0.0)
 - `NODE_ENV` - Environment (development / production / test)
+- `LOG_ENABLED` - Set to `false` to disable all logging (default: `true`)
+- `LOG_LEVEL` - Pino log level (default: `info`)
 
 ## Rules and Constraints
 

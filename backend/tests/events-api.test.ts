@@ -19,8 +19,8 @@ import {
 // assignments, and comments. Every test resets the database (beforeEach) and
 // builds its own fixture through the factories in tests/helpers/fixtures.ts,
 // so tests are independent and a broken seed fails the test instead of being
-// masked. The test database is required: the global setup fails the run when
-// it is not reachable.
+// masked. The database is PGlite (in-process WebAssembly Postgres); migrations
+// and permission seeding run in tests/setup.ts before each test file.
 
 interface Seed {
   organizationId: string;

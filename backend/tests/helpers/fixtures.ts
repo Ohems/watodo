@@ -3,8 +3,8 @@ import { sql } from 'kysely';
 import { db } from '../../src/database.js';
 
 /**
- * Truncates every table except `permissions` (seeded once by the global
- * setup) and `pgmigrations`. Call in a `beforeEach` hook so every test
+ * Truncates every table except tables seeded by tests/setup.ts before
+ * each test file and `pgmigrations`. Call in a `beforeEach` hook so every test
  * starts from an empty database; a seed failure then fails the test instead
  * of being masked by an early return.
  */
