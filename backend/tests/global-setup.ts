@@ -10,8 +10,8 @@ dotenvConfig({ path: fileURLToPath(new URL('../.env.test', import.meta.url)) });
 // Runs once before all test files: applies pending migrations and seeds the
 // permissions table in the test database, so integration tests run against a
 // real schema without any manual setup step. When the test database is not
-// reachable the setup is skipped and the integration tests skip themselves
-// (they probe the database in beforeAll).
+// reachable the setup throws, failing the whole test run instead of letting
+// tests skip silently.
 export default async function setup(): Promise<void> {
   // Imported dynamically so that the dotenv call above runs first.
   const { runner } = await import('node-pg-migrate');
@@ -27,9 +27,15 @@ export default async function setup(): Promise<void> {
   try {
     await sql`select 1`.execute(db);
   } catch (error) {
-    logger.warn({ error }, 'Test database is not reachable; integration tests will be skipped');
     await disconnectDatabase().catch(() => {});
-    return;
+    // Log before throwing: the thrown error fails the run, but vitest's error
+    // printer can mangle its output (vite source-map crash on Node 24), so the
+    // reason is also logged directly.
+    logger.error(
+      { error },
+      'Test database is not reachable; the backend test suite requires it. Start it with `docker compose up -d`.',
+    );
+    throw new Error('Test database is not reachable', { cause: error });
   }
 
   try {

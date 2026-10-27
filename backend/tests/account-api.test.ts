@@ -1,14 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { db } from '../src/database.js';
+import { createAuthAccount, createUser, resetDatabase } from './helpers/fixtures.js';
 
 // Integration tests for the self-service account endpoints: updating one's
 // own profile, listing and disconnecting login methods, connecting another
 // login method through the OAuth link flow, and deleting one's own account.
 // The OAuth provider and the Redis login-state storage are mocked; the
-// database is real. Skipped when the database is not available.
+// database is real. Every test resets the database (beforeEach) and builds
+// its own users, so tests are independent and a broken seed fails the test.
 
 const fakes = vi.hoisted(() => {
   const redisStore = new Map<string, string>();
@@ -58,34 +60,6 @@ vi.mock('../src/services/auth-providers/index.js', () => ({
   }),
 }));
 
-async function createUser(name: string): Promise<{ id: string; token: string }> {
-  const id = randomUUID();
-  const token = randomUUID();
-  const suffix = randomUUID();
-  await db
-    .insertInto('users')
-    .values({ id, name, email: `${name.toLowerCase().replaceAll(' ', '-')}-${suffix}@example.com` })
-    .execute();
-  await db.insertInto('access_tokens').values({ user_id: id, token }).execute();
-  return { id, token };
-}
-
-async function createAuthAccount(
-  userId: string,
-  provider: 'discord' | 'google' | 'microsoft',
-  providerAccountId: string,
-): Promise<void> {
-  await db
-    .insertInto('auth_accounts')
-    .values({
-      user_id: userId,
-      provider,
-      provider_account_id: providerAccountId,
-      access_token: `token-${providerAccountId}`,
-    })
-    .execute();
-}
-
 async function listAuthAccounts(userId: string): Promise<{ provider: string }[]> {
   return db
     .selectFrom('auth_accounts')
@@ -124,52 +98,37 @@ async function startLinkFlow(
 
 describe('Account API', () => {
   let app: FastifyInstance;
-  let dbAvailable = false;
   let userId = '';
+  let userEmail = '';
   let token = '';
-  let otherUserId = '';
   let otherUserEmail = '';
-  const throwawayUserIds: string[] = [];
 
   beforeAll(async () => {
     app = await buildApp();
     await app.ready();
-    try {
-      const main = await createUser('Account User');
-      const other = await createUser('Other User');
-      await createAuthAccount(main.id, 'discord', 'main-discord-1');
-      await createAuthAccount(main.id, 'google', 'main-google-1');
-      await createAuthAccount(other.id, 'discord', 'other-discord-1');
-      userId = main.id;
-      token = main.token;
-      otherUserId = other.id;
-      const otherRow = await db
-        .selectFrom('users')
-        .select('email')
-        .where('id', '=', other.id)
-        .executeTakeFirstOrThrow();
-      otherUserEmail = otherRow.email;
-      dbAvailable = true;
-    } catch {
-      dbAvailable = false;
-    }
+  });
+
+  beforeEach(async () => {
+    await resetDatabase();
+    // The main user has a discord and a google login method; the other user
+    // has a discord login method.
+    const main = await createUser('Account User');
+    const other = await createUser('Other User');
+    await createAuthAccount(main.id, 'discord', 'main-discord-1');
+    await createAuthAccount(main.id, 'google', 'main-google-1');
+    await createAuthAccount(other.id, 'discord', 'other-discord-1');
+    userId = main.id;
+    userEmail = main.email;
+    token = main.token;
+    otherUserEmail = other.email;
   });
 
   afterAll(async () => {
-    if (dbAvailable) {
-      await db
-        .deleteFrom('users')
-        .where('id', 'in', [userId, otherUserId, ...throwawayUserIds])
-        .execute()
-        .catch(() => {});
-    }
     await app.close();
   });
 
   describe('PATCH /api/v1/users/@me', () => {
     it('lets a user update their own personal information without user-management permissions', async () => {
-      if (!dbAvailable) return;
-
       const response = await app.inject({
         method: 'PATCH',
         url: '/api/v1/users/@me',
@@ -203,7 +162,14 @@ describe('Account API', () => {
     });
 
     it('rejects a phone number without a country code', async () => {
-      if (!dbAvailable) return;
+      // Set a valid phone number first so the rejection has something to keep.
+      const valid = await app.inject({
+        method: 'PATCH',
+        url: '/api/v1/users/@me',
+        headers: { 'x-token': token },
+        payload: { phoneNumber: '+358401234567' },
+      });
+      expect(valid.statusCode).toBe(200);
 
       const response = await app.inject({
         method: 'PATCH',
@@ -227,7 +193,14 @@ describe('Account API', () => {
     });
 
     it('clears the phone number with null', async () => {
-      if (!dbAvailable) return;
+      // Set a phone number first so clearing it is meaningful.
+      const valid = await app.inject({
+        method: 'PATCH',
+        url: '/api/v1/users/@me',
+        headers: { 'x-token': token },
+        payload: { phoneNumber: '+358401234567' },
+      });
+      expect(valid.statusCode).toBe(200);
 
       const response = await app.inject({
         method: 'PATCH',
@@ -248,8 +221,6 @@ describe('Account API', () => {
     });
 
     it('does not let a user change their own account state', async () => {
-      if (!dbAvailable) return;
-
       const response = await app.inject({
         method: 'PATCH',
         url: '/api/v1/users/@me',
@@ -269,8 +240,6 @@ describe('Account API', () => {
     });
 
     it('rejects invalid payloads', async () => {
-      if (!dbAvailable) return;
-
       const invalidEmail = await app.inject({
         method: 'PATCH',
         url: '/api/v1/users/@me',
@@ -289,8 +258,6 @@ describe('Account API', () => {
     });
 
     it('rejects an email address that is already in use', async () => {
-      if (!dbAvailable) return;
-
       const response = await app.inject({
         method: 'PATCH',
         url: '/api/v1/users/@me',
@@ -303,8 +270,6 @@ describe('Account API', () => {
     });
 
     it('requires authentication', async () => {
-      if (!dbAvailable) return;
-
       const response = await app.inject({
         method: 'PATCH',
         url: '/api/v1/users/@me',
@@ -316,8 +281,6 @@ describe('Account API', () => {
 
   describe('GET /api/v1/users/@me', () => {
     it('returns the current user in the serialized shape', async () => {
-      if (!dbAvailable) return;
-
       const response = await app.inject({
         method: 'GET',
         url: '/api/v1/users/@me',
@@ -341,8 +304,6 @@ describe('Account API', () => {
 
   describe('GET /api/v1/users/@me/auth-accounts', () => {
     it('lists the connected login methods without exposing tokens', async () => {
-      if (!dbAvailable) return;
-
       const response = await app.inject({
         method: 'GET',
         url: '/api/v1/users/@me/auth-accounts',
@@ -364,8 +325,6 @@ describe('Account API', () => {
     });
 
     it("does not list other users' login methods", async () => {
-      if (!dbAvailable) return;
-
       const response = await app.inject({
         method: 'GET',
         url: '/api/v1/users/@me/auth-accounts',
@@ -378,8 +337,6 @@ describe('Account API', () => {
     });
 
     it('requires authentication', async () => {
-      if (!dbAvailable) return;
-
       const response = await app.inject({ method: 'GET', url: '/api/v1/users/@me/auth-accounts' });
       expect(response.statusCode).toBe(401);
     });
@@ -387,8 +344,6 @@ describe('Account API', () => {
 
   describe('DELETE /api/v1/users/@me/auth-accounts/:provider', () => {
     it('disconnects a login method', async () => {
-      if (!dbAvailable) return;
-
       const response = await app.inject({
         method: 'DELETE',
         url: '/api/v1/users/@me/auth-accounts/google',
@@ -401,7 +356,13 @@ describe('Account API', () => {
     });
 
     it('refuses to disconnect the last login method', async () => {
-      if (!dbAvailable) return;
+      // Remove the google login method so discord is the last one.
+      const disconnect = await app.inject({
+        method: 'DELETE',
+        url: '/api/v1/users/@me/auth-accounts/google',
+        headers: { 'x-token': token },
+      });
+      expect(disconnect.statusCode).toBe(200);
 
       const response = await app.inject({
         method: 'DELETE',
@@ -416,8 +377,6 @@ describe('Account API', () => {
     });
 
     it('returns 404 for a login method that is not connected', async () => {
-      if (!dbAvailable) return;
-
       const response = await app.inject({
         method: 'DELETE',
         url: '/api/v1/users/@me/auth-accounts/microsoft',
@@ -428,8 +387,6 @@ describe('Account API', () => {
     });
 
     it('rejects an unsupported provider', async () => {
-      if (!dbAvailable) return;
-
       const response = await app.inject({
         method: 'DELETE',
         url: '/api/v1/users/@me/auth-accounts/twitter',
@@ -442,8 +399,6 @@ describe('Account API', () => {
 
   describe('POST /api/v1/auth/:provider/link', () => {
     it('requires authentication', async () => {
-      if (!dbAvailable) return;
-
       const response = await app.inject({
         method: 'POST',
         url: '/api/v1/auth/microsoft/link',
@@ -453,8 +408,6 @@ describe('Account API', () => {
     });
 
     it('rejects an unsupported provider', async () => {
-      if (!dbAvailable) return;
-
       const response = await app.inject({
         method: 'POST',
         url: '/api/v1/auth/twitter/link',
@@ -465,8 +418,6 @@ describe('Account API', () => {
     });
 
     it('starts an OAuth flow bound to the current user', async () => {
-      if (!dbAvailable) return;
-
       const state = await startLinkFlow(app, token);
 
       const stored = fakes.redisStore.get(`login:state:${state}`);
@@ -479,13 +430,11 @@ describe('Account API', () => {
 
   describe('GET /api/v1/auth/:provider/callback', () => {
     it('links the provider account to the current user after the OAuth callback', async () => {
-      if (!dbAvailable) return;
-
       const tokensBefore = await countAccessTokens(userId);
       fakes.profile = {
         id: 'main-microsoft-1',
-        email: 'renamed@example.com',
-        name: 'Renamed User',
+        email: userEmail,
+        name: 'Account User',
       };
 
       const state = await startLinkFlow(app, token);
@@ -501,7 +450,7 @@ describe('Account API', () => {
       expect(await countAccessTokens(userId)).toBe(tokensBefore);
 
       const accounts = await listAuthAccounts(userId);
-      expect(accounts.map(account => account.provider)).toEqual(['discord', 'microsoft']);
+      expect(accounts.map(account => account.provider)).toEqual(['discord', 'google', 'microsoft']);
 
       const linked = await db
         .selectFrom('auth_accounts')
@@ -522,11 +471,9 @@ describe('Account API', () => {
     });
 
     it('refuses to link a provider account that belongs to a different user', async () => {
-      if (!dbAvailable) return;
-
       fakes.profile = {
         id: 'other-discord-1',
-        email: 'other@example.com',
+        email: otherUserEmail,
         name: 'Other User',
       };
 
@@ -543,17 +490,15 @@ describe('Account API', () => {
 
       // Nothing was linked and no session was created.
       const accounts = await listAuthAccounts(userId);
-      expect(accounts.map(account => account.provider)).toEqual(['discord', 'microsoft']);
+      expect(accounts.map(account => account.provider)).toEqual(['discord', 'google']);
       expect(response.headers['set-cookie']).toBeUndefined();
     });
 
     it('reports an expired linking session', async () => {
-      if (!dbAvailable) return;
-
       fakes.profile = {
         id: 'main-microsoft-1',
-        email: 'renamed@example.com',
-        name: 'Renamed User',
+        email: userEmail,
+        name: 'Account User',
       };
 
       // Stage a link flow whose token no longer exists.
@@ -577,17 +522,12 @@ describe('Account API', () => {
 
   describe('DELETE /api/v1/users/@me', () => {
     it('requires authentication', async () => {
-      if (!dbAvailable) return;
-
       const response = await app.inject({ method: 'DELETE', url: '/api/v1/users/@me' });
       expect(response.statusCode).toBe(401);
     });
 
     it('deletes the user, their login methods and their sessions', async () => {
-      if (!dbAvailable) return;
-
       const throwaway = await createUser('Throwaway User');
-      throwawayUserIds.push(throwaway.id);
       await createAuthAccount(throwaway.id, 'discord', 'throwaway-discord-1');
 
       const response = await app.inject({

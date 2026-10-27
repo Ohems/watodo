@@ -368,8 +368,13 @@ Group frontend tests by the page or component being tested, for example `Account
   the connection: `tests/setup.ts` loads it in every test worker and
   `tests/global-setup.ts` applies migrations and seeds the permissions table once
   before the test files run (via the node-pg-migrate programmatic API).
-- Tests that need Redis or a database skip themselves when the test database is not
-  reachable (e.g. 302 or 500 for login without Redis).
+- The test database is required: `tests/global-setup.ts` fails the whole run when it
+  is not reachable (start it with `docker compose up -d`). Tests never skip silently.
+- Shared fixtures live in `backend/tests/helpers/fixtures.ts`: `resetDatabase()`
+  truncates all tables except `permissions` (seeded once by the global setup), and
+  the `create*` factories insert users, organizations, calendars, roles, tokens and
+  login methods. Integration tests reset the database in `beforeEach` and build the
+  data each test needs, so tests are independent and a broken seed fails the test.
 
 ### Frontend Unit/Component (Vitest)
 

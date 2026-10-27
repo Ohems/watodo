@@ -12,7 +12,7 @@
     "build": "tsc -p tsconfig.json",
     "build:dev": "tsc -p tsconfig.dev.json",
     "start": "node dist/index.js",
-    "test": "npm run build:dev && vitest run",
+    "test": "npm run build:dev && vitest run | pino-pretty -c",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "biome lint .",

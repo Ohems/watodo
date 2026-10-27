@@ -1,13 +1,21 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
-import { db } from '../src/database.js';
+import {
+  addUserToOrganization,
+  assignRole,
+  createOrganization,
+  createRole,
+  createUser,
+  resetDatabase,
+} from './helpers/fixtures.js';
 
-// Integration test for the organization endpoints: seeds an organization with
-// an admin, a member holding organization:write, a plain member and an
-// outsider, then verifies listing, reading and editing rules. Skipped when
-// the database is not available.
+// Integration test for the organization endpoints: an organization with an
+// admin, a member holding organization:write, a plain member and an outsider.
+// Every test resets the database (beforeEach) and rebuilds the fixture, so
+// tests are independent and a broken seed fails the test instead of being
+// masked.
 
 interface Seed {
   organizationId: string;
@@ -19,60 +27,11 @@ interface Seed {
   userIds: string[];
 }
 
-async function createUser(name: string): Promise<{ id: string; token: string }> {
-  const id = randomUUID();
-  const token = randomUUID();
-  const suffix = randomUUID();
-  await db
-    .insertInto('users')
-    .values({ id, name, email: `${name.toLowerCase().replaceAll(' ', '-')}-${suffix}@example.com` })
-    .execute();
-  await db.insertInto('access_tokens').values({ user_id: id, token }).execute();
-  return { id, token };
-}
-
-async function createRoleWithPermissions(
-  organizationId: string,
-  name: string,
-  permissionCodes: string[],
-): Promise<number> {
-  const role = await db
-    .insertInto('roles')
-    .values({ organization_id: organizationId, name })
-    .returningAll()
-    .executeTakeFirstOrThrow();
-
-  if (permissionCodes.length > 0) {
-    const rows = await db
-      .selectFrom('permissions')
-      .select(['id', 'code'])
-      .where('code', 'in', permissionCodes)
-      .execute();
-    const found = new Set(rows.map(row => row.code));
-    const missing = permissionCodes.filter(code => !found.has(code));
-    if (missing.length > 0) {
-      throw new Error(`Permissions not seeded: ${missing.join(', ')}`);
-    }
-    await db
-      .insertInto('role_permissions')
-      .values(rows.map(row => ({ role_id: role.id, permission_id: row.id })))
-      .execute();
-  }
-
-  return role.id;
-}
-
 async function seed(): Promise<Seed> {
   const organizationId = randomUUID();
   const otherOrganizationId = randomUUID();
-
-  await db
-    .insertInto('organizations')
-    .values([
-      { id: organizationId, name: `Org API Test ${organizationId}` },
-      { id: otherOrganizationId, name: `Other Org ${otherOrganizationId}` },
-    ])
-    .execute();
+  await createOrganization(`Org API Test ${organizationId}`, { id: organizationId });
+  await createOrganization(`Other Org ${otherOrganizationId}`, { id: otherOrganizationId });
 
   const admin = await createUser('Org Admin');
   const writer = await createUser('Org Writer');
@@ -80,38 +39,23 @@ async function seed(): Promise<Seed> {
   const outsider = await createUser('Org Outsider');
 
   for (const user of [admin, writer, member]) {
-    await db
-      .insertInto('user_organizations')
-      .values({ user_id: user.id, organization_id: organizationId })
-      .execute();
+    await addUserToOrganization(user.id, organizationId);
   }
-  await db
-    .insertInto('user_organizations')
-    .values({ user_id: outsider.id, organization_id: otherOrganizationId })
-    .execute();
+  await addUserToOrganization(outsider.id, otherOrganizationId);
 
-  const adminRoleId = await createRoleWithPermissions(organizationId, 'Admin', ['admin']);
-  const writerRoleId = await createRoleWithPermissions(organizationId, 'Writer', [
-    'organization:write',
-  ]);
-  const memberRoleId = await createRoleWithPermissions(organizationId, 'Member', [
+  const adminRoleId = await createRole(organizationId, 'Admin', ['admin']);
+  const writerRoleId = await createRole(organizationId, 'Writer', ['organization:write']);
+  const memberRoleId = await createRole(organizationId, 'Member', [
     'events:read',
     'organization:read',
   ]);
   // The outsider may edit the other organization, but not this one.
-  const otherWriterRoleId = await createRoleWithPermissions(otherOrganizationId, 'Writer', [
-    'organization:write',
-  ]);
+  const otherWriterRoleId = await createRole(otherOrganizationId, 'Writer', ['organization:write']);
 
-  await db
-    .insertInto('user_roles')
-    .values([
-      { user_id: admin.id, role_id: adminRoleId },
-      { user_id: writer.id, role_id: writerRoleId },
-      { user_id: member.id, role_id: memberRoleId },
-      { user_id: outsider.id, role_id: otherWriterRoleId },
-    ])
-    .execute();
+  await assignRole(admin.id, adminRoleId);
+  await assignRole(writer.id, writerRoleId);
+  await assignRole(member.id, memberRoleId);
+  await assignRole(outsider.id, otherWriterRoleId);
 
   return {
     organizationId,
@@ -124,37 +68,26 @@ async function seed(): Promise<Seed> {
   };
 }
 
-async function cleanup(seed: Seed): Promise<void> {
-  await db.deleteFrom('users').where('id', 'in', seed.userIds).execute();
-  await db
-    .deleteFrom('organizations')
-    .where('id', 'in', [seed.organizationId, seed.otherOrganizationId])
-    .execute();
-}
-
 describe('Organizations API', () => {
   let app: FastifyInstance;
-  let seedData: Seed | null = null;
+  let seedData: Seed;
 
   beforeAll(async () => {
     app = await buildApp();
     await app.ready();
-    try {
-      seedData = await seed();
-    } catch {
-      seedData = null;
-    }
+  });
+
+  beforeEach(async () => {
+    await resetDatabase();
+    seedData = await seed();
   });
 
   afterAll(async () => {
-    if (seedData) await cleanup(seedData).catch(() => {});
     await app.close();
   });
 
   describe('GET /api/v1/organizations', () => {
     it('lists only the organizations the user belongs to', async () => {
-      if (!seedData) return;
-
       const memberResponse = await app.inject({
         method: 'GET',
         url: '/api/v1/organizations',
@@ -178,8 +111,6 @@ describe('Organizations API', () => {
 
   describe('GET /api/v1/organizations/:organizationId', () => {
     it('returns the organization details to a member', async () => {
-      if (!seedData) return;
-
       const response = await app.inject({
         method: 'GET',
         url: `/api/v1/organizations/${seedData.organizationId}`,
@@ -197,8 +128,6 @@ describe('Organizations API', () => {
     });
 
     it('returns 404 for an organization the user does not belong to', async () => {
-      if (!seedData) return;
-
       const response = await app.inject({
         method: 'GET',
         url: `/api/v1/organizations/${seedData.organizationId}`,
@@ -215,8 +144,6 @@ describe('Organizations API', () => {
     });
 
     it('requires authentication', async () => {
-      if (!seedData) return;
-
       const response = await app.inject({
         method: 'GET',
         url: `/api/v1/organizations/${seedData.organizationId}`,
@@ -227,8 +154,6 @@ describe('Organizations API', () => {
 
   describe('PATCH /api/v1/organizations/:organizationId', () => {
     it('requires authentication', async () => {
-      if (!seedData) return;
-
       const response = await app.inject({
         method: 'PATCH',
         url: `/api/v1/organizations/${seedData.organizationId}`,
@@ -238,8 +163,6 @@ describe('Organizations API', () => {
     });
 
     it('lets an admin edit the organization', async () => {
-      if (!seedData) return;
-
       const response = await app.inject({
         method: 'PATCH',
         url: `/api/v1/organizations/${seedData.organizationId}`,
@@ -261,8 +184,6 @@ describe('Organizations API', () => {
     });
 
     it('lets a member with organization:write edit the organization', async () => {
-      if (!seedData) return;
-
       const response = await app.inject({
         method: 'PATCH',
         url: `/api/v1/organizations/${seedData.organizationId}`,
@@ -275,8 +196,6 @@ describe('Organizations API', () => {
     });
 
     it('denies editing to a plain member', async () => {
-      if (!seedData) return;
-
       const response = await app.inject({
         method: 'PATCH',
         url: `/api/v1/organizations/${seedData.organizationId}`,
@@ -288,8 +207,6 @@ describe('Organizations API', () => {
     });
 
     it('denies editing to a user with organization:write in another organization', async () => {
-      if (!seedData) return;
-
       // The outsider passes the route-level permission check (organization:write
       // in the other organization counts towards the global union) but is not a
       // member of this organization, so the service rejects with 404.
@@ -304,8 +221,6 @@ describe('Organizations API', () => {
     });
 
     it('rejects invalid payloads', async () => {
-      if (!seedData) return;
-
       const response = await app.inject({
         method: 'PATCH',
         url: `/api/v1/organizations/${seedData.organizationId}`,
@@ -319,8 +234,6 @@ describe('Organizations API', () => {
 
   describe('GET /api/v1/organizations/:organizationId/users/:userId', () => {
     it('returns a single organization user to a member with organization:read', async () => {
-      if (!seedData) return;
-
       const targetUserId = seedData.userIds[1];
       const response = await app.inject({
         method: 'GET',
@@ -342,8 +255,6 @@ describe('Organizations API', () => {
     });
 
     it('lets an admin read any organization user', async () => {
-      if (!seedData) return;
-
       const targetUserId = seedData.userIds[2];
       const response = await app.inject({
         method: 'GET',
@@ -356,8 +267,6 @@ describe('Organizations API', () => {
     });
 
     it('returns 404 for a user who is not in the organization', async () => {
-      if (!seedData) return;
-
       const response = await app.inject({
         method: 'GET',
         url: `/api/v1/organizations/${seedData.organizationId}/users/${seedData.userIds[3]}`,
@@ -368,8 +277,6 @@ describe('Organizations API', () => {
     });
 
     it('returns 404 for a non-existent user', async () => {
-      if (!seedData) return;
-
       const response = await app.inject({
         method: 'GET',
         url: `/api/v1/organizations/${seedData.organizationId}/users/${randomUUID()}`,
@@ -380,8 +287,6 @@ describe('Organizations API', () => {
     });
 
     it('requires authentication', async () => {
-      if (!seedData) return;
-
       const response = await app.inject({
         method: 'GET',
         url: `/api/v1/organizations/${seedData.organizationId}/users/${seedData.userIds[0]}`,
@@ -391,8 +296,6 @@ describe('Organizations API', () => {
     });
 
     it('denies access to a user without organization:read', async () => {
-      if (!seedData) return;
-
       const response = await app.inject({
         method: 'GET',
         url: `/api/v1/organizations/${seedData.otherOrganizationId}/users/${seedData.userIds[3]}`,
