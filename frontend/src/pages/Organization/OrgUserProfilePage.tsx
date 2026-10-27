@@ -34,13 +34,17 @@ import {
   useUpdateUserWorkRoleMutation,
 } from '../../api/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
-import { selectActiveOrganizationId } from '../../store/organization-slice.js';
+import {
+  selectActiveOrganizationId,
+  selectIsOrganizationLoaded,
+} from '../../store/organization-slice.js';
 
 function OrgUserProfilePage() {
   const { t } = useTranslation();
   const { userId } = useParams<{ userId: string }>();
   const navigate = useNavigate();
   const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
+  const organizationsLoaded = useAppSelector(selectIsOrganizationLoaded);
   const { data: currentUser } = useGetCurrentUserQuery();
 
   const canManage =
@@ -85,7 +89,7 @@ function OrgUserProfilePage() {
 
   const error = actionError ?? (queryError ? getApiErrorMessage(queryError) : null);
 
-  if (loading) {
+  if (!organizationsLoaded || loading) {
     return (
       <Center p="xl">
         <Loader />
@@ -93,18 +97,18 @@ function OrgUserProfilePage() {
     );
   }
 
-  if (!user) {
-    return (
-      <Box p="md">
-        <Alert color="red">{error ?? 'User not found'}</Alert>
-      </Box>
-    );
-  }
-
   if (!activeOrganizationId) {
     return (
       <Box p="md">
         <Alert color="yellow">{t('noOrganization.message')}</Alert>
+      </Box>
+    );
+  }
+
+  if (!user) {
+    return (
+      <Box p="md">
+        <Alert color="red">{error ?? 'User not found'}</Alert>
       </Box>
     );
   }

@@ -56,15 +56,25 @@ const organizationSlice = createSlice({
 });
 
 /**
- * The active organization: the persisted selection while the organization
- * list is loading, then the selection when it is still a member organization,
- * otherwise the first one (or null when the user has none).
+ * The active organization. Returns null while the organization list is still
+ * loading so that org-scoped queries use skipToken instead of firing with a
+ * stale persisted selection. Once loaded, the persisted selection is kept if
+ * it is still a member organization, otherwise the first one is used.
  */
 export function selectActiveOrganizationId(state: RootState): string | null {
   const stored = state.organization.activeOrganizationId;
   const { data } = api.endpoints.getMyOrganizations.select()(state);
-  if (data === undefined) return stored;
+  if (data === undefined) return null;
   return data.some(organization => organization.id === stored) ? stored : (data[0]?.id ?? null);
+}
+
+/**
+ * True once the organization list has finished loading, so the active
+ * organization is known and org-scoped queries can safely fire.
+ */
+export function selectIsOrganizationLoaded(state: RootState): boolean {
+  const { data, isLoading } = api.endpoints.getMyOrganizations.select()(state);
+  return !isLoading && data !== undefined;
 }
 
 export const { setActiveOrganization } = organizationSlice.actions;

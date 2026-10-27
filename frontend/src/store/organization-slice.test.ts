@@ -4,6 +4,7 @@ import { createTestStore } from '../test/test-utils.js';
 import type { Organization } from '../types/index.js';
 import organizationReducer, {
   selectActiveOrganizationId,
+  selectIsOrganizationLoaded,
   setActiveOrganization,
 } from './organization-slice.js';
 import { deleteCurrentUser, logout } from './session.js';
@@ -78,10 +79,10 @@ describe('selectActiveOrganizationId', () => {
     return store;
   }
 
-  it('should keep the persisted selection while the organizations are loading', () => {
+  it('should return null while the organizations are loading', () => {
     const store = createTestStore();
     store.dispatch(setActiveOrganization('org-b'));
-    expect(selectActiveOrganizationId(store.getState())).toBe('org-b');
+    expect(selectActiveOrganizationId(store.getState())).toBeNull();
   });
 
   it('should select the first organization when nothing is stored', async () => {
@@ -104,5 +105,32 @@ describe('selectActiveOrganizationId', () => {
   it('should return null when the user has no organization', async () => {
     const store = await seedOrganizations([]);
     expect(selectActiveOrganizationId(store.getState())).toBeNull();
+  });
+});
+
+describe('selectIsOrganizationLoaded', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  async function seedOrganizations(organizations: Organization[]) {
+    const store = createTestStore();
+    await store.dispatch(api.util.upsertQueryData('getMyOrganizations', undefined, organizations));
+    return store;
+  }
+
+  it('should return false while the organizations are loading', () => {
+    const store = createTestStore();
+    expect(selectIsOrganizationLoaded(store.getState())).toBe(false);
+  });
+
+  it('should return true once the organizations have loaded', async () => {
+    const store = await seedOrganizations([orgA]);
+    expect(selectIsOrganizationLoaded(store.getState())).toBe(true);
+  });
+
+  it('should return true when the user has no organization', async () => {
+    const store = await seedOrganizations([]);
+    expect(selectIsOrganizationLoaded(store.getState())).toBe(true);
   });
 });
