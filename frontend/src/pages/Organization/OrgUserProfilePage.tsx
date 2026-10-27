@@ -25,7 +25,7 @@ import {
   useGetAllCertificationsQuery,
   useGetAllWorkRolesQuery,
   useGetCurrentUserQuery,
-  useGetOrganizationUsersQuery,
+  useGetOrganizationUserQuery,
   useGetUserCertificationsQuery,
   useGetUserWorkRolesQuery,
   useRemoveUserCertificationMutation,
@@ -48,16 +48,12 @@ function OrgUserProfilePage() {
     currentUser?.permissions?.includes('work-role-management:write') === true;
 
   const {
-    data,
+    data: user,
     isLoading: loading,
     error: queryError,
-  } = useGetOrganizationUsersQuery(
-    activeOrganizationId
-      ? { organizationId: activeOrganizationId, query: { page: 0, limit: 200 } }
-      : skipToken,
+  } = useGetOrganizationUserQuery(
+    activeOrganizationId && userId ? { organizationId: activeOrganizationId, userId } : skipToken,
   );
-
-  const user = data?.items.find(u => u.id === userId) ?? null;
 
   // Work roles for this user (admin view)
   const { data: userWorkRoles } = useGetUserWorkRolesQuery(

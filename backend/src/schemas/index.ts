@@ -66,6 +66,11 @@ export const organizationParamsSchema = z.object({
   organizationId: z.uuid(),
 });
 
+export const organizationUserParamsSchema = z.object({
+  organizationId: z.uuid(),
+  userId: z.uuid(),
+});
+
 export const roleParamsSchema = z.object({
   organizationId: z.uuid(),
   roleId: z.coerce.number().int(),

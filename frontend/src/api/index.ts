@@ -1016,6 +1016,11 @@ export const api = createApi({
         withQuery(`/api/v1/organizations/${organizationId}/users`, query ?? {}),
       providesTags: ['OrganizationUsers'],
     }),
+    getOrganizationUser: build.query<OrganizationUser, { organizationId: string; userId: string }>({
+      query: ({ organizationId, userId }) =>
+        `/api/v1/organizations/${organizationId}/users/${userId}`,
+      providesTags: (_result, _error, { userId }) => [{ type: 'OrganizationUsers', id: userId }],
+    }),
 
     // --- Event series management ---
 
@@ -1151,6 +1156,7 @@ export const {
   useMarkNotificationReadMutation,
   useMarkAllNotificationsReadMutation,
   useGetOrganizationUsersQuery,
+  useGetOrganizationUserQuery,
   useGetEventSeriesManagementListQuery,
   useGetEventSeriesManagementQuery,
   useUpdateEventSeriesConfigMutation,

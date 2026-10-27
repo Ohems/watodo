@@ -94,7 +94,10 @@ async function seed(): Promise<Seed> {
   const writerRoleId = await createRoleWithPermissions(organizationId, 'Writer', [
     'organization:write',
   ]);
-  const memberRoleId = await createRoleWithPermissions(organizationId, 'Member', ['events:read']);
+  const memberRoleId = await createRoleWithPermissions(organizationId, 'Member', [
+    'events:read',
+    'organization:read',
+  ]);
   // The outsider may edit the other organization, but not this one.
   const otherWriterRoleId = await createRoleWithPermissions(otherOrganizationId, 'Writer', [
     'organization:write',
@@ -311,6 +314,92 @@ describe('Organizations API', () => {
       });
 
       expect(response.statusCode).toBe(400);
+    });
+  });
+
+  describe('GET /api/v1/organizations/:organizationId/users/:userId', () => {
+    it('returns a single organization user to a member with organization:read', async () => {
+      if (!seedData) return;
+
+      const targetUserId = seedData.userIds[1];
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/organizations/${seedData.organizationId}/users/${targetUserId}`,
+        headers: { 'x-token': seedData.memberToken },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.id).toBe(targetUserId);
+      expect(body.name).toBe('Org Writer');
+      expect(body.email).toBeTruthy();
+      expect(body.description).toBe('');
+      expect(body.isEmployed).toBe(false);
+      expect(body.isSuspended).toBe(false);
+      expect(body.isBlocked).toBe(false);
+      expect(body.state).toBe('active');
+      expect(body.createdAt).toBeTruthy();
+    });
+
+    it('lets an admin read any organization user', async () => {
+      if (!seedData) return;
+
+      const targetUserId = seedData.userIds[2];
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/organizations/${seedData.organizationId}/users/${targetUserId}`,
+        headers: { 'x-token': seedData.adminToken },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().id).toBe(targetUserId);
+    });
+
+    it('returns 404 for a user who is not in the organization', async () => {
+      if (!seedData) return;
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/organizations/${seedData.organizationId}/users/${seedData.userIds[3]}`,
+        headers: { 'x-token': seedData.memberToken },
+      });
+
+      expect(response.statusCode).toBe(404);
+    });
+
+    it('returns 404 for a non-existent user', async () => {
+      if (!seedData) return;
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/organizations/${seedData.organizationId}/users/${randomUUID()}`,
+        headers: { 'x-token': seedData.memberToken },
+      });
+
+      expect(response.statusCode).toBe(404);
+    });
+
+    it('requires authentication', async () => {
+      if (!seedData) return;
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/organizations/${seedData.organizationId}/users/${seedData.userIds[0]}`,
+      });
+
+      expect(response.statusCode).toBe(401);
+    });
+
+    it('denies access to a user without organization:read', async () => {
+      if (!seedData) return;
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/organizations/${seedData.otherOrganizationId}/users/${seedData.userIds[3]}`,
+        headers: { 'x-token': seedData.outsiderToken },
+      });
+
+      expect(response.statusCode).toBe(403);
     });
   });
 });
