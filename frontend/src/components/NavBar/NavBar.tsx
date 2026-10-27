@@ -45,7 +45,7 @@ function NavBar() {
       children: [
         { label: t('nav.orgGeneral'), path: '/organization/general' },
         { label: t('nav.orgSites'), path: '/organization/sites' },
-        { label: t('nav.orgJobs'), path: '/organization/jobs' },
+        { label: t('nav.orgWorkRoles'), path: '/organization/work-roles' },
         { label: t('nav.orgUsers'), path: '/organization/users' },
       ],
     },
@@ -67,6 +67,8 @@ function NavBar() {
       dispatch(logout());
     } else if (setting === 'account') {
       navigate('/account');
+    } else if (setting === 'profile') {
+      navigate('/profile');
     }
   };
 

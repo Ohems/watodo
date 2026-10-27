@@ -317,15 +317,90 @@ export const roomParamsSchema = z.object({
   roomId: z.uuid(),
 });
 
-// --- Jobs ---
+// --- Work Roles ---
 
-export const jobPushSchema = z.object({
+export const workRolePushSchema = z.object({
   name: z.string().min(1),
+  description: z.string().optional(),
   organizationId: z.uuid(),
 });
 
-export const jobUpdateSchema = z.object({
+export const workRoleUpdateSchema = z.object({
   name: z.string().min(1).optional(),
+  description: z.string().optional(),
+});
+
+export const workRoleParamsSchema = z.object({
+  organizationId: z.uuid(),
+  workRoleId: z.coerce.number().int(),
+});
+
+// --- Certifications ---
+
+export const certificationPushSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  organizationId: z.uuid(),
+});
+
+export const certificationUpdateSchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().optional(),
+});
+
+export const certificationParamsSchema = z.object({
+  organizationId: z.uuid(),
+  certificationId: z.coerce.number().int(),
+});
+
+// --- User Work Roles ---
+
+export const userWorkRolePushSchema = z.object({
+  workRoleId: z.number().int(),
+  isQualified: z.boolean().optional(),
+  notes: z.string().optional(),
+});
+
+export const userWorkRoleUpdateSchema = z.object({
+  isQualified: z.boolean().optional(),
+  notes: z.string().optional(),
+});
+
+export const userWorkRoleParamsSchema = z.object({
+  organizationId: z.uuid(),
+  userId: z.uuid(),
+  workRoleId: z.coerce.number().int(),
+});
+
+// --- User Certifications ---
+
+export const userCertificationPushSchema = z.object({
+  certificationId: z.number().int(),
+  certificationDate: z.iso.date().nullable().optional(),
+  validUntilDate: z.iso.date().nullable().optional(),
+});
+
+export const userCertificationUpdateSchema = z.object({
+  certificationDate: z.iso.date().nullable().optional(),
+  validUntilDate: z.iso.date().nullable().optional(),
+});
+
+export const userCertificationParamsSchema = z.object({
+  organizationId: z.uuid(),
+  userId: z.uuid(),
+  certificationId: z.coerce.number().int(),
+});
+
+// --- Certification Work Roles (link certifications to work roles) ---
+
+export const certificationWorkRolePushSchema = z.object({
+  certificationId: z.number().int(),
+});
+
+export const certificationWorkRoleParamsSchema = z.object({
+  organizationId: z.uuid(),
+  workRoleId: z.coerce.number().int(),
+  certificationId: z.coerce.number().int(),
 });
 
 // --- Notifications ---
@@ -388,8 +463,15 @@ export type SitePush = z.infer<typeof sitePushSchema>;
 export type SiteUpdate = z.infer<typeof siteUpdateSchema>;
 export type RoomPush = z.infer<typeof roomPushSchema>;
 export type RoomUpdate = z.infer<typeof roomUpdateSchema>;
-export type JobPush = z.infer<typeof jobPushSchema>;
-export type JobUpdate = z.infer<typeof jobUpdateSchema>;
+export type WorkRolePush = z.infer<typeof workRolePushSchema>;
+export type WorkRoleUpdate = z.infer<typeof workRoleUpdateSchema>;
+export type CertificationPush = z.infer<typeof certificationPushSchema>;
+export type CertificationUpdate = z.infer<typeof certificationUpdateSchema>;
+export type UserWorkRolePush = z.infer<typeof userWorkRolePushSchema>;
+export type UserWorkRoleUpdate = z.infer<typeof userWorkRoleUpdateSchema>;
+export type UserCertificationPush = z.infer<typeof userCertificationPushSchema>;
+export type UserCertificationUpdate = z.infer<typeof userCertificationUpdateSchema>;
+export type CertificationWorkRolePush = z.infer<typeof certificationWorkRolePushSchema>;
 export type NotificationUpdate = z.infer<typeof notificationUpdateSchema>;
 export type TableQuery = z.infer<typeof tableQuerySchema>;
 export type EventSeriesListQuery = z.infer<typeof eventSeriesListQuerySchema>;

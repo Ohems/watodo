@@ -132,12 +132,47 @@ export interface Rooms {
   updated_at: Generated<Date>;
 }
 
-export interface Jobs {
+export interface WorkRoles {
   id: Generated<number>;
   name: string;
+  description: Generated<string>;
   organization_id: string;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
+}
+
+export interface Certifications {
+  id: Generated<number>;
+  name: string;
+  description: Generated<string>;
+  organization_id: string;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface UserWorkRoles {
+  id: Generated<number>;
+  user_id: string;
+  work_role_id: number;
+  is_qualified: Generated<boolean>;
+  notes: Generated<string>;
+  created_at: Generated<Date>;
+}
+
+export interface UserCertifications {
+  id: Generated<number>;
+  user_id: string;
+  certification_id: number;
+  certification_date: Date | null;
+  valid_until_date: Date | null;
+  created_at: Generated<Date>;
+}
+
+export interface CertificationWorkRoles {
+  id: Generated<number>;
+  work_role_id: number;
+  certification_id: number;
+  created_at: Generated<Date>;
 }
 
 export interface Notifications {
@@ -279,7 +314,11 @@ export interface Database {
   team_members: TeamMembers;
   sites: Sites;
   rooms: Rooms;
-  jobs: Jobs;
+  work_roles: WorkRoles;
+  certifications: Certifications;
+  user_work_roles: UserWorkRoles;
+  user_certifications: UserCertifications;
+  certification_work_roles: CertificationWorkRoles;
   notifications: Notifications;
   calendars: Calendars;
   event_types: EventTypes;
@@ -336,9 +375,24 @@ export type Room = Selectable<Rooms>;
 export type NewRoom = Insertable<Rooms>;
 export type RoomUpdate = Updateable<Rooms>;
 
-export type Job = Selectable<Jobs>;
-export type NewJob = Insertable<Jobs>;
-export type JobUpdate = Updateable<Jobs>;
+export type WorkRole = Selectable<WorkRoles>;
+export type NewWorkRole = Insertable<WorkRoles>;
+export type WorkRoleUpdate = Updateable<WorkRoles>;
+
+export type Certification = Selectable<Certifications>;
+export type NewCertification = Insertable<Certifications>;
+export type CertificationUpdate = Updateable<Certifications>;
+
+export type UserWorkRole = Selectable<UserWorkRoles>;
+export type NewUserWorkRole = Insertable<UserWorkRoles>;
+export type UserWorkRoleUpdate = Updateable<UserWorkRoles>;
+
+export type UserCertification = Selectable<UserCertifications>;
+export type NewUserCertification = Insertable<UserCertifications>;
+export type UserCertificationUpdate = Updateable<UserCertifications>;
+
+export type CertificationWorkRole = Selectable<CertificationWorkRoles>;
+export type NewCertificationWorkRole = Insertable<CertificationWorkRoles>;
 
 export type Notification = Selectable<Notifications>;
 export type NewNotification = Insertable<Notifications>;

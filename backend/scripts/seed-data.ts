@@ -298,7 +298,11 @@ const SUMMARY_TABLES = [
   'team_members',
   'sites',
   'rooms',
-  'jobs',
+  'work_roles',
+  'certifications',
+  'user_work_roles',
+  'user_certifications',
+  'certification_work_roles',
   'notifications',
   'calendars',
   'event_types',
@@ -569,17 +573,95 @@ async function createSites(
   return { sites, rooms };
 }
 
-async function createJobs(tx: Tx, organizationId: string, seeds: { name: string }[]) {
-  const jobs = [];
+interface WorkRoleSeed {
+  name: string;
+  description: string;
+}
+
+interface CertificationSeed {
+  name: string;
+  description: string;
+}
+
+async function createWorkRoles(tx: Tx, organizationId: string, seeds: WorkRoleSeed[]) {
+  const roles = [];
   for (const seed of seeds) {
-    const job = await tx
-      .insertInto('jobs')
-      .values({ name: seed.name, organization_id: organizationId })
+    const role = await tx
+      .insertInto('work_roles')
+      .values({
+        name: seed.name,
+        description: seed.description,
+        organization_id: organizationId,
+      })
       .returningAll()
       .executeTakeFirstOrThrow();
-    jobs.push(job);
+    roles.push(role);
   }
-  return jobs;
+  return roles;
+}
+
+async function createCertifications(tx: Tx, organizationId: string, seeds: CertificationSeed[]) {
+  const certs = [];
+  for (const seed of seeds) {
+    const cert = await tx
+      .insertInto('certifications')
+      .values({
+        name: seed.name,
+        description: seed.description,
+        organization_id: organizationId,
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    certs.push(cert);
+  }
+  return certs;
+}
+
+async function assignUserToWorkRole(
+  tx: Tx,
+  userId: string,
+  workRoleId: number,
+  isQualified: boolean,
+  notes = '',
+): Promise<void> {
+  await tx
+    .insertInto('user_work_roles')
+    .values({
+      user_id: userId,
+      work_role_id: workRoleId,
+      is_qualified: isQualified,
+      notes,
+    })
+    .execute();
+}
+
+async function assignUserCertification(
+  tx: Tx,
+  userId: string,
+  certificationId: number,
+  certificationDate: Date | null = null,
+  validUntilDate: Date | null = null,
+): Promise<void> {
+  await tx
+    .insertInto('user_certifications')
+    .values({
+      user_id: userId,
+      certification_id: certificationId,
+      certification_date: certificationDate,
+      valid_until_date: validUntilDate,
+    })
+    .execute();
+}
+
+async function linkCertificationToWorkRole(
+  tx: Tx,
+  workRoleId: number,
+  certificationId: number,
+): Promise<void> {
+  await tx
+    .insertInto('certification_work_roles')
+    .values({ work_role_id: workRoleId, certification_id: certificationId })
+    .execute();
 }
 
 async function addTeamMembers(tx: Tx, teamId: string, userIds: string[]): Promise<void> {
@@ -903,13 +985,70 @@ async function main(): Promise<void> {
         },
       ]);
 
-      // Jobs for the first organization.
-      await createJobs(tx, firstOrganization.id, [
-        { name: 'Setup' },
-        { name: 'Cleanup' },
-        { name: 'Kitchen Helper' },
-        { name: 'AV Technician' },
+      // Work roles and certifications for the first organization.
+      const workRolesOne = await createWorkRoles(tx, firstOrganization.id, [
+        {
+          name: 'Setup',
+          description: 'Set up furniture, equipment and decorations before events.',
+        },
+        { name: 'Cleanup', description: 'Clean up and pack away after events.' },
+        {
+          name: 'Kitchen Helper',
+          description: 'Help prepare and serve food in the community kitchen.',
+        },
+        { name: 'AV Technician', description: 'Operate audio and video equipment during events.' },
       ]);
+      const certsOne = await createCertifications(tx, firstOrganization.id, [
+        { name: 'First Aid Certificate', description: 'Valid first aid certification.' },
+        { name: 'Food Hygiene Certificate', description: 'Required for handling food.' },
+        {
+          name: 'Sound Engineering Certificate',
+          description: 'Certified to operate the mixing desk.',
+        },
+      ]);
+      // AV Technician requires Sound Engineering Certificate.
+      await linkCertificationToWorkRole(tx, workRolesOne[3].id, certsOne[2].id);
+      // Kitchen Helper requires Food Hygiene Certificate.
+      await linkCertificationToWorkRole(tx, workRolesOne[2].id, certsOne[1].id);
+
+      // Assign mock users to work roles matching their descriptions.
+      // mockUsersOne[0] = Anna Korhonen (coordinator, employed) - Setup, qualified
+      await assignUserToWorkRole(tx, mockUsersOne[0].id, workRolesOne[0].id, true);
+      // mockUsersOne[1] = Mikko Virtanen (logistics, employed) - Setup, Cleanup, qualified
+      await assignUserToWorkRole(tx, mockUsersOne[1].id, workRolesOne[0].id, true);
+      await assignUserToWorkRole(tx, mockUsersOne[1].id, workRolesOne[1].id, true);
+      // mockUsersOne[2] = Liisa Makinen (kitchen) - Kitchen Helper, qualified, has Food Hygiene cert
+      await assignUserToWorkRole(tx, mockUsersOne[2].id, workRolesOne[2].id, true);
+      await assignUserCertification(
+        tx,
+        mockUsersOne[2].id,
+        certsOne[1].id,
+        new Date(now.getUTCFullYear() - 1, 5, 15),
+        new Date(now.getUTCFullYear() + 2, 5, 15),
+      );
+      // mockUsersOne[3] = Jukka Nieminen (sports grounds) - Setup, not yet qualified
+      await assignUserToWorkRole(tx, mockUsersOne[3].id, workRolesOne[0].id, false);
+      // mockUsersOne[5] = Ville Lehtonen (helps out) - Cleanup, not qualified
+      await assignUserToWorkRole(tx, mockUsersOne[5].id, workRolesOne[1].id, false);
+      // mockUsersOne[6] = Emilia Jarvinen - Kitchen Helper, not qualified
+      await assignUserToWorkRole(tx, mockUsersOne[6].id, workRolesOne[2].id, false);
+      // realUser - AV Technician, qualified, has Sound Engineering cert
+      await assignUserToWorkRole(tx, realUser.id, workRolesOne[3].id, true);
+      await assignUserCertification(
+        tx,
+        realUser.id,
+        certsOne[2].id,
+        new Date(now.getUTCFullYear() - 2, 2, 10),
+        new Date(now.getUTCFullYear() + 1, 2, 10),
+      );
+      // mockUsersOne[2] also has First Aid
+      await assignUserCertification(
+        tx,
+        mockUsersOne[2].id,
+        certsOne[0].id,
+        new Date(now.getUTCFullYear() - 1, 0, 20),
+        new Date(now.getUTCFullYear() + 2, 0, 20),
+      );
 
       let defaultCalendarOne = await tx
         .selectFrom('calendars')
@@ -1305,12 +1444,57 @@ async function main(): Promise<void> {
         },
       ]);
 
-      // Jobs for the second organization.
-      await createJobs(tx, secondOrganization.id, [
-        { name: 'Event Setup' },
-        { name: 'Coaching' },
-        { name: 'Kitchen Duty' },
+      // Work roles and certifications for the second organization.
+      const workRolesTwo = await createWorkRoles(tx, secondOrganization.id, [
+        { name: 'Event Setup', description: 'Set up chairs, tables and equipment before events.' },
+        { name: 'Coaching', description: 'Coach and supervise sports activities.' },
+        { name: 'Kitchen Duty', description: 'Prepare and serve food at community events.' },
       ]);
+      const certsTwo = await createCertifications(tx, secondOrganization.id, [
+        { name: 'First Aid Certificate', description: 'Valid first aid certification.' },
+        { name: 'Food Hygiene Certificate', description: 'Required for handling food.' },
+        { name: 'Coaching License', description: 'Certified sports coaching license.' },
+      ]);
+      // Coaching requires Coaching License.
+      await linkCertificationToWorkRole(tx, workRolesTwo[1].id, certsTwo[2].id);
+      // Kitchen Duty requires Food Hygiene Certificate.
+      await linkCertificationToWorkRole(tx, workRolesTwo[2].id, certsTwo[1].id);
+
+      // Assign mock users to work roles for the second organization.
+      // mockUsersTwo[0] - Event Setup, qualified
+      await assignUserToWorkRole(tx, mockUsersTwo[0].id, workRolesTwo[0].id, true);
+      // mockUsersTwo[1] - Coaching, qualified, has Coaching License
+      await assignUserToWorkRole(tx, mockUsersTwo[1].id, workRolesTwo[1].id, true);
+      await assignUserCertification(
+        tx,
+        mockUsersTwo[1].id,
+        certsTwo[2].id,
+        new Date(now.getUTCFullYear() - 1, 8, 1),
+        new Date(now.getUTCFullYear() + 2, 8, 1),
+      );
+      // mockUsersTwo[2] - Kitchen Duty, not qualified
+      await assignUserToWorkRole(tx, mockUsersTwo[2].id, workRolesTwo[2].id, false);
+      // mockUsersTwo[3] - Coaching, not qualified
+      await assignUserToWorkRole(tx, mockUsersTwo[3].id, workRolesTwo[1].id, false);
+      // mockUsersTwo[5] - Event Setup, qualified
+      await assignUserToWorkRole(tx, mockUsersTwo[5].id, workRolesTwo[0].id, true);
+      // mockUsersTwo[0] also has First Aid
+      await assignUserCertification(
+        tx,
+        mockUsersTwo[0].id,
+        certsTwo[0].id,
+        new Date(now.getUTCFullYear() - 2, 3, 15),
+        new Date(now.getUTCFullYear() + 1, 3, 15),
+      );
+      // realUser - Kitchen Duty, qualified, has Food Hygiene cert
+      await assignUserToWorkRole(tx, realUser.id, workRolesTwo[2].id, true);
+      await assignUserCertification(
+        tx,
+        realUser.id,
+        certsTwo[1].id,
+        new Date(now.getUTCFullYear() - 1, 6, 10),
+        new Date(now.getUTCFullYear() + 2, 6, 10),
+      );
 
       const mainCalendar = await createCalendar(tx, secondOrganization.id, 'Main Calendar');
       const sportsCalendar = await createCalendar(tx, secondOrganization.id, 'Sports Grounds');

@@ -228,6 +228,35 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 - `DELETE /api/v1/organizations/:organizationId/sites/:siteId/rooms/:roomId` - Delete room (`room-management:write`)
 - `GET /api/v1/organizations/:organizationId/rooms` - List all rooms in an organization, optionally filtered by `siteId` (`room-management:read`)
 - `GET /api/v1/organizations/:organizationId/rooms/all` - List all rooms in an organization, optionally filtered by `siteId` (`room-management:read`)
+- `GET /api/v1/organizations/:organizationId/work-roles` - List work roles (paginated, `work-role-management:read`)
+- `GET /api/v1/organizations/:organizationId/work-roles/all` - List all work roles (no pagination, `work-role-management:read`)
+- `POST /api/v1/organizations/:organizationId/work-roles` - Create work role (`work-role-management:write`)
+- `GET /api/v1/organizations/:organizationId/work-roles/:workRoleId` - Get work role with required certifications and assigned users (`work-role-management:read`)
+- `PATCH /api/v1/organizations/:organizationId/work-roles/:workRoleId` - Update work role (`work-role-management:write`)
+- `DELETE /api/v1/organizations/:organizationId/work-roles/:workRoleId` - Delete work role (`work-role-management:write`)
+- `GET /api/v1/organizations/:organizationId/work-roles/:workRoleId/users` - List users assigned to a work role (`work-role-management:read`)
+- `GET /api/v1/organizations/:organizationId/work-roles/:workRoleId/certifications` - List required certifications for a work role (`work-role-management:read`)
+- `POST /api/v1/organizations/:organizationId/work-roles/:workRoleId/certifications` - Link a certification to a work role (`work-role-management:write`)
+- `DELETE /api/v1/organizations/:organizationId/work-roles/:workRoleId/certifications/:certificationId` - Unlink a certification from a work role (`work-role-management:write`)
+- `GET /api/v1/organizations/:organizationId/certifications` - List certifications (paginated, `certification-management:read`)
+- `GET /api/v1/organizations/:organizationId/certifications/all` - List all certifications (no pagination, `certification-management:read`)
+- `POST /api/v1/organizations/:organizationId/certifications` - Create certification (`certification-management:write`)
+- `GET /api/v1/organizations/:organizationId/certifications/:certificationId` - Get certification (`certification-management:read`)
+- `PATCH /api/v1/organizations/:organizationId/certifications/:certificationId` - Update certification (`certification-management:write`)
+- `DELETE /api/v1/organizations/:organizationId/certifications/:certificationId` - Delete certification (`certification-management:write`)
+- `GET /api/v1/organizations/:organizationId/my/work-roles` - List current user's work roles (auth required)
+- `POST /api/v1/organizations/:organizationId/my/work-roles` - Add a work role to self (auth required)
+- `DELETE /api/v1/organizations/:organizationId/my/work-roles/:userWorkRoleId` - Remove a work role from self (auth required)
+- `GET /api/v1/organizations/:organizationId/my/certifications` - List current user's certifications (auth required)
+- `POST /api/v1/organizations/:organizationId/my/certifications` - Add a certification to self (auth required)
+- `DELETE /api/v1/organizations/:organizationId/my/certifications/:userCertificationId` - Remove a certification from self (auth required)
+- `GET /api/v1/organizations/:organizationId/users/:userId/work-roles` - List a user's work roles (`work-role-management:read`)
+- `POST /api/v1/organizations/:organizationId/users/:userId/work-roles` - Add a work role to a user (`work-role-management:write`)
+- `PATCH /api/v1/organizations/:organizationId/users/work-roles/:userWorkRoleId` - Update a user's work role (e.g. mark qualified, `work-role-management:write`)
+- `DELETE /api/v1/organizations/:organizationId/users/work-roles/:userWorkRoleId` - Remove a work role from a user (`work-role-management:write`)
+- `GET /api/v1/organizations/:organizationId/users/:userId/certifications` - List a user's certifications (`work-role-management:read`)
+- `POST /api/v1/organizations/:organizationId/users/:userId/certifications` - Add a certification to a user (`work-role-management:write`)
+- `DELETE /api/v1/organizations/:organizationId/users/certifications/:userCertificationId` - Remove a certification from a user (`work-role-management:write`)
 
 ## Frontend Architecture
 
@@ -257,6 +286,7 @@ frontend/src/
     ├── UserList/         # User list (Contacts)
     ├── UserProfile/      # User profile detail
     ├── Account/          # Account page: personal info, login methods, account deletion
+    ├── Profile/          # Personal profile: manage work roles and certifications
     ├── ErrorPage/        # Error page (uses useRouteError)
     ├── Login/            # Login screen (shown when unauthenticated)
     └── NoOrganizationPage/ # Shown when user has no organization
@@ -293,9 +323,12 @@ frontend/src/
 - **Schema**: tables covering users, authentication accounts (multi-provider),
   access tokens, records, permissions, roles, role permissions, user roles,
   organizations, teams, sites (physical locations), rooms (within sites),
-  calendars, event types, jobs, events, responsibilities, assignments,
-  operations, and operation assignments. Events can be assigned to a site
-  (optionally reserving the whole site) and/or a specific room within a site.
+  calendars, event types, work roles (work roles), certifications,
+  user work roles (availability/qualification), user certifications,
+  certification work roles (mandatory certifications per role), events,
+  responsibilities, assignments, operations, and operation assignments.
+  Events can be assigned to a site (optionally reserving the whole site)
+  and/or a specific room within a site.
 - **Auth tables**: `permissions` holds the system-defined permission codes;
   `auth_accounts` links users to provider accounts (discord, google, microsoft);
   `roles` belong to an organization and are granted permissions via

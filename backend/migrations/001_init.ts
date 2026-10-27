@@ -174,10 +174,11 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
   pgm.createIndex('rooms', 'organization_id');
   pgm.createIndex('rooms', 'site_id');
 
-  // Jobs (organization-scoped job types, e.g. "Cook", "Driver")
-  pgm.createTable('jobs', {
+  // Work roles (organization-scoped roles, e.g. "Cook", "AV Technician")
+  pgm.createTable('work_roles', {
     id: { type: 'serial', primaryKey: true },
     name: { type: 'text', notNull: true },
+    description: { type: 'text', notNull: true, default: '' },
     organization_id: {
       type: 'uuid',
       notNull: true,
@@ -187,7 +188,93 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
-  pgm.createIndex('jobs', 'organization_id');
+  pgm.createIndex('work_roles', 'organization_id');
+
+  // Certifications (organization-scoped, e.g. "First Aid Certificate")
+  pgm.createTable('certifications', {
+    id: { type: 'serial', primaryKey: true },
+    name: { type: 'text', notNull: true },
+    description: { type: 'text', notNull: true, default: '' },
+    organization_id: {
+      type: 'uuid',
+      notNull: true,
+      references: 'organizations',
+      onDelete: 'CASCADE',
+    },
+    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+    updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+  });
+  pgm.createIndex('certifications', 'organization_id');
+
+  // User work roles: links users to work roles they are willing/qualified to fill.
+  pgm.createTable('user_work_roles', {
+    id: { type: 'serial', primaryKey: true },
+    user_id: { type: 'uuid', notNull: true, references: 'users', onDelete: 'CASCADE' },
+    work_role_id: {
+      type: 'integer',
+      notNull: true,
+      references: 'work_roles',
+      onDelete: 'CASCADE',
+    },
+    is_qualified: { type: 'boolean', notNull: true, default: false },
+    notes: { type: 'text', notNull: true, default: '' },
+    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+  });
+  pgm.addConstraint(
+    'user_work_roles',
+    'user_work_roles_user_role_unique',
+    'UNIQUE(user_id, work_role_id)',
+  );
+  pgm.createIndex('user_work_roles', 'user_id');
+  pgm.createIndex('user_work_roles', 'work_role_id');
+
+  // User certifications: links users to certifications they hold.
+  pgm.createTable('user_certifications', {
+    id: { type: 'serial', primaryKey: true },
+    user_id: { type: 'uuid', notNull: true, references: 'users', onDelete: 'CASCADE' },
+    certification_id: {
+      type: 'integer',
+      notNull: true,
+      references: 'certifications',
+      onDelete: 'CASCADE',
+    },
+    certification_date: { type: 'date' },
+    valid_until_date: { type: 'date' },
+    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+  });
+  pgm.addConstraint(
+    'user_certifications',
+    'user_certifications_user_cert_unique',
+    'UNIQUE(user_id, certification_id)',
+  );
+  pgm.createIndex('user_certifications', 'user_id');
+  pgm.createIndex('user_certifications', 'certification_id');
+
+  // Certification work roles: links certifications to work roles. A linked
+  // certification is considered mandatory for that work role.
+  pgm.createTable('certification_work_roles', {
+    id: { type: 'serial', primaryKey: true },
+    work_role_id: {
+      type: 'integer',
+      notNull: true,
+      references: 'work_roles',
+      onDelete: 'CASCADE',
+    },
+    certification_id: {
+      type: 'integer',
+      notNull: true,
+      references: 'certifications',
+      onDelete: 'CASCADE',
+    },
+    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+  });
+  pgm.addConstraint(
+    'certification_work_roles',
+    'certification_work_roles_role_cert_unique',
+    'UNIQUE(work_role_id, certification_id)',
+  );
+  pgm.createIndex('certification_work_roles', 'work_role_id');
+  pgm.createIndex('certification_work_roles', 'certification_id');
 
   // Notifications (per-user)
   pgm.createTable('notifications', {
@@ -485,7 +572,11 @@ export async function down(pgm: MigrationBuilder): Promise<void> {
   pgm.dropTable('event_types');
   pgm.dropTable('calendars');
   pgm.dropTable('notifications');
-  pgm.dropTable('jobs');
+  pgm.dropTable('certification_work_roles');
+  pgm.dropTable('user_certifications');
+  pgm.dropTable('user_work_roles');
+  pgm.dropTable('certifications');
+  pgm.dropTable('work_roles');
   pgm.dropTable('rooms');
   pgm.dropTable('sites');
   pgm.dropTable('team_members');

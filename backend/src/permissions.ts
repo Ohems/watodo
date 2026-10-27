@@ -24,8 +24,10 @@ export const PERMISSIONS = {
   SITE_MANAGEMENT_WRITE: 'site-management:write',
   ROOM_MANAGEMENT_READ: 'room-management:read',
   ROOM_MANAGEMENT_WRITE: 'room-management:write',
-  JOB_MANAGEMENT_READ: 'job-management:read',
-  JOB_MANAGEMENT_WRITE: 'job-management:write',
+  WORK_ROLE_MANAGEMENT_READ: 'work-role-management:read',
+  WORK_ROLE_MANAGEMENT_WRITE: 'work-role-management:write',
+  CERTIFICATION_MANAGEMENT_READ: 'certification-management:read',
+  CERTIFICATION_MANAGEMENT_WRITE: 'certification-management:write',
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -60,7 +62,7 @@ export const PERMISSION_DEFINITIONS: { code: Permission; description: string }[]
   },
   {
     code: PERMISSIONS.ORGANIZATION_READ,
-    description: 'View organization members, teams, sites, rooms and jobs.',
+    description: 'View organization members, teams, sites, rooms and work roles.',
   },
   { code: PERMISSIONS.OPERATIONS_READ, description: 'View operations.' },
   {
@@ -98,12 +100,20 @@ export const PERMISSION_DEFINITIONS: { code: Permission; description: string }[]
     description: 'Create, update and delete rooms.',
   },
   {
-    code: PERMISSIONS.JOB_MANAGEMENT_READ,
-    description: 'View jobs.',
+    code: PERMISSIONS.WORK_ROLE_MANAGEMENT_READ,
+    description: 'View work roles and their qualifications.',
   },
   {
-    code: PERMISSIONS.JOB_MANAGEMENT_WRITE,
-    description: 'Create, update and delete jobs.',
+    code: PERMISSIONS.WORK_ROLE_MANAGEMENT_WRITE,
+    description: 'Create, update and delete work roles.',
+  },
+  {
+    code: PERMISSIONS.CERTIFICATION_MANAGEMENT_READ,
+    description: 'View certifications.',
+  },
+  {
+    code: PERMISSIONS.CERTIFICATION_MANAGEMENT_WRITE,
+    description: 'Create, update and delete certifications.',
   },
 ];
 

@@ -310,23 +310,104 @@ export interface RoomUpdate {
   description?: string;
 }
 
-// --- Jobs ---
+// --- Work Roles ---
 
-export interface Job {
+export interface WorkRole {
   id: number;
   name: string;
+  description: string;
   organizationId: string;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface JobPush {
+export interface WorkRolePush {
   name: string;
+  description?: string;
   organizationId: string;
 }
 
-export interface JobUpdate {
+export interface WorkRoleUpdate {
   name?: string;
+  description?: string;
+}
+
+export interface WorkRoleDetail extends WorkRole {
+  requiredCertifications: Certification[];
+  users: UserWorkRole[];
+}
+
+// --- Certifications ---
+
+export interface Certification {
+  id: number;
+  name: string;
+  description: string;
+  organizationId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CertificationPush {
+  name: string;
+  description?: string;
+  organizationId: string;
+}
+
+export interface CertificationUpdate {
+  name?: string;
+  description?: string;
+}
+
+// --- User Work Roles ---
+
+export interface UserWorkRole {
+  id: number;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  workRoleId: number;
+  workRoleName: string;
+  workRoleDescription: string;
+  isQualified: boolean;
+  notes: string;
+  createdAt: string;
+}
+
+export interface UserWorkRolePush {
+  workRoleId: number;
+  isQualified?: boolean;
+  notes?: string;
+}
+
+export interface UserWorkRoleUpdate {
+  isQualified?: boolean;
+  notes?: string;
+}
+
+// --- User Certifications ---
+
+export interface UserCertification {
+  id: number;
+  userId: string;
+  userName: string;
+  certificationId: number;
+  certificationName: string;
+  certificationDescription: string;
+  certificationDate: string | null;
+  validUntilDate: string | null;
+  createdAt: string;
+}
+
+export interface UserCertificationPush {
+  certificationId: number;
+  certificationDate?: string | null;
+  validUntilDate?: string | null;
+}
+
+export interface UserCertificationUpdate {
+  certificationDate?: string | null;
+  validUntilDate?: string | null;
 }
 
 // --- Notifications ---
