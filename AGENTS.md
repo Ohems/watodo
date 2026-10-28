@@ -408,6 +408,66 @@ Group frontend tests by the page or component being tested, for example `Account
 - Run: `npm run test:e2e -w frontend`
 - Install browsers first: `npm run playwright:install -w frontend`
 
+#### E2E test requirements
+
+Every E2E test must complete within 20 seconds (enforced by `timeout: 20_000`
+in `playwright.config.ts`). Do not increase this timeout; if a test is slow,
+optimize the test or the mock setup instead. Assertion timeouts are 5 seconds
+(`expect.timeout`).
+
+Every page and feature must have Playwright E2E tests that cover three aspects:
+
+1. **Data display**: Open the page and verify that data from the API is rendered
+   correctly (names, descriptions, dates, badges, empty states, etc.).
+2. **Permission levels**: Verify that users with different permission levels see
+   the correct UI. Admin users and users with the relevant write permission must
+   see edit/add/delete buttons. Regular users (no permissions) must see the data
+   in read-only mode without those buttons. Users with only a specific permission
+   (e.g. `site-management:write` but not `room-management:write`) must see only
+   the controls their permissions allow.
+3. **Edit/mutation calls**: When a user edits data and saves, intercept the
+   outgoing request and verify it calls the correct backend endpoint with the
+   correct HTTP method and request body.
+
+Shared helpers live in `frontend/e2e/helpers.ts`:
+
+- `mockCommonApis(page, user, orgs)` sets up auth token, current user,
+  organizations, auth providers, notifications, and occurrences mocks.
+- `mockOrgApis(page, orgId, options)` mocks all organization-scoped endpoints
+  (sites, rooms, teams, work roles, certifications, org users).
+- `mockMyWorkRolesAndCerts(page, orgId, options)` mocks self-service endpoints.
+- `interceptMutation(page, urlPattern, method, response)` captures mutation
+  requests so tests can assert the URL, method, and body.
+- `adminUser()`, `regularUser()`, `userWithPermissions(perms)` are factory
+  functions for test users with different permission levels.
+
+Group E2E tests by page or feature area, for example `home.spec.ts`,
+`organization.spec.ts`, `permissions.spec.ts`. Use `test.describe` blocks for
+sub-groups (data display, permission levels, editing, navigation). When adding
+a new page, create a corresponding spec file and add it to the test suite.
+Every new page must have tests for all three aspects above before the work is
+considered complete.
+
+Common E2E pitfalls to avoid:
+
+- **Strict mode violations**: Text like the user name, organization name, or
+  entity names often appears in both the NavBar and the page content. Use
+  `.first()`, `.nth(1)`, or more specific locators (e.g.
+  `getByRole('heading', { name: '...' })`) to disambiguate.
+- **interceptMutation + same-URL GET conflict**: When a PATCH mutation and a
+  GET request share the same URL (e.g. `/users/@me` or
+  `/organizations/:id/sites/:siteId`), `route.continue()` in `interceptMutation`
+  does not fall through to earlier `page.route` handlers reliably. Instead,
+  register a single `page.route` that handles both methods.
+- **Hidden text in comboboxes**: Text inside a closed Mantine `Select` or
+  `MultiSelect` (the selected value) is considered "hidden" by Playwright.
+  Use `getByRole('combobox', { name: '...' }).toHaveValue('...')` instead of
+  `getByText('...')`.
+- **Predicate-based route mocks**: Prefer `page.route(url => url.pathname ===
+  '...' && url.searchParams.has('page'), ...)` over glob patterns like
+  `**/api/v1/.../sites?*` for list endpoints, because globs can accidentally
+  intercept single-entity requests (e.g. `/sites/site-1`).
+
 ## Environment Variables
 
 See `.env.sample` for all variables. Key ones:

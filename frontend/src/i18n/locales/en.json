@@ -58,6 +58,7 @@
   "error": {
     "oops": "Oops!",
     "unexpected": "An unexpected error has occurred.",
+    "notFound": "The page \"{{path}}\" was not found.",
     "goHome": "Go Home"
   },
   "noOrganization": {
