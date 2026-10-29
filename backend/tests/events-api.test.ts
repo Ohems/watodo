@@ -1198,7 +1198,7 @@ describe('Events API', () => {
       expect(detail.statusCode).toBe(404);
 
       const jobs = await db
-        .selectFrom('event_jobs')
+        .selectFrom('event_work_roles')
         .selectAll()
         .where('event_series_id', '=', series.id)
         .execute();

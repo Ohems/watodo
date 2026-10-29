@@ -438,12 +438,13 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
   );
   pgm.createIndex('event_series_teams', 'team_id');
 
-  // Event exceptions: per-occurrence overrides for a series (cancel an
-  // occurrence, or reschedule it to a different time). `occurrence_start` is
-  // the original occurrence start and acts as the occurrence's identity;
-  // jobs and comments are keyed by it as well. A cancelled occurrence has
-  // `is_cancelled` set; a rescheduled one has `override_start`/`override_end`.
-  pgm.createTable('event_exceptions', {
+  // Event occurrences: a materialized instance of an event series with a
+  // stable ID. Occurrences are materialized on write (when a slot, comment,
+  // or cancel/reschedule is attached), so every instance that has attached
+  // data has a permanent, URL-safe identifier that does not change when the
+  // occurrence is rescheduled. `is_cancelled` / `override_start` /
+  // `override_end` carry the per-occurrence cancel/reschedule state.
+  pgm.createTable('event_occurrences', {
     id: { type: 'serial', primaryKey: true },
     event_series_id: {
       type: 'integer',
@@ -459,21 +460,26 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
   pgm.addConstraint(
-    'event_exceptions',
-    'event_exceptions_series_occurrence_unique',
+    'event_occurrences',
+    'event_occurrences_series_occurrence_unique',
     'UNIQUE(event_series_id, occurrence_start)',
   );
   pgm.addConstraint(
-    'event_exceptions',
-    'event_exceptions_override_valid',
+    'event_occurrences',
+    'event_occurrences_override_valid',
     'CHECK (override_end IS NULL OR override_start IS NULL OR override_end > override_start)',
   );
-  pgm.createIndex('event_exceptions', 'event_series_id');
+  pgm.createIndex('event_occurrences', 'event_series_id');
 
-  // Event jobs: job slots that need to be staffed. `occurrence_start` NULL
-  // means the slot applies to every occurrence of the series; a non-NULL
-  // value scopes the slot to that single occurrence.
-  pgm.createTable('event_jobs', {
+  // Event work role slots that need to be staffed. `event_occurrence_id`
+  // NULL means the slot belongs to the series (the parent template, managed
+  // from event management); a non-NULL value scopes the slot to a single
+  // materialized occurrence (inherited from the parent on materialization).
+  // `inherited_from_work_role_id` tracks which parent slot an occurrence slot
+  // was copied from, so re-importing never duplicates. `is_critical` marks a
+  // slot that must be filled for the event to proceed; `work_role_id` links
+  // the slot to a work role from the catalog.
+  pgm.createTable('event_work_roles', {
     id: { type: 'serial', primaryKey: true },
     event_series_id: {
       type: 'integer',
@@ -481,35 +487,53 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
       references: 'event_series',
       onDelete: 'CASCADE',
     },
-    occurrence_start: { type: 'timestamptz' },
+    event_occurrence_id: {
+      type: 'integer',
+      references: 'event_occurrences',
+      onDelete: 'CASCADE',
+    },
+    inherited_from_work_role_id: {
+      type: 'integer',
+      references: 'event_work_roles',
+      onDelete: 'SET NULL',
+    },
     title: { type: 'text', notNull: true },
     description: { type: 'text', notNull: true, default: '' },
+    is_critical: { type: 'boolean', notNull: true, default: false },
+    work_role_id: {
+      type: 'integer',
+      references: 'work_roles',
+      onDelete: 'SET NULL',
+    },
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
-  pgm.createIndex('event_jobs', ['event_series_id', 'occurrence_start']);
+  pgm.createIndex('event_work_roles', 'event_series_id');
+  pgm.createIndex('event_work_roles', 'work_role_id');
+  pgm.createIndex('event_work_roles', 'event_occurrence_id');
+  pgm.createIndex('event_work_roles', 'inherited_from_work_role_id');
 
   // Event job assignments: users assigned to a job slot.
-  pgm.createTable('event_job_assignments', {
+  pgm.createTable('event_work_role_assignments', {
     id: { type: 'serial', primaryKey: true },
-    event_job_id: {
+    event_work_role_id: {
       type: 'integer',
       notNull: true,
-      references: 'event_jobs',
+      references: 'event_work_roles',
       onDelete: 'CASCADE',
     },
     user_id: { type: 'uuid', notNull: true, references: 'users', onDelete: 'CASCADE' },
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
   pgm.addConstraint(
-    'event_job_assignments',
-    'event_job_assignments_job_user_unique',
-    'UNIQUE(event_job_id, user_id)',
+    'event_work_role_assignments',
+    'event_work_role_assignments_job_user_unique',
+    'UNIQUE(event_work_role_id, user_id)',
   );
-  pgm.createIndex('event_job_assignments', 'user_id');
+  pgm.createIndex('event_work_role_assignments', 'user_id');
 
-  // Event comments: comments on a whole series (`occurrence_start` NULL) or
-  // on a single occurrence of it.
+  // Event comments: comments on a whole series (`event_occurrence_id` NULL)
+  // or on a single materialized occurrence of it.
   pgm.createTable('event_comments', {
     id: { type: 'serial', primaryKey: true },
     event_series_id: {
@@ -518,13 +542,18 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
       references: 'event_series',
       onDelete: 'CASCADE',
     },
-    occurrence_start: { type: 'timestamptz' },
+    event_occurrence_id: {
+      type: 'integer',
+      references: 'event_occurrences',
+      onDelete: 'CASCADE',
+    },
     user_id: { type: 'uuid', notNull: true, references: 'users', onDelete: 'CASCADE' },
     body: { type: 'text', notNull: true },
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
-  pgm.createIndex('event_comments', ['event_series_id', 'occurrence_start']);
+  pgm.createIndex('event_comments', 'event_series_id');
+  pgm.createIndex('event_comments', 'event_occurrence_id');
 
   // Operations
   pgm.createTable('operations', {
@@ -560,9 +589,9 @@ export async function down(pgm: MigrationBuilder): Promise<void> {
   pgm.dropTable('op_assignments');
   pgm.dropTable('operations');
   pgm.dropTable('event_comments');
-  pgm.dropTable('event_job_assignments');
-  pgm.dropTable('event_jobs');
-  pgm.dropTable('event_exceptions');
+  pgm.dropTable('event_work_role_assignments');
+  pgm.dropTable('event_work_roles');
+  pgm.dropTable('event_occurrences');
   pgm.dropTable('event_series_teams');
   pgm.dropTable('event_series');
   pgm.dropTable('event_type_roles');

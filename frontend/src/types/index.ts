@@ -156,6 +156,8 @@ export interface EventSeriesPush {
 export type EventSeriesUpdate = Partial<EventSeriesPush>;
 
 export interface EventOccurrence {
+  /** Stable ID of the materialized occurrence instance, or null if not yet materialized. */
+  occurrenceId: number | null;
   seriesId: number;
   title: string;
   description: string | null;
@@ -173,6 +175,18 @@ export interface EventOccurrence {
   exceptionId: number | null;
 }
 
+/**
+ * Builds the URL reference for an occurrence: the stable numeric ID when
+ * materialized, or a temporary `tmp:{seriesId}:{isoStart}` key otherwise.
+ */
+export function occurrenceRef(
+  occurrence: Pick<EventOccurrence, 'occurrenceId' | 'seriesId' | 'occurrenceStart'>,
+): string {
+  return occurrence.occurrenceId !== null
+    ? String(occurrence.occurrenceId)
+    : `tmp:${occurrence.seriesId}:${occurrence.occurrenceStart}`;
+}
+
 export interface EventException {
   id: number;
   seriesId: number;
@@ -184,7 +198,7 @@ export interface EventException {
   updatedAt: string;
 }
 
-export interface EventJobAssignment {
+export interface EventWorkRoleAssignment {
   id: number;
   jobId: number;
   userId: string;
@@ -192,29 +206,53 @@ export interface EventJobAssignment {
   createdAt: string;
 }
 
-export interface EventJob {
+export interface EventWorkRole {
   id: number;
   seriesId: number;
-  occurrenceStart: string | null;
+  /** NULL = parent (series-level) slot; non-NULL = occurrence-level inherited slot. */
+  occurrenceId: number | null;
+  inheritedFromJobId: number | null;
   title: string;
   description: string;
-  assignments: EventJobAssignment[];
+  isCritical: boolean;
+  workRoleId: number | null;
+  workRoleName: string | null;
+  assignments: EventWorkRoleAssignment[];
   createdAt: string;
   updatedAt: string;
 }
 
-export interface EventJobPush {
+export interface EventWorkRolePush {
   title: string;
   description?: string;
   occurrenceStart?: string | null;
+  occurrenceId?: number | null;
+  isCritical?: boolean;
+  workRoleId?: number | null;
 }
 
-export type EventJobUpdate = Partial<EventJobPush>;
+export type EventWorkRoleUpdate = Partial<EventWorkRolePush>;
+
+// --- Event readiness ---
+
+export interface RoleReadiness {
+  workRoleId: number | null;
+  workRoleName: string;
+  required: number;
+  filled: number;
+  isCritical: boolean;
+  isUnfilled: boolean;
+}
+
+export interface EventReadiness {
+  roles: RoleReadiness[];
+  isReady: boolean;
+  unfilledCriticalCount: number;
+}
 
 export interface EventComment {
   id: number;
   seriesId: number;
-  occurrenceStart: string | null;
   userId: string;
   userName: string;
   body: string;
@@ -225,8 +263,16 @@ export interface EventComment {
 export interface EventOccurrenceDetail {
   series: EventSeries;
   occurrence: EventOccurrence;
-  jobs: EventJob[];
+  /** Slots visible for this occurrence: occurrence-level + parent-level. */
+  jobs: EventWorkRole[];
+  /** Parent (series-level) slots only. */
+  parentJobs: EventWorkRole[];
+  /** Occurrence-level (inherited) slots only. */
+  occurrenceJobs: EventWorkRole[];
+  /** Parent slots not yet imported into this occurrence. */
+  missingParentJobs: EventWorkRole[];
   comments: EventComment[];
+  readiness: EventReadiness;
 }
 
 // --- Teams ---

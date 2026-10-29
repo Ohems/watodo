@@ -94,6 +94,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 function makeOccurrence(partial: Partial<EventOccurrence> & { seriesId: number }) {
   const start = new Date(Date.now() + DAY_MS).toISOString();
   return {
+    occurrenceId: null,
     title: `Event ${partial.seriesId}`,
     description: null,
     isAllDay: false,

@@ -242,30 +242,41 @@ export interface EventSeriesTeams {
   created_at: Generated<Date>;
 }
 
-export interface EventExceptions {
+export interface EventOccurrences {
   id: Generated<number>;
   event_series_id: number;
+  /** The original occurrence start in the series (stable identity). */
   occurrence_start: Date;
+  /** Whether this occurrence is cancelled. */
   is_cancelled: Generated<boolean>;
+  /** Rescheduled start, if any. */
   override_start: Date | null;
+  /** Rescheduled end, if any. */
   override_end: Date | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }
 
-export interface EventJobs {
+export interface EventWorkRoles {
   id: Generated<number>;
   event_series_id: number;
-  occurrence_start: Date | null;
+  /** NULL = parent (series-level) slot; non-NULL = inherited occurrence slot. */
+  event_occurrence_id: number | null;
+  /** Which parent slot this occurrence slot was inherited from. */
+  inherited_from_work_role_id: number | null;
   title: string;
   description: Generated<string>;
+  /** Whether this slot must be filled for the event to proceed. */
+  is_critical: Generated<boolean>;
+  /** The work role this slot is for, if linked to the work role catalog. */
+  work_role_id: number | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }
 
-export interface EventJobAssignments {
+export interface EventWorkRoleAssignments {
   id: Generated<number>;
-  event_job_id: number;
+  event_work_role_id: number;
   user_id: string;
   created_at: Generated<Date>;
 }
@@ -273,7 +284,8 @@ export interface EventJobAssignments {
 export interface EventComments {
   id: Generated<number>;
   event_series_id: number;
-  occurrence_start: Date | null;
+  /** NULL = series-wide comment; non-NULL = scoped to one occurrence. */
+  event_occurrence_id: number | null;
   user_id: string;
   body: string;
   created_at: Generated<Date>;
@@ -325,9 +337,9 @@ export interface Database {
   event_type_roles: EventTypeRoles;
   event_series: EventSeriesTable;
   event_series_teams: EventSeriesTeams;
-  event_exceptions: EventExceptions;
-  event_jobs: EventJobs;
-  event_job_assignments: EventJobAssignments;
+  event_occurrences: EventOccurrences;
+  event_work_roles: EventWorkRoles;
+  event_work_role_assignments: EventWorkRoleAssignments;
   event_comments: EventComments;
   operations: Operations;
   op_assignments: OpAssignments;
@@ -408,16 +420,15 @@ export type EventSeriesUpdate = Updateable<EventSeriesTable>;
 export type EventSeriesTeam = Selectable<EventSeriesTeams>;
 export type NewEventSeriesTeam = Insertable<EventSeriesTeams>;
 
-export type EventException = Selectable<EventExceptions>;
-export type NewEventException = Insertable<EventExceptions>;
-export type EventExceptionUpdate = Updateable<EventExceptions>;
+export type EventOccurrenceRow = Selectable<EventOccurrences>;
+export type NewEventOccurrenceRow = Insertable<EventOccurrences>;
 
-export type EventJob = Selectable<EventJobs>;
-export type NewEventJob = Insertable<EventJobs>;
-export type EventJobUpdate = Updateable<EventJobs>;
+export type EventWorkRole = Selectable<EventWorkRoles>;
+export type NewEventWorkRole = Insertable<EventWorkRoles>;
+export type EventWorkRoleUpdate = Updateable<EventWorkRoles>;
 
-export type EventJobAssignment = Selectable<EventJobAssignments>;
-export type NewEventJobAssignment = Insertable<EventJobAssignments>;
+export type EventWorkRoleAssignment = Selectable<EventWorkRoleAssignments>;
+export type NewEventWorkRoleAssignment = Insertable<EventWorkRoleAssignments>;
 
 export type EventComment = Selectable<EventComments>;
 export type NewEventComment = Insertable<EventComments>;

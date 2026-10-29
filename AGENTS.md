@@ -143,8 +143,18 @@ backend/src/
 │   ├── index.ts          # Route registration + health check
 │   ├── auth.ts           # OAuth login/callback routes per provider + logout
 │   ├── users.ts          # User CRUD routes
+│   ├── events.ts         # Event series, occurrences, work role slots, comments routes
+│   ├── calendars.ts      # Calendar routes
+│   ├── notifications.ts  # Notification routes
 │   ├── operations.ts     # Operations + assignments routes
-│   └── roles.ts          # Role + role assignment routes (organization scoped)
+│   ├── organizations.ts  # Organization, team, site/room routes
+│   ├── roles.ts          # Role + role assignment routes (organization scoped)
+│   ├── sites.ts          # Site routes
+│   ├── rooms.ts          # Room routes
+│   ├── teams.ts          # Team routes
+│   ├── work-roles.ts     # Work role catalog routes
+│   ├── certifications.ts # Certification routes
+│   └── user-work-roles.ts # User work role / certification routes
 ├── controllers/          # Request handlers (parse input, call services, send response)
 └── services/             # Business logic (database queries via Kysely)
     └── auth-providers/   # OAuth provider logic, one file per provider
@@ -211,6 +221,34 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 - `POST /api/v1/operations/:id/assignments` - Add assignment (`operations:write`)
 - `PATCH /api/v1/operations/:id/assignments/:aid` - Update assignment (`operations:write`)
 - `DELETE /api/v1/operations/:id/assignments/:aid` - Delete assignment (`operations:write`)
+- `GET /api/v1/event-series` - List event series (`events:read`, requires `organizationId` query)
+- `POST /api/v1/event-series` - Create event series (`events:write`)
+- `GET /api/v1/event-series/management` - Paginated series list for the management view (`events:read`)
+- `GET /api/v1/event-series/occurrences` - Occurrences in a time range (used by calendars; `events:read`)
+- `GET /api/v1/event-occurrences/:occurrenceRef` - Single occurrence detail by ref (numeric ID or `tmp:{seriesId}:{isoStart}`; `events:read`)
+- `POST /api/v1/event-occurrences/:occurrenceRef/import-slots` - Import parent series slots into a materialized occurrence (`events:write`)
+- `GET /api/v1/event-series/:seriesId` - Get series (`events:read`)
+- `GET /api/v1/event-series/:seriesId/management` - Get series with site/room/teams (`events:read`)
+- `PATCH /api/v1/event-series/:seriesId` - Update series (`events:write`)
+- `PATCH /api/v1/event-series/:seriesId/config` - Update site/room/team assignments (`events:write`)
+- `DELETE /api/v1/event-series/:seriesId` - Delete series (`events:write`)
+- `GET /api/v1/event-series/:seriesId/occurrences` - Occurrences of one series in a range (`events:read`)
+- `GET /api/v1/event-series/:seriesId/occurrences/:occurrenceStart` - Single occurrence detail (`events:read`)
+- `POST /api/v1/event-series/:seriesId/occurrences/:occurrenceStart/cancel` - Cancel occurrence (`events:write`)
+- `POST /api/v1/event-series/:seriesId/occurrences/:occurrenceStart/reschedule` - Reschedule occurrence (`events:write`)
+- `POST /api/v1/event-series/:seriesId/occurrences/:occurrenceStart/split` - Split series at occurrence (`events:write`)
+- `DELETE /api/v1/event-series/:seriesId/occurrences/:occurrenceStart/exception` - Restore occurrence (`events:write`)
+- `GET /api/v1/event-series/:seriesId/exceptions` - List cancelled/rescheduled occurrences (`events:read`)
+- `GET /api/v1/event-series/:seriesId/work-roles` - List work role slots (`events:read`, optional `occurrenceStart` query)
+- `POST /api/v1/event-series/:seriesId/work-roles` - Create slot (`events:write`; body may include `occurrenceId`, `isCritical`, `workRoleId`)
+- `PATCH /api/v1/event-series/:seriesId/work-roles/:workRoleId` - Update slot (`events:write`)
+- `DELETE /api/v1/event-series/:seriesId/work-roles/:workRoleId` - Delete slot (`events:write`)
+- `POST /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments` - Assign user to slot (`events:write`)
+- `DELETE /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments/:assignmentId` - Unassign user (`events:write`)
+- `GET /api/v1/event-series/:seriesId/comments` - List comments (`events:read`)
+- `POST /api/v1/event-series/:seriesId/comments` - Add comment (`events:write`)
+- `PATCH /api/v1/event-series/:seriesId/comments/:commentId` - Update comment (author only, `events:write`)
+- `DELETE /api/v1/event-series/:seriesId/comments/:commentId` - Delete comment (author only, `events:write`)
 - `GET /api/v1/organizations/:organizationId/roles` - List roles with permissions (`role-management:read`)
 - `POST /api/v1/organizations/:organizationId/roles` - Create role (`role-management:write`)
 - `PATCH /api/v1/organizations/:organizationId/roles/:roleId` - Update role (`role-management:write`)
@@ -282,15 +320,21 @@ frontend/src/
 │   ├── NavBar/           # Top navigation bar
 │   ├── Calendar/         # react-big-calendar wrapper
 │   ├── EditField/        # Inline edit field
+│   ├── EventSeriesDialog/ # Create/edit/split event series dialog
 │   ├── UserCard/         # User card component
 │   ├── ToolbarButton/    # Toolbar button
 │   └── NavigationButton/ # Navigation button
 └── pages/
-    ├── Home/             # Calendar view (default route)
+    ├── Home/             # Dashboard: notifications + upcoming events (default route)
+    ├── Events/           # CalendarPage (calendar view), EventManagementPage (series list),
+    │                     # EventConfigPage (series site/room/teams), EventOccurrencePage
+    │                     # (single event instance: readiness, work role slots, assignees)
     ├── UserList/         # User list (Contacts)
     ├── UserProfile/      # User profile detail
     ├── Account/          # Account page: personal info, login methods, account deletion
     ├── Profile/          # Personal profile: manage work roles and certifications
+    ├── Teams/            # Team list + team management
+    ├── Organization/     # Org general, sites/rooms, work roles, users
     ├── ErrorPage/        # Error page (uses useRouteError)
     ├── Login/            # Login screen (shown when unauthenticated)
     └── NoOrganizationPage/ # Shown when user has no organization
@@ -327,12 +371,20 @@ frontend/src/
 - **Schema**: tables covering users, authentication accounts (multi-provider),
   access tokens, records, permissions, roles, role permissions, user roles,
   organizations, teams, sites (physical locations), rooms (within sites),
-  calendars, event types, work roles (work roles), certifications,
+  calendars, event types, work roles (the role catalog), certifications,
   user work roles (availability/qualification), user certifications,
-  certification work roles (mandatory certifications per role), events,
-  responsibilities, assignments, operations, and operation assignments.
+  certification work roles (mandatory certifications per role),
+  event series, event occurrences, event work roles (slots), event work role
+  assignments, event comments, operations, and operation assignments.
   Events can be assigned to a site (optionally reserving the whole site)
   and/or a specific room within a site.
+- **Occurrence model**: `event_series` is expanded on the fly by the recurrence
+  engine; individual instances are materialized into `event_occurrences` on
+  first write (slot, comment, or cancel/reschedule). `event_occurrences` carries
+  the stable ID used in URLs plus `is_cancelled`/`override_start`/`override_end`.
+  `event_work_roles` slots with `event_occurrence_id` NULL are the parent
+  template; materialization copies them to occurrence-level slots tracked by
+  `inherited_from_work_role_id` (re-import never duplicates, never deletes).
 - **Auth tables**: `permissions` holds the system-defined permission codes;
   `auth_accounts` links users to provider accounts (discord, google, microsoft);
   `roles` belong to an organization and are granted permissions via
@@ -490,9 +542,12 @@ See `.env.sample` for all variables. Key ones:
 - When you add a feature that persists data, update `backend/scripts/seed-data.ts` (run with
   `npm run seed:data -w backend`) so the generated test data covers the new feature. The script
   generates semi-realistic test data for both organizations, mock users, roles, teams, calendars,
-  event types, event series (previous/current/next month), exceptions, job slots, comments and
+  event types, event series (previous/current/next month), materialized occurrences (with
+  cancel/reschedule flags), work role slots with assignments, comments and
   operations. It must keep refusing to run unless the database has exactly one user and one
-  organization (the state after the first login).
+  organization (the state after the first login). The core seeding logic is exported as
+  `seedTestData(tx)` so `backend/tests/seed-data.test.ts` can run it against PGlite and assert
+  the row counts.
 - Never change the database schema directly. Always create a migration.
 - Never rename or renumber existing migration files.
 - Do not introduce new dependencies without good reason. The project uses specific

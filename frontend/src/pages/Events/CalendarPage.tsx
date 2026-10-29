@@ -10,10 +10,10 @@ import {
   useGetTeamsQuery,
 } from '../../api/index.js';
 import Calendar, { type CalendarEvent } from '../../components/Calendar/Calendar.js';
-import EventOccurrenceDialog from '../../components/EventOccurrenceDialog/EventOccurrenceDialog.js';
 import { useAppSelector } from '../../hooks/redux.js';
 import { selectActiveOrganizationId } from '../../store/organization-slice.js';
 import type { EventOccurrence } from '../../types/index.js';
+import { occurrenceRef } from '../../types/index.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -34,10 +34,6 @@ function CalendarPage() {
     start: startOfMonth(now),
     end: new Date(now.getFullYear(), now.getMonth() + 1, 1),
   }));
-  const [selected, setSelected] = useState<{
-    seriesId: number;
-    occurrenceStart: string;
-  } | null>(null);
 
   const [scope, setScope] = useState<FilterScope>('all');
   const [siteId, setSiteId] = useState<string | null>(null);
@@ -89,7 +85,7 @@ function CalendarPage() {
   const handleEventClick = (event: CalendarEvent) => {
     const occurrence = event.resource as EventOccurrence | undefined;
     if (occurrence) {
-      navigate(`/events/${occurrence.seriesId}`);
+      navigate(`/events/occurrences/${encodeURIComponent(occurrenceRef(occurrence))}`);
     }
   };
 
@@ -146,11 +142,6 @@ function CalendarPage() {
         events={events}
         onRangeChange={newRange => setRange(newRange)}
         onSelectEvent={handleEventClick}
-      />
-      <EventOccurrenceDialog
-        seriesId={selected?.seriesId ?? null}
-        occurrenceStart={selected?.occurrenceStart ?? null}
-        onClose={() => setSelected(null)}
       />
     </Box>
   );

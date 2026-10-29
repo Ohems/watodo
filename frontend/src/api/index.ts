@@ -9,10 +9,6 @@ import type {
   CertificationUpdate,
   EventComment,
   EventException,
-  EventJob,
-  EventJobAssignment,
-  EventJobPush,
-  EventJobUpdate,
   EventOccurrence,
   EventOccurrenceDetail,
   EventSeries,
@@ -21,6 +17,10 @@ import type {
   EventSeriesManagement,
   EventSeriesPush,
   EventSeriesUpdate,
+  EventWorkRole,
+  EventWorkRoleAssignment,
+  EventWorkRolePush,
+  EventWorkRoleUpdate,
   Notification,
   OccurrenceFilter,
   OpAssignment,
@@ -408,6 +408,15 @@ export const api = createApi({
         seriesDetailTag(seriesId),
       ],
     }),
+    getOccurrenceDetailByRef: build.query<EventOccurrenceDetail, string>({
+      query: occurrenceRef => `/api/v1/event-occurrences/${encodeURIComponent(occurrenceRef)}`,
+      // Provide both the occurrence-specific tag and the series tag so that
+      // job mutations (which invalidate the series tag) refresh this query.
+      providesTags: (result, _error, occurrenceRef) => [
+        { type: 'OccurrenceDetail' as const, id: `occ:${occurrenceRef}` },
+        ...(result ? [seriesDetailTag(result.series.id)] : []),
+      ],
+    }),
     cancelOccurrence: build.mutation<EventException, { seriesId: number; occurrenceStart: string }>(
       {
         query: ({ seriesId, occurrenceStart }) => ({
@@ -468,54 +477,60 @@ export const api = createApi({
 
     // --- Event jobs ---
 
-    listEventJobs: build.query<EventJob[], { seriesId: number; occurrenceStart?: string }>({
+    listEventWorkRoles: build.query<
+      EventWorkRole[],
+      { seriesId: number; occurrenceStart?: string }
+    >({
       query: ({ seriesId, occurrenceStart }) =>
-        withQuery(`/api/v1/event-series/${seriesId}/jobs`, { occurrenceStart }),
+        withQuery(`/api/v1/event-series/${seriesId}/work-roles`, { occurrenceStart }),
       providesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
     }),
-    createEventJob: build.mutation<EventJob, { seriesId: number; data: EventJobPush }>({
+    createEventWorkRole: build.mutation<
+      EventWorkRole,
+      { seriesId: number; data: EventWorkRolePush }
+    >({
       query: ({ seriesId, data }) => ({
-        url: `/api/v1/event-series/${seriesId}/jobs`,
+        url: `/api/v1/event-series/${seriesId}/work-roles`,
         method: 'POST',
         body: data,
       }),
       invalidatesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
     }),
-    updateEventJob: build.mutation<
-      EventJob,
-      { seriesId: number; jobId: number; data: EventJobUpdate }
+    updateEventWorkRole: build.mutation<
+      EventWorkRole,
+      { seriesId: number; workRoleId: number; data: EventWorkRoleUpdate }
     >({
-      query: ({ seriesId, jobId, data }) => ({
-        url: `/api/v1/event-series/${seriesId}/jobs/${jobId}`,
+      query: ({ seriesId, workRoleId, data }) => ({
+        url: `/api/v1/event-series/${seriesId}/work-roles/${workRoleId}`,
         method: 'PATCH',
         body: data,
       }),
       invalidatesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
     }),
-    deleteEventJob: build.mutation<void, { seriesId: number; jobId: number }>({
-      query: ({ seriesId, jobId }) => ({
-        url: `/api/v1/event-series/${seriesId}/jobs/${jobId}`,
+    deleteEventWorkRole: build.mutation<void, { seriesId: number; workRoleId: number }>({
+      query: ({ seriesId, workRoleId }) => ({
+        url: `/api/v1/event-series/${seriesId}/work-roles/${workRoleId}`,
         method: 'DELETE',
       }),
       invalidatesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
     }),
-    assignUserToJob: build.mutation<
-      EventJobAssignment,
-      { seriesId: number; jobId: number; userId: string }
+    assignUserToWorkRole: build.mutation<
+      EventWorkRoleAssignment,
+      { seriesId: number; workRoleId: number; userId: string }
     >({
-      query: ({ seriesId, jobId, userId }) => ({
-        url: `/api/v1/event-series/${seriesId}/jobs/${jobId}/assignments`,
+      query: ({ seriesId, workRoleId, userId }) => ({
+        url: `/api/v1/event-series/${seriesId}/work-roles/${workRoleId}/assignments`,
         method: 'POST',
         body: { userId },
       }),
       invalidatesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
     }),
-    unassignUserFromJob: build.mutation<
+    unassignUserFromWorkRole: build.mutation<
       void,
-      { seriesId: number; jobId: number; assignmentId: number }
+      { seriesId: number; workRoleId: number; assignmentId: number }
     >({
-      query: ({ seriesId, jobId, assignmentId }) => ({
-        url: `/api/v1/event-series/${seriesId}/jobs/${jobId}/assignments/${assignmentId}`,
+      query: ({ seriesId, workRoleId, assignmentId }) => ({
+        url: `/api/v1/event-series/${seriesId}/work-roles/${workRoleId}/assignments/${assignmentId}`,
         method: 'DELETE',
       }),
       invalidatesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
@@ -556,6 +571,19 @@ export const api = createApi({
         method: 'DELETE',
       }),
       invalidatesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
+    }),
+
+    // --- Occurrence-level work role slot import ---
+
+    importParentSlots: build.mutation<EventWorkRole[], string>({
+      query: occurrenceRef => ({
+        url: `/api/v1/event-occurrences/${encodeURIComponent(occurrenceRef)}/import-slots`,
+        method: 'POST',
+        body: {},
+      }),
+      invalidatesTags: (_result, _error, occurrenceRef) => [
+        { type: 'OccurrenceDetail' as const, id: `occ:${occurrenceRef}` },
+      ],
     }),
 
     // --- Teams ---
@@ -1085,21 +1113,23 @@ export const {
   useGetOccurrencesQuery,
   useGetSeriesOccurrencesQuery,
   useGetOccurrenceDetailQuery,
+  useGetOccurrenceDetailByRefQuery,
   useCancelOccurrenceMutation,
   useRescheduleOccurrenceMutation,
   useDeleteExceptionMutation,
   useSplitEventSeriesMutation,
   useListExceptionsQuery,
-  useListEventJobsQuery,
-  useCreateEventJobMutation,
-  useUpdateEventJobMutation,
-  useDeleteEventJobMutation,
-  useAssignUserToJobMutation,
-  useUnassignUserFromJobMutation,
+  useListEventWorkRolesQuery,
+  useCreateEventWorkRoleMutation,
+  useUpdateEventWorkRoleMutation,
+  useDeleteEventWorkRoleMutation,
+  useAssignUserToWorkRoleMutation,
+  useUnassignUserFromWorkRoleMutation,
   useListEventCommentsQuery,
   useCreateEventCommentMutation,
   useUpdateEventCommentMutation,
   useDeleteEventCommentMutation,
+  useImportParentSlotsMutation,
   useGetTeamsQuery,
   useGetTeamQuery,
   useCreateTeamMutation,

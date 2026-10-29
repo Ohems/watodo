@@ -3,12 +3,12 @@ import {
   calendarListQuerySchema,
   eventCommentPushSchema,
   eventCommentUpdateSchema,
-  eventJobPushSchema,
-  eventJobUpdateSchema,
   eventSeriesListQuerySchema,
   eventSeriesPushSchema,
   eventSeriesQuerySchema,
   eventSeriesUpdateSchema,
+  eventWorkRolePushSchema,
+  eventWorkRoleUpdateSchema,
   incrementalSchema,
   occurrenceRangeQuerySchema,
   opAssignmentSchema,
@@ -323,26 +323,26 @@ describe('Schemas', () => {
     });
   });
 
-  describe('eventJobPushSchema and eventJobUpdateSchema', () => {
+  describe('eventWorkRolePushSchema and eventWorkRoleUpdateSchema', () => {
     it('should accept a slot with and without an occurrence', () => {
-      expect(eventJobPushSchema.safeParse({ title: 'Setup' }).success).toBe(true);
+      expect(eventWorkRolePushSchema.safeParse({ title: 'Setup' }).success).toBe(true);
       expect(
-        eventJobPushSchema.safeParse({
+        eventWorkRolePushSchema.safeParse({
           title: 'Setup',
           description: 'Early',
           occurrenceStart: '2026-10-21T16:00:00.000Z',
         }).success,
       ).toBe(true);
-      expect(eventJobPushSchema.safeParse({ title: 'Setup', occurrenceStart: null }).success).toBe(
-        true,
-      );
-      expect(eventJobPushSchema.safeParse({ description: 'No title' }).success).toBe(false);
+      expect(
+        eventWorkRolePushSchema.safeParse({ title: 'Setup', occurrenceStart: null }).success,
+      ).toBe(true);
+      expect(eventWorkRolePushSchema.safeParse({ description: 'No title' }).success).toBe(false);
     });
 
     it('should accept partial updates', () => {
-      expect(eventJobUpdateSchema.safeParse({}).success).toBe(true);
-      expect(eventJobUpdateSchema.safeParse({ title: 'New' }).success).toBe(true);
-      expect(eventJobUpdateSchema.safeParse({ occurrenceStart: null }).success).toBe(true);
+      expect(eventWorkRoleUpdateSchema.safeParse({}).success).toBe(true);
+      expect(eventWorkRoleUpdateSchema.safeParse({ title: 'New' }).success).toBe(true);
+      expect(eventWorkRoleUpdateSchema.safeParse({ occurrenceStart: null }).success).toBe(true);
     });
   });
 

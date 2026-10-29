@@ -22,6 +22,7 @@ import {
   useMarkNotificationReadMutation,
 } from '../../api/index.js';
 import type { EventOccurrence, Notification } from '../../types/index.js';
+import { occurrenceRef } from '../../types/index.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const UPCOMING_DAYS = 14;
@@ -77,7 +78,7 @@ function Home() {
   };
 
   const handleEventClick = (occurrence: EventOccurrence) => {
-    navigate(`/events/${occurrence.seriesId}`);
+    navigate(`/events/occurrences/${encodeURIComponent(occurrenceRef(occurrence))}`);
   };
 
   return (

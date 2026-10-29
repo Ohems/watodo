@@ -211,15 +211,19 @@ export const rescheduleOccurrenceSchema = z.object({
   end: z.iso.datetime().optional(),
 });
 
-export const eventJobPushSchema = z.object({
+export const eventWorkRolePushSchema = z.object({
   title: z.string().min(1),
   description: z.string().optional(),
   occurrenceStart: z.iso.datetime().nullable().optional(),
+  /** Scope the slot to a materialized occurrence (inherited copy). */
+  occurrenceId: z.number().int().nullable().optional(),
+  isCritical: z.boolean().optional(),
+  workRoleId: z.number().int().nullable().optional(),
 });
 
-export const eventJobUpdateSchema = eventJobPushSchema.partial();
+export const eventWorkRoleUpdateSchema = eventWorkRolePushSchema.partial();
 
-export const eventJobAssignmentSchema = z.object({
+export const eventWorkRoleAssignmentSchema = z.object({
   userId: z.uuid(),
 });
 
@@ -236,7 +240,7 @@ export const eventCommentsQuerySchema = z.object({
   occurrenceStart: z.iso.datetime().optional(),
 });
 
-export const eventJobsQuerySchema = z.object({
+export const eventWorkRolesQuerySchema = z.object({
   occurrenceStart: z.iso.datetime().optional(),
 });
 
@@ -257,13 +261,13 @@ export type EventSeriesPush = z.infer<typeof eventSeriesPushSchema>;
 export type EventSeriesUpdate = z.infer<typeof eventSeriesUpdateSchema>;
 export type OccurrenceRangeQuery = z.infer<typeof occurrenceRangeQuerySchema>;
 export type RescheduleOccurrenceInput = z.infer<typeof rescheduleOccurrenceSchema>;
-export type EventJobPush = z.infer<typeof eventJobPushSchema>;
-export type EventJobUpdate = z.infer<typeof eventJobUpdateSchema>;
-export type EventJobAssignmentInput = z.infer<typeof eventJobAssignmentSchema>;
+export type EventWorkRolePush = z.infer<typeof eventWorkRolePushSchema>;
+export type EventWorkRoleUpdate = z.infer<typeof eventWorkRoleUpdateSchema>;
+export type EventWorkRoleAssignmentInput = z.infer<typeof eventWorkRoleAssignmentSchema>;
 export type EventCommentPush = z.infer<typeof eventCommentPushSchema>;
 export type EventCommentUpdate = z.infer<typeof eventCommentUpdateSchema>;
 export type EventCommentsQuery = z.infer<typeof eventCommentsQuerySchema>;
-export type EventJobsQuery = z.infer<typeof eventJobsQuerySchema>;
+export type EventWorkRolesQuery = z.infer<typeof eventWorkRolesQuerySchema>;
 
 // --- Teams ---
 

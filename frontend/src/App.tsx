@@ -9,6 +9,7 @@ import ErrorPage from './pages/ErrorPage/ErrorPage.js';
 import CalendarPage from './pages/Events/CalendarPage.js';
 import EventConfigPage from './pages/Events/EventConfigPage.js';
 import EventManagementPage from './pages/Events/EventManagementPage.js';
+import EventOccurrencePage from './pages/Events/EventOccurrencePage.js';
 import Home from './pages/Home/Home.js';
 import LoginPage from './pages/Login/LoginPage.js';
 import OrgGeneralPage from './pages/Organization/OrgGeneralPage.js';
@@ -55,6 +56,7 @@ function AppContent() {
         <Route path="/" element={<Home />} />
         <Route path="/events/calendar" element={<CalendarPage />} />
         <Route path="/events/management" element={<EventManagementPage />} />
+        <Route path="/events/occurrences/:occurrenceRef" element={<EventOccurrencePage />} />
         <Route path="/events/:eventId" element={<EventConfigPage />} />
         <Route path="/teams" element={<TeamsPage />} />
         <Route path="/teams/:teamId" element={<TeamManagementPage />} />
