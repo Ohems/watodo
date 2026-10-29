@@ -507,9 +507,14 @@ export const api = createApi({
       }),
       invalidatesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
     }),
-    deleteEventWorkRole: build.mutation<void, { seriesId: number; workRoleId: number }>({
-      query: ({ seriesId, workRoleId }) => ({
-        url: `/api/v1/event-series/${seriesId}/work-roles/${workRoleId}`,
+    deleteEventWorkRole: build.mutation<
+      void,
+      { seriesId: number; workRoleId: number; occurrenceRef?: string }
+    >({
+      query: ({ seriesId, workRoleId, occurrenceRef }) => ({
+        url: withQuery(`/api/v1/event-series/${seriesId}/work-roles/${workRoleId}`, {
+          ...(occurrenceRef ? { occurrenceRef } : {}),
+        }),
         method: 'DELETE',
       }),
       invalidatesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
@@ -584,6 +589,57 @@ export const api = createApi({
       invalidatesTags: (_result, _error, occurrenceRef) => [
         { type: 'OccurrenceDetail' as const, id: `occ:${occurrenceRef}` },
       ],
+    }),
+
+    // --- Occurrence materialization + occurrence-scoped resources ---
+    // The occurrence page calls materialize when the ref is a tmp key, then
+    // uses the numeric eventOccurrenceId for all writes.
+
+    materializeOccurrence: build.mutation<{ occurrenceId: number }, string>({
+      query: occurrenceRef => ({
+        url: `/api/v1/event-occurrences/${encodeURIComponent(occurrenceRef)}/materialize`,
+        method: 'POST',
+        body: {},
+      }),
+    }),
+    createOccurrenceWorkRole: build.mutation<
+      EventWorkRole,
+      { occurrenceId: number; data: EventWorkRolePush }
+    >({
+      query: ({ occurrenceId, data }) => ({
+        url: `/api/v1/event-occurrences/${occurrenceId}/work-roles`,
+        method: 'POST',
+        body: data,
+      }),
+      invalidatesTags: ['OccurrenceDetail'],
+    }),
+    deleteOccurrenceWorkRole: build.mutation<void, { occurrenceId: number; workRoleId: number }>({
+      query: ({ occurrenceId, workRoleId }) => ({
+        url: `/api/v1/event-occurrences/${occurrenceId}/work-roles/${workRoleId}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['OccurrenceDetail'],
+    }),
+    assignUserToOccurrenceWorkRole: build.mutation<
+      EventWorkRoleAssignment,
+      { occurrenceId: number; workRoleId: number; userId: string }
+    >({
+      query: ({ occurrenceId, workRoleId, userId }) => ({
+        url: `/api/v1/event-occurrences/${occurrenceId}/work-roles/${workRoleId}/assignments`,
+        method: 'POST',
+        body: { userId },
+      }),
+      invalidatesTags: ['OccurrenceDetail'],
+    }),
+    unassignUserFromOccurrenceWorkRole: build.mutation<
+      void,
+      { occurrenceId: number; workRoleId: number; assignmentId: number }
+    >({
+      query: ({ occurrenceId, workRoleId, assignmentId }) => ({
+        url: `/api/v1/event-occurrences/${occurrenceId}/work-roles/${workRoleId}/assignments/${assignmentId}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['OccurrenceDetail'],
     }),
 
     // --- Teams ---
@@ -1130,6 +1186,11 @@ export const {
   useUpdateEventCommentMutation,
   useDeleteEventCommentMutation,
   useImportParentSlotsMutation,
+  useMaterializeOccurrenceMutation,
+  useCreateOccurrenceWorkRoleMutation,
+  useDeleteOccurrenceWorkRoleMutation,
+  useAssignUserToOccurrenceWorkRoleMutation,
+  useUnassignUserFromOccurrenceWorkRoleMutation,
   useGetTeamsQuery,
   useGetTeamQuery,
   useCreateTeamMutation,

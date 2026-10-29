@@ -491,6 +491,85 @@ async function createSeries(tx: Tx, values: NewEventSeries): Promise<EventSeries
   return tx.insertInto('event_series').values(values).returningAll().executeTakeFirstOrThrow();
 }
 
+/**
+ * Materializes an occurrence (upsert) and, when newly created, copies the
+ * parent (series-level) work role slots - including their user assignments -
+ * into the occurrence. Mirrors ensureOccurrenceMaterialized in the service.
+ */
+async function materializeOccurrence(
+  tx: Tx,
+  seriesId: number,
+  occurrenceStart: Date,
+): Promise<number> {
+  const occ = await tx
+    .insertInto('event_occurrences')
+    .values({ event_series_id: seriesId, occurrence_start: occurrenceStart })
+    .onConflict(oc => oc.columns(['event_series_id', 'occurrence_start']).doNothing())
+    .returning('id')
+    .executeTakeFirst();
+  if (occ) {
+    const parentSlots = await tx
+      .selectFrom('event_work_roles')
+      .select(['id', 'title', 'description', 'is_critical', 'work_role_id'])
+      .where('event_series_id', '=', seriesId)
+      .where('event_occurrence_id', 'is', null)
+      .execute();
+    if (parentSlots.length > 0) {
+      const newSlots = await tx
+        .insertInto('event_work_roles')
+        .values(
+          parentSlots.map(s => ({
+            event_series_id: seriesId,
+            event_occurrence_id: occ.id,
+            inherited_from_work_role_id: s.id,
+            title: s.title,
+            description: s.description,
+            is_critical: s.is_critical,
+            work_role_id: s.work_role_id,
+          })),
+        )
+        .onConflict(oc => oc.doNothing())
+        .returning(['id', 'inherited_from_work_role_id'])
+        .execute();
+      const parentAssignments = await tx
+        .selectFrom('event_work_role_assignments')
+        .select(['event_work_role_id', 'user_id'])
+        .where(
+          'event_work_role_id',
+          'in',
+          parentSlots.map(s => s.id),
+        )
+        .execute();
+      const newByParent = new Map(
+        newSlots
+          .filter(s => s.inherited_from_work_role_id !== null)
+          .map(s => [s.inherited_from_work_role_id as number, s.id]),
+      );
+      const rows = parentAssignments
+        .map(a => {
+          const newId = newByParent.get(a.event_work_role_id);
+          return newId !== undefined ? { event_work_role_id: newId, user_id: a.user_id } : null;
+        })
+        .filter((r): r is { event_work_role_id: number; user_id: string } => r !== null);
+      if (rows.length > 0) {
+        await tx
+          .insertInto('event_work_role_assignments')
+          .values(rows)
+          .onConflict(oc => oc.doNothing())
+          .execute();
+      }
+    }
+    return occ.id;
+  }
+  const existing = await tx
+    .selectFrom('event_occurrences')
+    .select('id')
+    .where('event_series_id', '=', seriesId)
+    .where('occurrence_start', '=', occurrenceStart)
+    .executeTakeFirstOrThrow();
+  return existing.id;
+}
+
 async function addJob(
   tx: Tx,
   seriesId: number,
@@ -502,50 +581,9 @@ async function addJob(
 ): Promise<EventWorkRole> {
   // Materialize the occurrence when the slot is scoped to one, so the
   // occurrence gets a stable ID and inherited parent slots.
-  let eventOccurrenceId: number | null = null;
-  if (occurrenceStart) {
-    const occ = await tx
-      .insertInto('event_occurrences')
-      .values({ event_series_id: seriesId, occurrence_start: occurrenceStart })
-      .onConflict(oc => oc.columns(['event_series_id', 'occurrence_start']).doNothing())
-      .returning('id')
-      .executeTakeFirst();
-    if (occ) {
-      eventOccurrenceId = occ.id;
-      // Inherit parent (series-level) slots into the new occurrence.
-      const parentSlots = await tx
-        .selectFrom('event_work_roles')
-        .select(['id', 'title', 'description', 'is_critical', 'work_role_id'])
-        .where('event_series_id', '=', seriesId)
-        .where('event_occurrence_id', 'is', null)
-        .execute();
-      if (parentSlots.length > 0) {
-        await tx
-          .insertInto('event_work_roles')
-          .values(
-            parentSlots.map(s => ({
-              event_series_id: seriesId,
-              event_occurrence_id: occ.id,
-              inherited_from_work_role_id: s.id,
-              title: s.title,
-              description: s.description,
-              is_critical: s.is_critical,
-              work_role_id: s.work_role_id,
-            })),
-          )
-          .onConflict(oc => oc.doNothing())
-          .execute();
-      }
-    } else {
-      const existing = await tx
-        .selectFrom('event_occurrences')
-        .select('id')
-        .where('event_series_id', '=', seriesId)
-        .where('occurrence_start', '=', occurrenceStart)
-        .executeTakeFirstOrThrow();
-      eventOccurrenceId = existing.id;
-    }
-  }
+  const eventOccurrenceId = occurrenceStart
+    ? await materializeOccurrence(tx, seriesId, occurrenceStart)
+    : null;
   return tx
     .insertInto('event_work_roles')
     .values({
@@ -576,22 +614,7 @@ async function addComment(
 ): Promise<void> {
   let eventOccurrenceId: number | null = null;
   if (occurrenceStart) {
-    const occ = await tx
-      .insertInto('event_occurrences')
-      .values({ event_series_id: seriesId, occurrence_start: occurrenceStart })
-      .onConflict(oc => oc.columns(['event_series_id', 'occurrence_start']).doNothing())
-      .returning('id')
-      .executeTakeFirst();
-    eventOccurrenceId =
-      occ?.id ??
-      (
-        await tx
-          .selectFrom('event_occurrences')
-          .select('id')
-          .where('event_series_id', '=', seriesId)
-          .where('occurrence_start', '=', occurrenceStart)
-          .executeTakeFirstOrThrow()
-      ).id;
+    eventOccurrenceId = await materializeOccurrence(tx, seriesId, occurrenceStart);
   }
   await tx
     .insertInto('event_comments')
@@ -851,13 +874,11 @@ async function seedWeeklyMeeting(
 
   // Cancel the second occurrence of the current month (a holiday, for example).
   if (currentOccurrences.length > 1) {
+    const occId = await materializeOccurrence(tx, series.id, currentOccurrences[1].occurrenceStart);
     await tx
-      .insertInto('event_occurrences')
-      .values({
-        event_series_id: series.id,
-        occurrence_start: currentOccurrences[1].occurrenceStart,
-        is_cancelled: true,
-      })
+      .updateTable('event_occurrences')
+      .set({ is_cancelled: true, updated_at: new Date() })
+      .where('id', '=', occId)
       .execute();
   }
 
@@ -866,11 +887,10 @@ async function seedWeeklyMeeting(
   if (nextOccurrences.length > 0) {
     const original = nextOccurrences[0].occurrenceStart;
     const wall = toWallClockDate(original, timezone);
+    const occId = await materializeOccurrence(tx, series.id, original);
     await tx
-      .insertInto('event_occurrences')
-      .values({
-        event_series_id: series.id,
-        occurrence_start: original,
+      .updateTable('event_occurrences')
+      .set({
         override_start: at(
           timezone,
           wall.getUTCFullYear(),
@@ -887,7 +907,9 @@ async function seedWeeklyMeeting(
           20,
           30,
         ),
+        updated_at: new Date(),
       })
+      .where('id', '=', occId)
       .execute();
   }
 

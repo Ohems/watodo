@@ -282,7 +282,8 @@ async function ensureOccurrenceMaterialized(
     .returning('id')
     .executeTakeFirst();
   if (inserted) {
-    // Inherit parent (series-level) work role slots into the new occurrence.
+    // Inherit parent (series-level) work role slots into the new occurrence,
+    // copying any user assignments from the parent slots as well.
     const parentSlots = await db
       .selectFrom('event_work_roles')
       .select(['id', 'title', 'description', 'is_critical', 'work_role_id'])
@@ -290,12 +291,11 @@ async function ensureOccurrenceMaterialized(
       .where('event_occurrence_id', 'is', null)
       .execute();
     if (parentSlots.length > 0) {
-      await db
+      const newSlots = await db
         .insertInto('event_work_roles')
         .values(
           parentSlots.map(s => ({
             event_series_id: seriesId,
-            occurrence_start: occurrenceStart,
             event_occurrence_id: inserted.id,
             inherited_from_work_role_id: s.id,
             title: s.title,
@@ -305,7 +305,33 @@ async function ensureOccurrenceMaterialized(
           })),
         )
         .onConflict(oc => oc.doNothing())
+        .returning(['id', 'inherited_from_work_role_id'])
         .execute();
+      // Copy assignments from parent slots to the corresponding new slots.
+      const parentIds = parentSlots.map(s => s.id);
+      const parentAssignments = await db
+        .selectFrom('event_work_role_assignments')
+        .select(['event_work_role_id', 'user_id'])
+        .where('event_work_role_id', 'in', parentIds)
+        .execute();
+      const newByParent = new Map(
+        newSlots
+          .filter(s => s.inherited_from_work_role_id !== null)
+          .map(s => [s.inherited_from_work_role_id as number, s.id]),
+      );
+      const assignmentRows = parentAssignments
+        .map(a => {
+          const newId = newByParent.get(a.event_work_role_id);
+          return newId !== undefined ? { event_work_role_id: newId, user_id: a.user_id } : null;
+        })
+        .filter((r): r is { event_work_role_id: number; user_id: string } => r !== null);
+      if (assignmentRows.length > 0) {
+        await db
+          .insertInto('event_work_role_assignments')
+          .values(assignmentRows)
+          .onConflict(oc => oc.doNothing())
+          .execute();
+      }
     }
     return inserted.id;
   }
@@ -1051,11 +1077,41 @@ export async function getOccurrenceDetail(
   const jobs = await listEventWorkRoles(seriesId, { occurrenceStart });
   const parentJobs = await listEventWorkRoles(seriesId, { parentOnly: true });
   const occurrenceJobs =
-    occurrenceId !== null ? await listEventWorkRoles(seriesId, { occurrenceId }) : [];
-  const inheritedParentIds = new Set(
-    occurrenceJobs.map(j => j.inheritedFromWorkRoleId).filter((id): id is number => id !== null),
-  );
-  const missingParentJobs = parentJobs.filter(j => !inheritedParentIds.has(j.id));
+    occurrenceId !== null
+      ? await listEventWorkRoles(seriesId, { occurrenceId, occurrenceOnly: true })
+      : [];
+  // A parent slot is "missing" when the occurrence has fewer slots for that
+  // work role than the parent (manual occurrence slots count too, not just
+  // inherited ones). Ad-hoc slots without a work role are matched by
+  // inherited_from_work_role_id only.
+  const occCountByRole = new Map<number, number>();
+  const inheritedParentIds = new Set<number>();
+  for (const j of occurrenceJobs) {
+    if (j.workRoleId !== null) {
+      occCountByRole.set(j.workRoleId, (occCountByRole.get(j.workRoleId) ?? 0) + 1);
+    }
+    if (j.inheritedFromWorkRoleId !== null) inheritedParentIds.add(j.inheritedFromWorkRoleId);
+  }
+  const parentCountByRole = new Map<number, number>();
+  for (const j of parentJobs) {
+    if (j.workRoleId !== null) {
+      parentCountByRole.set(j.workRoleId, (parentCountByRole.get(j.workRoleId) ?? 0) + 1);
+    }
+  }
+  const missingParentJobs = parentJobs.filter(j => {
+    if (j.workRoleId !== null) {
+      const parentCount = parentCountByRole.get(j.workRoleId) ?? 0;
+      const occCount = occCountByRole.get(j.workRoleId) ?? 0;
+      if (occCount < parentCount) {
+        // Consume one "missing" per parent slot beyond the occurrence count.
+        occCountByRole.set(j.workRoleId, occCount + 1);
+        parentCountByRole.set(j.workRoleId, parentCount - 1);
+        return true;
+      }
+      return false;
+    }
+    return !inheritedParentIds.has(j.id);
+  });
 
   const comments = await listEventComments(seriesId, occurrenceStart);
   const readiness = await computeReadiness(seriesId, occurrenceStart);
@@ -1139,6 +1195,176 @@ export async function getOccurrenceDetailByRef(
   logger.trace('eventService.getOccurrenceDetailByRef');
   const { seriesId, occurrenceStart } = await resolveOccurrenceRef(ref);
   return getOccurrenceDetail(seriesId, occurrenceStart);
+}
+
+/**
+ * Materializes an occurrence referenced by ref (numeric ID or tmp key) and
+ * returns its stable ID. On first creation, parent slots and their
+ * assignments are inherited.
+ * @param ref - The occurrence reference.
+ * @returns The stable occurrence ID.
+ */
+export async function materializeOccurrenceByRef(ref: string): Promise<number> {
+  logger.trace('eventService.materializeOccurrenceByRef');
+  const { seriesId, occurrenceStart } = await resolveOccurrenceRef(ref);
+  return ensureOccurrenceMaterialized(seriesId, occurrenceStart);
+}
+
+/**
+ * Resolves a ref to a materialized occurrence ID, materializing on write.
+ * Read endpoints should use resolveOccurrenceRef + lookup instead.
+ */
+
+// --- Occurrence-scoped work role slots ---
+
+/** Lists the work role slots scoped to a materialized occurrence. */
+export async function listOccurrenceWorkRoles(
+  occurrenceId: number,
+): Promise<EventWorkRoleResponse[]> {
+  const occ = await db
+    .selectFrom('event_occurrences')
+    .select('event_series_id')
+    .where('id', '=', occurrenceId)
+    .executeTakeFirst();
+  if (!occ) throw notFound(`Event occurrence ${occurrenceId} not found!`);
+  return listEventWorkRoles(occ.event_series_id, { occurrenceId, occurrenceOnly: true });
+}
+
+/** Creates a work role slot scoped to the occurrence. */
+export async function createOccurrenceWorkRole(
+  occurrenceId: number,
+  data: EventWorkRolePush,
+): Promise<EventWorkRoleResponse> {
+  const occ = await db
+    .selectFrom('event_occurrences')
+    .select(['event_series_id', 'occurrence_start'])
+    .where('id', '=', occurrenceId)
+    .executeTakeFirst();
+  if (!occ) throw notFound(`Event occurrence ${occurrenceId} not found!`);
+  return createEventWorkRole(occ.event_series_id, {
+    ...data,
+    occurrenceStart: occ.occurrence_start.toISOString(),
+    occurrenceId,
+  });
+}
+
+async function getOccurrenceSlotOrThrow(occurrenceId: number, workRoleId: number) {
+  const slot = await db
+    .selectFrom('event_work_roles')
+    .selectAll()
+    .where('id', '=', workRoleId)
+    .where('event_occurrence_id', '=', occurrenceId)
+    .executeTakeFirst();
+  if (!slot) {
+    throw notFound(`Work role slot ${workRoleId} not found in occurrence ${occurrenceId}!`);
+  }
+  return slot;
+}
+
+/** Updates a slot that belongs to the occurrence (parent slots are rejected). */
+export async function updateOccurrenceWorkRole(
+  occurrenceId: number,
+  workRoleId: number,
+  data: EventWorkRoleUpdate,
+): Promise<EventWorkRoleResponse> {
+  const slot = await getOccurrenceSlotOrThrow(occurrenceId, workRoleId);
+  return updateEventWorkRole(slot.event_series_id, workRoleId, data);
+}
+
+/** Deletes a slot that belongs to the occurrence; parent slots are never deleted. */
+export async function deleteOccurrenceWorkRole(
+  occurrenceId: number,
+  workRoleId: number,
+): Promise<void> {
+  await getOccurrenceSlotOrThrow(occurrenceId, workRoleId);
+  await db.deleteFrom('event_work_roles').where('id', '=', workRoleId).execute();
+}
+
+/** Assigns a user to an occurrence slot. */
+export async function assignUserToOccurrenceWorkRole(
+  occurrenceId: number,
+  workRoleId: number,
+  userId: string,
+): Promise<EventWorkRoleAssignmentResponse> {
+  const slot = await getOccurrenceSlotOrThrow(occurrenceId, workRoleId);
+  return assignUserToWorkRole(slot.event_series_id, workRoleId, userId);
+}
+
+/** Removes an assignment from an occurrence slot. */
+export async function unassignUserFromOccurrenceWorkRole(
+  occurrenceId: number,
+  workRoleId: number,
+  assignmentId: number,
+): Promise<void> {
+  const slot = await getOccurrenceSlotOrThrow(occurrenceId, workRoleId);
+  return unassignUserFromWorkRole(slot.event_series_id, workRoleId, assignmentId);
+}
+
+// --- Occurrence-scoped comments ---
+
+/** Lists comments scoped to the occurrence (plus series-wide ones). */
+export async function listOccurrenceComments(
+  occurrenceId: number,
+): Promise<EventCommentResponse[]> {
+  const occ = await db
+    .selectFrom('event_occurrences')
+    .select(['event_series_id', 'occurrence_start'])
+    .where('id', '=', occurrenceId)
+    .executeTakeFirst();
+  if (!occ) throw notFound(`Event occurrence ${occurrenceId} not found!`);
+  return listEventComments(occ.event_series_id, occ.occurrence_start);
+}
+
+/** Creates a comment scoped to the occurrence. */
+export async function createOccurrenceComment(
+  occurrenceId: number,
+  userId: string,
+  data: EventCommentPush,
+): Promise<EventCommentResponse> {
+  const occ = await db
+    .selectFrom('event_occurrences')
+    .select(['event_series_id', 'occurrence_start'])
+    .where('id', '=', occurrenceId)
+    .executeTakeFirst();
+  if (!occ) throw notFound(`Event occurrence ${occurrenceId} not found!`);
+  return createEventComment(occ.event_series_id, userId, {
+    ...data,
+    occurrenceStart: occ.occurrence_start.toISOString(),
+  });
+}
+
+async function getOccurrenceCommentOrThrow(occurrenceId: number, commentId: number) {
+  const comment = await db
+    .selectFrom('event_comments')
+    .selectAll()
+    .where('id', '=', commentId)
+    .where('event_occurrence_id', '=', occurrenceId)
+    .executeTakeFirst();
+  if (!comment) {
+    throw notFound(`Comment ${commentId} not found in occurrence ${occurrenceId}!`);
+  }
+  return comment;
+}
+
+/** Updates a comment that belongs to the occurrence (author only). */
+export async function updateOccurrenceComment(
+  occurrenceId: number,
+  commentId: number,
+  userId: string,
+  data: EventCommentUpdate,
+): Promise<EventCommentResponse> {
+  const comment = await getOccurrenceCommentOrThrow(occurrenceId, commentId);
+  return updateEventComment(comment.event_series_id, commentId, userId, data);
+}
+
+/** Deletes a comment that belongs to the occurrence (author only). */
+export async function deleteOccurrenceComment(
+  occurrenceId: number,
+  commentId: number,
+  userId: string,
+): Promise<void> {
+  const comment = await getOccurrenceCommentOrThrow(occurrenceId, commentId);
+  return deleteEventComment(comment.event_series_id, commentId, userId);
 }
 
 // --- Occurrence exceptions (cancel / reschedule) ---
@@ -1262,7 +1488,12 @@ export async function deleteException(seriesId: number, occurrenceStart: Date): 
  */
 export async function listEventWorkRoles(
   seriesId: number,
-  options?: { occurrenceStart?: Date; occurrenceId?: number | null; parentOnly?: boolean },
+  options?: {
+    occurrenceStart?: Date;
+    occurrenceId?: number | null;
+    parentOnly?: boolean;
+    occurrenceOnly?: boolean;
+  },
 ): Promise<EventWorkRoleResponse[]> {
   logger.trace('eventService.listEventWorkRoles');
   await getSeriesRowOrThrow(seriesId);
@@ -1282,6 +1513,8 @@ export async function listEventWorkRoles(
   let query = db.selectFrom('event_work_roles').selectAll().where('event_series_id', '=', seriesId);
   if (options?.parentOnly) {
     query = query.where('event_occurrence_id', 'is', null);
+  } else if (options?.occurrenceOnly && occurrenceId !== null) {
+    query = query.where('event_occurrence_id', '=', occurrenceId);
   } else if (occurrenceId !== null) {
     // Parent slots + slots scoped to this occurrence.
     query = query.where(eb =>
@@ -1401,9 +1634,48 @@ export async function updateEventWorkRole(
   return (await attachAssignments([updated]))[0];
 }
 
-export async function deleteEventWorkRole(seriesId: number, jobId: number): Promise<void> {
+export async function deleteEventWorkRole(
+  seriesId: number,
+  jobId: number,
+  occurrenceRef?: string,
+): Promise<void> {
   logger.trace('eventService.deleteEventWorkRole');
   await getSeriesRowOrThrow(seriesId);
+
+  // When an occurrence ref is given (occurrence page), never delete the
+  // parent slot: materialize the occurrence if needed and delete only the
+  // occurrence-level copy inherited from this parent slot.
+  if (occurrenceRef !== undefined) {
+    const { seriesId: refSeriesId, occurrenceStart } = await resolveOccurrenceRef(occurrenceRef);
+    if (refSeriesId !== seriesId) {
+      throw badRequest('Occurrence does not belong to this event series!');
+    }
+    const occId = await ensureOccurrenceMaterialized(seriesId, occurrenceStart);
+    const result = await db
+      .deleteFrom('event_work_roles')
+      .where('event_series_id', '=', seriesId)
+      .where('event_occurrence_id', '=', occId)
+      .where('inherited_from_work_role_id', '=', jobId)
+      .executeTakeFirst();
+    if (result.numDeletedRows === 0n) {
+      // Maybe the occurrence slot was added manually (not inherited): delete
+      // the occurrence-level slot with this id if it belongs to the occurrence.
+      const slot = await db
+        .selectFrom('event_work_roles')
+        .select(['id', 'event_occurrence_id'])
+        .where('id', '=', jobId)
+        .where('event_series_id', '=', seriesId)
+        .executeTakeFirst();
+      if (slot && slot.event_occurrence_id === occId) {
+        await db.deleteFrom('event_work_roles').where('id', '=', jobId).execute();
+        return;
+      }
+      throw notFound(
+        `Work role slot ${jobId} has no occurrence-level copy in occurrence ${occurrenceRef}!`,
+      );
+    }
+    return;
+  }
 
   const result = await db
     .deleteFrom('event_work_roles')
@@ -1411,7 +1683,7 @@ export async function deleteEventWorkRole(seriesId: number, jobId: number): Prom
     .where('event_series_id', '=', seriesId)
     .executeTakeFirst();
   if (result.numDeletedRows === 0n) {
-    throw notFound(`Job slot ${jobId} not found in event series ${seriesId}!`);
+    throw notFound(`Work role slot ${jobId} not found in event series ${seriesId}!`);
   }
 }
 

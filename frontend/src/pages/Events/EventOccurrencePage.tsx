@@ -22,15 +22,16 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   getApiErrorMessage,
-  useAssignUserToWorkRoleMutation,
-  useCreateEventWorkRoleMutation,
-  useDeleteEventWorkRoleMutation,
+  useAssignUserToOccurrenceWorkRoleMutation,
+  useCreateOccurrenceWorkRoleMutation,
+  useDeleteOccurrenceWorkRoleMutation,
   useGetAllWorkRolesQuery,
   useGetCurrentUserQuery,
   useGetOccurrenceDetailByRefQuery,
   useGetUserListQuery,
   useImportParentSlotsMutation,
-  useUnassignUserFromWorkRoleMutation,
+  useMaterializeOccurrenceMutation,
+  useUnassignUserFromOccurrenceWorkRoleMutation,
 } from '../../api/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
 import { selectActiveOrganizationId } from '../../store/organization-slice.js';
@@ -72,11 +73,12 @@ function EventOccurrencePage() {
     valid && activeOrganizationId ? activeOrganizationId : skipToken,
   );
 
-  const [deleteJob] = useDeleteEventWorkRoleMutation();
-  const [unassignUserFromWorkRole] = useUnassignUserFromWorkRoleMutation();
-  const [assignUserToWorkRole] = useAssignUserToWorkRoleMutation();
-  const [createJob] = useCreateEventWorkRoleMutation();
+  const [deleteSlot] = useDeleteOccurrenceWorkRoleMutation();
+  const [unassignUser] = useUnassignUserFromOccurrenceWorkRoleMutation();
+  const [assignUser] = useAssignUserToOccurrenceWorkRoleMutation();
+  const [createSlot] = useCreateOccurrenceWorkRoleMutation();
   const [importParentSlots] = useImportParentSlotsMutation();
+  const [materializeOccurrence] = useMaterializeOccurrenceMutation();
 
   const [actionError, setActionError] = useState<string | null>(null);
   const error = actionError ?? (detailError ? getApiErrorMessage(detailError) : null);
@@ -92,6 +94,20 @@ function EventOccurrencePage() {
     } catch (err) {
       setActionError(getApiErrorMessage(err));
     }
+  };
+
+  /**
+   * Returns the numeric occurrence ID, materializing the occurrence first
+   * when the URL still has a tmp ref. After materialization the URL is
+   * upgraded to the numeric ID.
+   */
+  const ensureOccurrenceId = async (): Promise<number> => {
+    if (occurrenceRef !== null && !/^\d+$/.test(occurrenceRef)) {
+      const res = await materializeOccurrence(occurrenceRef).unwrap();
+      navigate(`/events/occurrences/${res.occurrenceId}`, { replace: true });
+      return res.occurrenceId;
+    }
+    return Number(occurrenceRef);
   };
 
   // Upgrade the URL from a tmp ref to the stable numeric ID once the
@@ -176,11 +192,9 @@ function EventOccurrencePage() {
     );
   }
 
-  // Slots to show: occurrence-level slots if materialized, otherwise parent slots.
-  const slots =
-    occurrence.occurrenceId !== null && detail.occurrenceJobs.length > 0
-      ? detail.occurrenceJobs
-      : detail.jobs;
+  // Slots to show: occurrence-level slots once materialized, otherwise the
+  // parent (series-level) slots.
+  const slots = occurrence.occurrenceId !== null ? detail.occurrenceJobs : detail.parentJobs;
 
   return (
     <Box p="md" maw={900} mx="auto">
@@ -338,17 +352,12 @@ function EventOccurrencePage() {
                       </Badge>
                     )}
                     <Badge size="sm" variant="light" color={slotColor}>
-                      {job.occurrenceId !== null
-                        ? t('events.occurrenceSpecific')
-                        : t('events.seriesWide')}
-                    </Badge>
-                    {isUnfilled && (
-                      <Badge size="sm" color={job.isCritical ? 'red' : 'yellow'} variant="outline">
-                        {job.isCritical
+                      {isUnfilled
+                        ? job.isCritical
                           ? t('events.criticalUnfilled')
-                          : t('events.optionalUnfilled')}
-                      </Badge>
-                    )}
+                          : t('events.optionalUnfilled')
+                        : t('events.filled')}
+                    </Badge>
                     {canWrite && (
                       <ActionIcon
                         size="sm"
@@ -356,7 +365,11 @@ function EventOccurrencePage() {
                         color="red"
                         aria-label={t('events.deleteJob')}
                         onClick={() =>
-                          run(() => deleteJob({ seriesId: series.id, workRoleId: job.id }).unwrap())
+                          run(() =>
+                            ensureOccurrenceId().then(occId =>
+                              deleteSlot({ occurrenceId: occId, workRoleId: job.id }).unwrap(),
+                            ),
+                          )
                         }
                       >
                         <IconTrash size={14} />
@@ -381,11 +394,13 @@ function EventOccurrencePage() {
                               variant="transparent"
                               onClick={() =>
                                 run(() =>
-                                  unassignUserFromWorkRole({
-                                    seriesId: series.id,
-                                    workRoleId: job.id,
-                                    assignmentId: assignment.id,
-                                  }).unwrap(),
+                                  ensureOccurrenceId().then(occId =>
+                                    unassignUser({
+                                      occurrenceId: occId,
+                                      workRoleId: job.id,
+                                      assignmentId: assignment.id,
+                                    }).unwrap(),
+                                  ),
                                 )
                               }
                             >
@@ -419,8 +434,9 @@ function EventOccurrencePage() {
                         disabled={!assignUserIds[job.id]}
                         onClick={() =>
                           run(async () => {
-                            await assignUserToWorkRole({
-                              seriesId: series.id,
+                            const occId = await ensureOccurrenceId();
+                            await assignUser({
+                              occurrenceId: occId,
                               workRoleId: job.id,
                               userId: assignUserIds[job.id],
                             }).unwrap();
@@ -465,12 +481,11 @@ function EventOccurrencePage() {
                     run(async () => {
                       if (slotWorkRoleId === null) return;
                       const wr = workRoles.find(w => w.id === slotWorkRoleId);
-                      await createJob({
-                        seriesId: series.id,
+                      const occId = await ensureOccurrenceId();
+                      await createSlot({
+                        occurrenceId: occId,
                         data: {
                           title: wr?.name ?? 'Slot',
-                          occurrenceStart: occurrence.occurrenceStart,
-                          occurrenceId: occurrence.occurrenceId,
                           isCritical: slotIsCritical,
                           workRoleId: slotWorkRoleId,
                         },
