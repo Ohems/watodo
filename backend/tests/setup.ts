@@ -1,10 +1,18 @@
 import { fileURLToPath } from 'node:url';
 import { config } from 'dotenv';
+import { inject } from 'vitest';
+import { setPgliteTemplate } from '../src/pglite-template.js';
 
 // Load the committed test environment (backend/.env.test) before any src module
 // is evaluated. dotenv does not override variables that are already set, so
 // these values win over the development .env that src/config.ts loads.
 config({ path: fileURLToPath(new URL('../.env.test', import.meta.url)) });
+
+// Retrieve the pre-migrated PGlite snapshot (a Uint8Array) that the Vitest
+// global setup built once and provided to this worker, and store it before
+// importing src/database.js, which reads it when creating the PGlite instance.
+// No snapshot file is read from disk.
+setPgliteTemplate(inject('pgliteTemplate'));
 
 // Importing src/database.js in test mode creates a PGlite instance (in-process
 // WebAssembly Postgres) and a Kysely db backed by it. The top-level await in

@@ -32,11 +32,13 @@ npm run dev                # start both dev servers
 The backend test suite runs against PGlite (in-process WebAssembly Postgres via
 `@electric-sql/pglite`), so no Docker container or external database is needed.
 `backend/tests/global-setup.ts` (Vitest globalSetup) builds a pre-migrated PGlite
-template once and caches it in the OS temp directory (invalidated by mtime when
-migration files change). `backend/tests/setup.ts` loads `backend/.env.test`
-(committed to Git, placeholder values only) and imports `src/database.ts`, which
-loads the cached template per test worker. Any pending migrations are applied
-and the permissions table is seeded before each test file runs.
+snapshot once per test run and provides it to every worker via `provide()` as a
+`Uint8Array` (no files are written; the forks pool transmits it over IPC).
+`backend/tests/setup.ts` loads `backend/.env.test` (committed to Git, placeholder
+values only), retrieves the snapshot with `inject()` and stores it in
+`src/pglite-template.ts` before importing `src/database.ts`, which loads the
+snapshot per test worker. Any pending migrations are applied and the permissions
+table is seeded before each test file runs.
 ```
 
 The backend runs on port 3000, the frontend on port 5173 (with API proxy to :3000).
@@ -405,7 +407,7 @@ frontend/src/
 1. Create a migration: `npm run migrate:create -w backend -- <name>`
 2. Edit the migration file in `backend/migrations/`
 3. Apply it: `npm run migrate -w backend`
-4. Never edit or delete existing migration files. (The PGlite test template is rebuilt automatically by `tests/global-setup.ts` when migration files change.)
+4. Never edit or delete existing migration files. (The PGlite test snapshot is rebuilt automatically by `tests/global-setup.ts` on every test run.)
 
 ## Testing
 
@@ -430,15 +432,18 @@ Group frontend tests by the page or component being tested, for example `Account
   WebAssembly Postgres. No Docker container or external database is needed.
   `backend/src/database.ts` creates a PGlite instance when `NODE_ENV=test` and
   wires it into Kysely via the built-in `PGliteDialect`. `tests/global-setup.ts`
-  (Vitest globalSetup) builds a pre-migrated template once and caches it in the
-  OS temp directory; `src/database.ts` loads it via PGlite's `loadDataDir`
-  (~350ms) instead of a fresh initdb + migrations (~1500ms). The cache is
-  invalidated by mtime when migration files or the permissions registry change.
-  `tests/setup.ts` loads `backend/.env.test` (committed, placeholder values
-  only), imports `src/database.ts` (which creates the PGlite instance), applies
-  any pending migrations via node-pg-migrate (using the pg-client adapter in
+  (Vitest globalSetup) builds a pre-migrated snapshot once per test run and
+  calls `project.provide('pgliteTemplate', snapshot)` with the snapshot as a
+  `Uint8Array` (gzip tarball from `dumpDataDir`); no file is written. The forks
+  pool sends the provided context to each worker over IPC with advanced (v8)
+  serialization, which preserves typed arrays. `tests/setup.ts` reads it with
+  `inject('pgliteTemplate')`, stores it in `src/pglite-template.ts`, then imports
+  `src/database.ts`, which loads the snapshot via PGlite's `loadDataDir` (~350ms)
+  instead of a fresh initdb + migrations (~1500ms). `tests/setup.ts` also loads
+  `backend/.env.test` (committed, placeholder values only), applies any pending
+  migrations via node-pg-migrate (using the pg-client adapter in
   `tests/helpers/pglite-client.ts`) and seeds the permissions table before each
-  test file runs. Both steps are idempotent, so a stale or missing template is
+  test file runs. Both steps are idempotent, so a stale or missing snapshot is
   self-healing. Each test file gets its own fork (and therefore its own PGlite
   instance).
 - Shared fixtures live in `backend/tests/helpers/fixtures.ts`: `resetDatabase()`

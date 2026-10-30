@@ -4,6 +4,7 @@ import pg from 'pg';
 import { config } from './config.js';
 import type { Database } from './db/types.js';
 import { createLogger } from './logger.js';
+import { getPgliteTemplate } from './pglite-template.js';
 
 const logger = createLogger('database');
 
@@ -46,27 +47,24 @@ if (config.nodeEnv === 'test') {
 
   const { PGlite: PGliteClass } = await import('@electric-sql/pglite');
 
-  // Load a pre-built template (migrations + permissions already applied) when
-  // available. The template is built once by tests/global-setup.ts (Vitest
-  // globalSetup) and cached in the OS temp directory. Loading it takes ~350ms
-  // instead of ~1500ms for a fresh initdb + migrations. The migration runner in
-  // tests/setup.ts applies any new migrations on top, so a stale template is
-  // self-healing. Keep the path in sync with tests/global-setup.ts.
-  const { existsSync, readFileSync } = await import('node:fs');
-  const { tmpdir } = await import('node:os');
-  const { join } = await import('node:path');
-  const templatePath = join(tmpdir(), 'watodo-pglite-template.tar.gz');
+  // Load the pre-built snapshot (migrations + permissions already applied) when
+  // available. The snapshot is built once per test run by tests/global-setup.ts
+  // (Vitest globalSetup) and passed to this worker via provide()/inject() as a
+  // Uint8Array (stored by tests/setup.ts in pglite-template.ts before this
+  // module is imported). Loading it takes ~350ms instead of ~1500ms for a
+  // fresh initdb + migrations. The migration runner in tests/setup.ts applies
+  // any new migrations on top, so a stale snapshot is self-healing.
+  const template = getPgliteTemplate();
 
-  if (existsSync(templatePath)) {
-    const templateData = readFileSync(templatePath);
+  if (template) {
     pglite = new PGliteClass({
       ...perfOptions,
-      loadDataDir: new File([templateData], 'pglite-template.tar.gz'),
+      loadDataDir: new File([template], 'pglite-template.tar.gz', { type: 'application/gzip' }),
     });
-    logger.info('Test database loaded from template (PGlite)');
+    logger.info('Test database loaded from provided snapshot (PGlite)');
   } else {
     pglite = new PGliteClass(perfOptions);
-    logger.info('Test database initialized (PGlite, no template found)');
+    logger.info('Test database initialized (PGlite, no snapshot provided)');
   }
 
   db = new Kysely<Database>({

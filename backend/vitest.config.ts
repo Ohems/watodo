@@ -5,13 +5,15 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['tests/**/*.test.ts'],
-    // Builds a pre-migrated PGlite template once (cached in the OS temp dir by
-    // mtime) so each worker can load it via loadDataDir instead of a fresh
-    // initdb + migrations.
+    // Builds a pre-migrated PGlite snapshot once per test run and provides it
+    // to each worker via provide()/inject() as a Uint8Array (no files written),
+    // so each worker can load it via loadDataDir instead of a fresh initdb +
+    // migrations.
     globalSetup: 'tests/global-setup.ts',
-    // Loads backend/.env.test, creates a PGlite instance (in-process
-    // WebAssembly Postgres) per test worker, applies migrations and seeds the
-    // permissions table. No external database or Docker container is needed.
+    // Loads backend/.env.test, injects the PGlite snapshot provided by the
+    // global setup, creates a PGlite instance (in-process WebAssembly
+    // Postgres) per test worker, applies migrations and seeds the permissions
+    // table. No external database or Docker container is needed.
     // Each test file gets its own fork with its own PGlite instance, so test
     // files can run in parallel safely.
     setupFiles: ['tests/setup.ts'],

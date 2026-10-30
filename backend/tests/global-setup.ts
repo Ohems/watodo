@@ -1,36 +1,24 @@
-import { existsSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { TestProject } from 'vitest/node';
+
+declare module 'vitest' {
+  interface ProvidedContext {
+    /** Pre-migrated PGlite database snapshot (gzip tarball) built by this global setup. */
+    pgliteTemplate: Uint8Array<ArrayBuffer>;
+  }
+}
 
 /**
- * Vitest global setup: builds a pre-migrated PGlite database template and
- * caches it in the OS temp directory. Each test worker loads the template via
- * PGlite's `loadDataDir` (~350ms) instead of a fresh initdb + migrations
- * (~1500ms).
+ * Vitest global setup: builds a pre-migrated PGlite database snapshot once per
+ * test run and provides it to every worker via project.provide(). Each worker
+ * retrieves it with inject() (tests/setup.ts) and loads it via PGlite's
+ * `loadDataDir` (~350ms) instead of a fresh initdb + migrations (~1500ms).
  *
- * The template path is shared with `src/database.ts` (keep in sync). The cache
- * is invalidated by comparing mtimes: if any migration file or the permissions
- * registry is newer than the template, it is rebuilt.
+ * The snapshot is passed as a Uint8Array, not a file: the forks pool transmits
+ * the provided context over IPC with advanced (v8) serialization, which
+ * preserves typed arrays, so nothing is ever written to disk.
  */
-const templatePath = join(tmpdir(), 'watodo-pglite-template.tar.gz');
-
-function getSourceMtimes(): number[] {
-  const migrationsDir = fileURLToPath(new URL('../migrations', import.meta.url));
-  const mtimes = readdirSync(migrationsDir)
-    .filter(file => file.endsWith('.ts'))
-    .map(file => statSync(join(migrationsDir, file)).mtimeMs);
-  mtimes.push(statSync(fileURLToPath(new URL('../src/permissions.ts', import.meta.url))).mtimeMs);
-  return mtimes;
-}
-
-function isTemplateFresh(): boolean {
-  if (!existsSync(templatePath)) return false;
-  const templateMtime = statSync(templatePath).mtimeMs;
-  return getSourceMtimes().every(mtime => mtime <= templateMtime);
-}
-
-async function buildTemplate(): Promise<void> {
+async function buildTemplate(): Promise<Uint8Array<ArrayBuffer>> {
   const { PGlite } = await import('@electric-sql/pglite');
   const { runner } = await import('node-pg-migrate');
   const { createPgliteClient } = await import('./helpers/pglite-client.js');
@@ -70,18 +58,14 @@ async function buildTemplate(): Promise<void> {
   await pglite.query('CHECKPOINT');
 
   const dump = await pglite.dumpDataDir('gzip');
-  const buffer = Buffer.from(await dump.arrayBuffer());
-
-  // Write atomically: temp file + rename.
-  const tempPath = `${templatePath}.tmp`;
-  writeFileSync(tempPath, buffer);
-  renameSync(tempPath, templatePath);
+  const template = new Uint8Array(await dump.arrayBuffer());
 
   await pglite.close();
+
+  return template;
 }
 
-export default async function globalSetup(): Promise<void> {
-  if (!isTemplateFresh()) {
-    await buildTemplate();
-  }
+export default async function globalSetup(project: TestProject): Promise<void> {
+  const template = await buildTemplate();
+  project.provide('pgliteTemplate', template);
 }
