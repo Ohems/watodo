@@ -21,6 +21,14 @@ export default defineConfig({
     // pool in vitest 5 / vite 8 crashes on Node 24 when source map lookups
     // encounter non-string module code (code.charCodeAt is not a function).
     pool: 'forks',
+    // Disable the on-disk module transform cache. vitest 5.0.5 reads cached
+    // modules with readFile() without an encoding, so their code reaches
+    // vite 8.3.5's module runner as a Buffer; when vite then maps an error
+    // stack, extractInlineSourceMap crashes with "code.charCodeAt is not a
+    // function" and hides the real error (vitest-dev/vitest#11682, fixed
+    // upstream by #11709 but not yet released). With the fs cache off, module
+    // code is always a string and stack mapping works on Node 24.
+    fsModuleCache: false,
     testTimeout: 30000,
     hookTimeout: 30000,
     coverage: {

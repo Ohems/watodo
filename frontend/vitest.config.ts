@@ -8,6 +8,10 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
+    // Disable the on-disk module transform cache: vitest 5.0.5 reads cached
+    // modules as a Buffer, which crashes vite 8.3.5's source-map lookup on
+    // Node 24 ("code.charCodeAt is not a function", vitest-dev/vitest#11682).
+    fsModuleCache: false,
     coverage: {
       provider: 'v8',
       include: ['src/**/*.{ts,tsx}'],
