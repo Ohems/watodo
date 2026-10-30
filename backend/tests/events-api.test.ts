@@ -15,7 +15,7 @@ import {
 
 // Integration test for the event series API: exercises the whole rrule based
 // system end to end: series CRUD, occurrence expansion (including far into
-// the future), per-occurrence cancel/reschedule, job slots with user
+// the future), per-occurrence cancel/reschedule, work role slots with user
 // assignments, and comments. Every test resets the database (beforeEach) and
 // builds its own fixture through the factories in tests/helpers/fixtures.ts,
 // so tests are independent and a broken seed fails the test instead of being
@@ -213,30 +213,30 @@ const createSeries = async (
   return response.json() as EventSeriesResponse;
 };
 
-const createJob = async (
+const createWorkRole = async (
   seed: Seed,
   seriesId: number,
   payload: Record<string, unknown>,
-): Promise<{ id: number; occurrenceStart: string | null }> => {
+): Promise<{ id: number; occurrenceId: number | null }> => {
   const response = await app.inject({
     method: 'POST',
-    url: `/api/v1/event-series/${seriesId}/jobs`,
+    url: `/api/v1/event-series/${seriesId}/work-roles`,
     headers: auth(seed.adminToken),
     payload,
   });
   expect(response.statusCode).toBe(200);
-  return response.json() as { id: number; occurrenceStart: string | null };
+  return response.json() as { id: number; occurrenceId: number | null };
 };
 
-const assignToJob = async (
+const assignToWorkRole = async (
   seed: Seed,
   seriesId: number,
-  jobId: number,
+  workRoleId: number,
   userId: string,
 ): Promise<{ id: number; userName: string }> => {
   const response = await app.inject({
     method: 'POST',
-    url: `/api/v1/event-series/${seriesId}/jobs/${jobId}/assignments`,
+    url: `/api/v1/event-series/${seriesId}/work-roles/${workRoleId}/assignments`,
     headers: auth(seed.adminToken),
     payload: { userId },
   });
@@ -249,7 +249,7 @@ const createComment = async (
   seriesId: number,
   payload: Record<string, unknown>,
   token = seed.adminToken,
-): Promise<{ id: number; userName: string; occurrenceStart: string | null }> => {
+): Promise<{ id: number; userName: string }> => {
   const response = await app.inject({
     method: 'POST',
     url: `/api/v1/event-series/${seriesId}/comments`,
@@ -257,7 +257,7 @@ const createComment = async (
     payload,
   });
   expect(response.statusCode).toBe(200);
-  return response.json() as { id: number; userName: string; occurrenceStart: string | null };
+  return response.json() as { id: number; userName: string };
 };
 
 const occurrencesOf = async (
@@ -300,7 +300,7 @@ const split = async (
   });
 
 // Payload of the weekly Monday/Wednesday 18:00 Europe/Berlin series used by
-// the occurrence, job, comment and split tests.
+// the occurrence, slot, comment and split tests.
 const weeklyPayload = {
   title: 'Weekly sync',
   start: '2026-10-21T16:00:00.000Z', // Wednesday 18:00 Europe/Berlin
@@ -707,16 +707,16 @@ describe('Events API', () => {
       await configure(seriesBId, { siteId: siteBId, roomId: roomBId, teamIds: [teamBId] });
       await configure(seriesCId, { siteId: siteAId, teamIds: [] });
 
-      // The reader is assigned to a series-wide job on series A (covering all
-      // its occurrences) and to an occurrence-scoped job on series C.
-      const jobA = await createJob(seed, seriesAId, { title: 'Series-wide job' });
-      await assignToJob(seed, seriesAId, jobA.id, seed.readerUserId);
+      // The reader is assigned to a series-wide slot on series A (covering all
+      // its occurrences) and to an occurrence-scoped slot on series C.
+      const slotA = await createWorkRole(seed, seriesAId, { title: 'Series-wide slot' });
+      await assignToWorkRole(seed, seriesAId, slotA.id, seed.readerUserId);
 
-      const jobC = await createJob(seed, seriesCId, {
-        title: 'Scoped job',
+      const slotC = await createWorkRole(seed, seriesCId, {
+        title: 'Scoped slot',
         occurrenceStart: '2026-10-28T16:00:00.000Z',
       });
-      await assignToJob(seed, seriesCId, jobC.id, seed.readerUserId);
+      await assignToWorkRole(seed, seriesCId, slotC.id, seed.readerUserId);
 
       const range = 'start=2026-10-21T00:00:00.000Z&end=2026-11-05T00:00:00.000Z';
       const getOccurrences = async (token: string, query = '') => {
@@ -761,8 +761,8 @@ describe('Events API', () => {
       const teamScope = await getOccurrences(seed.readerToken, '&scope=team');
       expect(seriesIdsOf(teamScope)).toEqual([seriesAId]);
 
-      // Scope "my events": all occurrences of series A (series-wide job) and
-      // only the 2026-10-28 occurrence of series C (occurrence-scoped job).
+      // Scope "my events": all occurrences of series A (series-wide slot) and
+      // only the 2026-10-28 occurrence of series C (occurrence-scoped slot).
       const mine = await getOccurrences(seed.readerToken, '&scope=mine');
       expect(seriesIdsOf(mine)).toEqual([seriesAId, seriesCId]);
       const mineBySeries = new Map<number, string[]>();
@@ -774,7 +774,7 @@ describe('Events API', () => {
       expect(mineBySeries.get(seriesAId)).toHaveLength(3);
       expect(mineBySeries.get(seriesCId)).toEqual(['2026-10-28T16:00:00.000Z']);
 
-      // The admin has no job assignments, so "my events" is empty for them.
+      // The admin has no slot assignments, so "my events" is empty for them.
       const adminMine = await getOccurrences(seed.adminToken, '&scope=mine');
       expect(adminMine).toHaveLength(0);
     });
@@ -898,32 +898,38 @@ describe('Events API', () => {
     });
   });
 
-  describe('POST /api/v1/event-series/:seriesId/jobs', () => {
-    it('creates series-wide and occurrence-scoped job slots', async () => {
+  describe('POST /api/v1/event-series/:seriesId/work-roles', () => {
+    it('creates series-wide and occurrence-scoped work role slots', async () => {
       const seed = await createEventsFixture();
       const series = await createSeries(seed, weeklyPayload);
 
       // Series-wide slot.
-      const slot = await createJob(seed, series.id, {
+      const slot = await createWorkRole(seed, series.id, {
         title: 'Setup crew',
         description: 'Arrive early',
       });
-      expect(slot.occurrenceStart).toBeNull();
+      expect(slot.occurrenceId).toBeNull();
 
-      // Occurrence-scoped slot.
-      const scoped = await createJob(seed, series.id, {
+      // Occurrence-scoped slot: points at the materialized occurrence.
+      const scoped = await createWorkRole(seed, series.id, {
         title: 'AV check',
         occurrenceStart: '2026-10-21T16:00:00.000Z',
       });
-      expect(scoped.occurrenceStart).toBe('2026-10-21T16:00:00.000Z');
+      expect(scoped.occurrenceId).not.toBeNull();
+      const occRow = await db
+        .selectFrom('event_occurrences')
+        .select('occurrence_start')
+        .where('id', '=', scoped.occurrenceId as number)
+        .executeTakeFirstOrThrow();
+      expect(occRow.occurrence_start.toISOString()).toBe('2026-10-21T16:00:00.000Z');
     });
 
-    it('rejects a job slot for a date that is not an occurrence', async () => {
+    it('rejects a work role slot for a date that is not an occurrence', async () => {
       const seed = await createEventsFixture();
       const series = await createSeries(seed, weeklyPayload);
       const response = await app.inject({
         method: 'POST',
-        url: `/api/v1/event-series/${series.id}/jobs`,
+        url: `/api/v1/event-series/${series.id}/work-roles`,
         headers: auth(seed.adminToken),
         payload: { title: 'Nope', occurrenceStart: '2026-10-22T16:00:00.000Z' },
       });
@@ -931,23 +937,23 @@ describe('Events API', () => {
     });
   });
 
-  describe('POST /api/v1/event-series/:seriesId/jobs/:jobId/assignments', () => {
-    it('assigns a user to a job slot', async () => {
+  describe('POST /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments', () => {
+    it('assigns a user to a work role slot', async () => {
       const seed = await createEventsFixture();
       const series = await createSeries(seed, weeklyPayload);
-      const slot = await createJob(seed, series.id, { title: 'Setup crew' });
-      const assignment = await assignToJob(seed, series.id, slot.id, seed.readerUserId);
+      const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
+      const assignment = await assignToWorkRole(seed, series.id, slot.id, seed.readerUserId);
       expect(assignment.userName).toBe('Reader User');
     });
 
     it('rejects a duplicate assignment', async () => {
       const seed = await createEventsFixture();
       const series = await createSeries(seed, weeklyPayload);
-      const slot = await createJob(seed, series.id, { title: 'Setup crew' });
-      await assignToJob(seed, series.id, slot.id, seed.readerUserId);
+      const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
+      await assignToWorkRole(seed, series.id, slot.id, seed.readerUserId);
       const response = await app.inject({
         method: 'POST',
-        url: `/api/v1/event-series/${series.id}/jobs/${slot.id}/assignments`,
+        url: `/api/v1/event-series/${series.id}/work-roles/${slot.id}/assignments`,
         headers: auth(seed.adminToken),
         payload: { userId: seed.readerUserId },
       });
@@ -957,10 +963,10 @@ describe('Events API', () => {
     it('rejects an assignment for an unknown user', async () => {
       const seed = await createEventsFixture();
       const series = await createSeries(seed, weeklyPayload);
-      const slot = await createJob(seed, series.id, { title: 'Setup crew' });
+      const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
       const response = await app.inject({
         method: 'POST',
-        url: `/api/v1/event-series/${series.id}/jobs/${slot.id}/assignments`,
+        url: `/api/v1/event-series/${series.id}/work-roles/${slot.id}/assignments`,
         headers: auth(seed.adminToken),
         payload: { userId: randomUUID() },
       });
@@ -975,7 +981,12 @@ describe('Events API', () => {
 
       const seriesWide = await createComment(seed, series.id, { body: 'Series-wide note' });
       expect(seriesWide.userName).toBe('Admin User');
-      expect(seriesWide.occurrenceStart).toBeNull();
+      const seriesWideRow = await db
+        .selectFrom('event_comments')
+        .select('event_occurrence_id')
+        .where('id', '=', seriesWide.id)
+        .executeTakeFirstOrThrow();
+      expect(seriesWideRow.event_occurrence_id).toBeNull();
 
       const scoped = await createComment(
         seed,
@@ -984,6 +995,17 @@ describe('Events API', () => {
         seed.readerToken,
       );
       expect(scoped.userName).toBe('Reader User');
+      const scopedRow = await db
+        .selectFrom('event_comments')
+        .innerJoin(
+          'event_occurrences',
+          'event_occurrences.id',
+          'event_comments.event_occurrence_id',
+        )
+        .select('event_occurrences.occurrence_start')
+        .where('event_comments.id', '=', scoped.id)
+        .executeTakeFirstOrThrow();
+      expect(scopedRow.occurrence_start.toISOString()).toBe('2026-10-21T16:00:00.000Z');
     });
 
     it('rejects a comment for a date that is not an occurrence', async () => {
@@ -1000,20 +1022,21 @@ describe('Events API', () => {
   });
 
   describe('GET /api/v1/event-series/:seriesId/occurrences/:occurrenceStart', () => {
-    it('includes the job slots of the occurrence', async () => {
+    it('includes the work role slots of the occurrence', async () => {
       const seed = await createEventsFixture();
       const series = await createSeries(seed, weeklyPayload);
-      // The occurrence detail shows both slots, the scoped one only for its
-      // occurrence.
-      const setupSlot = await createJob(seed, series.id, {
+      // Creating an occurrence-scoped slot materializes the occurrence and
+      // inherits the parent slots into it, so the detail shows the parent
+      // slot, its inherited occurrence copy and the scoped slot.
+      const setupSlot = await createWorkRole(seed, series.id, {
         title: 'Setup crew',
         description: 'Arrive early',
       });
-      await createJob(seed, series.id, {
+      await createWorkRole(seed, series.id, {
         title: 'AV check',
         occurrenceStart: '2026-10-21T16:00:00.000Z',
       });
-      await assignToJob(seed, series.id, setupSlot.id, seed.readerUserId);
+      await assignToWorkRole(seed, series.id, setupSlot.id, seed.readerUserId);
 
       const detail = await app.inject({
         method: 'GET',
@@ -1022,19 +1045,41 @@ describe('Events API', () => {
       });
       expect(detail.statusCode).toBe(200);
       const detailBody = detail.json() as {
-        jobs: { id: number; title: string; assignments: { userName: string }[] }[];
+        workRoles: { id: number; title: string; assignments: { userName: string }[] }[];
+        parentWorkRoles: { id: number; title: string }[];
+        occurrenceWorkRoles: {
+          id: number;
+          title: string;
+          inheritedFromWorkRoleId: number | null;
+        }[];
+        missingParentWorkRoles: unknown[];
       };
-      expect(detailBody.jobs).toHaveLength(2);
-      const setup = detailBody.jobs.find(j => j.title === 'Setup crew');
+      expect(detailBody.workRoles.map(j => j.title).sort()).toEqual([
+        'AV check',
+        'Setup crew',
+        'Setup crew',
+      ]);
+      expect(detailBody.parentWorkRoles.map(j => j.title)).toEqual(['Setup crew']);
+      expect(detailBody.occurrenceWorkRoles.map(j => j.title).sort()).toEqual([
+        'AV check',
+        'Setup crew',
+      ]);
+      // The parent slot was fully inherited, so nothing is missing.
+      expect(detailBody.missingParentWorkRoles).toHaveLength(0);
+      const inherited = detailBody.occurrenceWorkRoles.find(j => j.title === 'Setup crew');
+      expect(inherited?.inheritedFromWorkRoleId).toBe(setupSlot.id);
+      const setup = detailBody.workRoles.find(j => j.title === 'Setup crew');
       expect(setup?.assignments.map(a => a.userName)).toEqual(['Reader User']);
 
+      // Another occurrence of the series is not materialized, so only the
+      // parent slot is visible for it.
       const other = await app.inject({
         method: 'GET',
         url: `/api/v1/event-series/${series.id}/occurrences/${encodeURIComponent('2026-10-26T17:00:00.000Z')}`,
         headers: auth(seed.readerToken),
       });
-      const otherJobs = (other.json() as { jobs: { title: string }[] }).jobs;
-      expect(otherJobs.map(j => j.title)).toEqual(['Setup crew']);
+      const otherBody = other.json() as { workRoles: { title: string }[] };
+      expect(otherBody.workRoles.map(j => j.title)).toEqual(['Setup crew']);
     });
 
     it('includes the comments of the occurrence', async () => {
@@ -1058,14 +1103,14 @@ describe('Events API', () => {
     });
   });
 
-  describe('PATCH /api/v1/event-series/:seriesId/jobs/:jobId', () => {
-    it('updates a job slot', async () => {
+  describe('PATCH /api/v1/event-series/:seriesId/work-roles/:workRoleId', () => {
+    it('updates a work role slot', async () => {
       const seed = await createEventsFixture();
       const series = await createSeries(seed, weeklyPayload);
-      const slot = await createJob(seed, series.id, { title: 'Setup crew' });
+      const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
       const response = await app.inject({
         method: 'PATCH',
-        url: `/api/v1/event-series/${series.id}/jobs/${slot.id}`,
+        url: `/api/v1/event-series/${series.id}/work-roles/${slot.id}`,
         headers: auth(seed.adminToken),
         payload: { title: 'Setup crew (updated)' },
       });
@@ -1074,29 +1119,29 @@ describe('Events API', () => {
     });
   });
 
-  describe('DELETE /api/v1/event-series/:seriesId/jobs/:jobId/assignments/:assignmentId', () => {
-    it('unassigns a user from a job slot', async () => {
+  describe('DELETE /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments/:assignmentId', () => {
+    it('unassigns a user from a work role slot', async () => {
       const seed = await createEventsFixture();
       const series = await createSeries(seed, weeklyPayload);
-      const slot = await createJob(seed, series.id, { title: 'Setup crew' });
-      const assignment = await assignToJob(seed, series.id, slot.id, seed.readerUserId);
+      const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
+      const assignment = await assignToWorkRole(seed, series.id, slot.id, seed.readerUserId);
       const response = await app.inject({
         method: 'DELETE',
-        url: `/api/v1/event-series/${series.id}/jobs/${slot.id}/assignments/${assignment.id}`,
+        url: `/api/v1/event-series/${series.id}/work-roles/${slot.id}/assignments/${assignment.id}`,
         headers: auth(seed.adminToken),
       });
       expect(response.statusCode).toBe(200);
     });
   });
 
-  describe('DELETE /api/v1/event-series/:seriesId/jobs/:jobId', () => {
-    it('deletes a job slot', async () => {
+  describe('DELETE /api/v1/event-series/:seriesId/work-roles/:workRoleId', () => {
+    it('deletes a work role slot', async () => {
       const seed = await createEventsFixture();
       const series = await createSeries(seed, weeklyPayload);
-      const slot = await createJob(seed, series.id, { title: 'AV check' });
+      const slot = await createWorkRole(seed, series.id, { title: 'AV check' });
       const response = await app.inject({
         method: 'DELETE',
-        url: `/api/v1/event-series/${series.id}/jobs/${slot.id}`,
+        url: `/api/v1/event-series/${series.id}/work-roles/${slot.id}`,
         headers: auth(seed.adminToken),
       });
       expect(response.statusCode).toBe(200);
@@ -1177,10 +1222,10 @@ describe('Events API', () => {
   });
 
   describe('DELETE /api/v1/event-series/:seriesId', () => {
-    it('deletes a series with its jobs and comments', async () => {
+    it('deletes a series with its work role slots and comments', async () => {
       const seed = await createEventsFixture();
       const series = await createSeries(seed, weeklyPayload);
-      await createJob(seed, series.id, { title: 'Setup crew' });
+      await createWorkRole(seed, series.id, { title: 'Setup crew' });
       await createComment(seed, series.id, { body: 'Series-wide note' });
 
       const response = await app.inject({
@@ -1197,12 +1242,12 @@ describe('Events API', () => {
       });
       expect(detail.statusCode).toBe(404);
 
-      const jobs = await db
+      const slots = await db
         .selectFrom('event_work_roles')
         .selectAll()
         .where('event_series_id', '=', series.id)
         .execute();
-      expect(jobs).toHaveLength(0);
+      expect(slots).toHaveLength(0);
       const comments = await db
         .selectFrom('event_comments')
         .selectAll()

@@ -73,7 +73,7 @@ export const PERMISSION_DEFINITIONS: { code: Permission; description: string }[]
   {
     code: PERMISSIONS.EVENTS_WRITE,
     description:
-      'Create, update and delete event series, and manage occurrences, job slots and comments.',
+      'Create, update and delete event series, and manage occurrences, work role slots and comments.',
   },
   {
     code: PERMISSIONS.TEAM_MANAGEMENT_READ,

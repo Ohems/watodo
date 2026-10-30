@@ -194,7 +194,8 @@ function EventOccurrencePage() {
 
   // Slots to show: occurrence-level slots once materialized, otherwise the
   // parent (series-level) slots.
-  const slots = occurrence.occurrenceId !== null ? detail.occurrenceJobs : detail.parentJobs;
+  const slots =
+    occurrence.occurrenceId !== null ? detail.occurrenceWorkRoles : detail.parentWorkRoles;
 
   return (
     <Box p="md" maw={900} mx="auto">
@@ -308,14 +309,14 @@ function EventOccurrencePage() {
           </Text>
 
           {/* Import notice: parent has slots not yet on this occurrence */}
-          {detail.missingParentJobs.length > 0 && (
+          {detail.missingParentWorkRoles.length > 0 && (
             <Alert color="blue" variant="light" mb="sm">
               <Group gap="xs" wrap="wrap" justify="space-between">
                 <Text size="sm">
                   {t('events.parentHasNewRoles', {
-                    count: detail.missingParentJobs.length,
+                    count: detail.missingParentWorkRoles.length,
                   })}{' '}
-                  {detail.missingParentJobs.map(j => j.workRoleName ?? j.title).join(', ')}
+                  {detail.missingParentWorkRoles.map(j => j.workRoleName ?? j.title).join(', ')}
                 </Text>
                 {canWrite && occurrence.occurrenceId !== null && (
                   <Button
@@ -331,9 +332,9 @@ function EventOccurrencePage() {
           )}
 
           <Stack gap="sm">
-            {slots.map(job => {
-              const isUnfilled = job.assignments.length === 0;
-              const slotColor = job.isCritical
+            {slots.map(slot => {
+              const isUnfilled = slot.assignments.length === 0;
+              const slotColor = slot.isCritical
                 ? isUnfilled
                   ? 'red'
                   : 'green'
@@ -341,19 +342,19 @@ function EventOccurrencePage() {
                   ? 'yellow'
                   : 'green';
               return (
-                <Box key={job.id}>
+                <Box key={slot.id}>
                   <Group gap="xs" wrap="wrap">
                     <Text size="sm" fw={500}>
-                      {job.workRoleName ?? job.title}
+                      {slot.workRoleName ?? slot.title}
                     </Text>
-                    {job.isCritical && (
+                    {slot.isCritical && (
                       <Badge size="sm" color="red" variant="filled">
                         {t('events.critical')}
                       </Badge>
                     )}
                     <Badge size="sm" variant="light" color={slotColor}>
                       {isUnfilled
-                        ? job.isCritical
+                        ? slot.isCritical
                           ? t('events.criticalUnfilled')
                           : t('events.optionalUnfilled')
                         : t('events.filled')}
@@ -363,11 +364,11 @@ function EventOccurrencePage() {
                         size="sm"
                         variant="subtle"
                         color="red"
-                        aria-label={t('events.deleteJob')}
+                        aria-label={t('events.deleteSlot')}
                         onClick={() =>
                           run(() =>
                             ensureOccurrenceId().then(occId =>
-                              deleteSlot({ occurrenceId: occId, workRoleId: job.id }).unwrap(),
+                              deleteSlot({ occurrenceId: occId, workRoleId: slot.id }).unwrap(),
                             ),
                           )
                         }
@@ -376,13 +377,13 @@ function EventOccurrencePage() {
                       </ActionIcon>
                     )}
                   </Group>
-                  {job.description && (
+                  {slot.description && (
                     <Text size="sm" c="dimmed">
-                      {job.description}
+                      {slot.description}
                     </Text>
                   )}
                   <Group gap="xs" mt={4} wrap="wrap">
-                    {job.assignments.map(assignment => (
+                    {slot.assignments.map(assignment => (
                       <Badge
                         key={assignment.id}
                         size="sm"
@@ -397,7 +398,7 @@ function EventOccurrencePage() {
                                   ensureOccurrenceId().then(occId =>
                                     unassignUser({
                                       occurrenceId: occId,
-                                      workRoleId: job.id,
+                                      workRoleId: slot.id,
                                       assignmentId: assignment.id,
                                     }).unwrap(),
                                   ),
@@ -419,11 +420,11 @@ function EventOccurrencePage() {
                         size="sm"
                         placeholder={t('events.assignUser')}
                         data={userList
-                          .filter(user => !job.assignments.some(a => a.userId === user.id))
+                          .filter(user => !slot.assignments.some(a => a.userId === user.id))
                           .map(user => ({ value: user.id, label: user.name }))}
-                        value={assignUserIds[job.id] ?? null}
+                        value={assignUserIds[slot.id] ?? null}
                         onChange={value =>
-                          setAssignUserIds(prev => ({ ...prev, [job.id]: value ?? '' }))
+                          setAssignUserIds(prev => ({ ...prev, [slot.id]: value ?? '' }))
                         }
                         style={{ minWidth: 200 }}
                       />
@@ -431,16 +432,16 @@ function EventOccurrencePage() {
                         size="sm"
                         variant="outline"
                         leftSection={<IconPlus size={14} />}
-                        disabled={!assignUserIds[job.id]}
+                        disabled={!assignUserIds[slot.id]}
                         onClick={() =>
                           run(async () => {
                             const occId = await ensureOccurrenceId();
                             await assignUser({
                               occurrenceId: occId,
-                              workRoleId: job.id,
-                              userId: assignUserIds[job.id],
+                              workRoleId: slot.id,
+                              userId: assignUserIds[slot.id],
                             }).unwrap();
-                            setAssignUserIds(prev => ({ ...prev, [job.id]: '' }));
+                            setAssignUserIds(prev => ({ ...prev, [slot.id]: '' }));
                           })
                         }
                       >
@@ -495,7 +496,7 @@ function EventOccurrencePage() {
                     })
                   }
                 >
-                  {t('events.addJob')}
+                  {t('events.addSlot')}
                 </Button>
               </Group>
             )}

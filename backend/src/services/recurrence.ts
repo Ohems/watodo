@@ -36,7 +36,7 @@ export interface OccurrenceExceptionRule {
 }
 
 export interface ExpandedOccurrence {
-  // The original occurrence start; the occurrence's identity. Job slots,
+  // The original occurrence start; the occurrence's identity. Work role slots,
   // comments and exceptions are keyed by it.
   occurrenceStart: Date;
   // Effective start/end after applying a reschedule override.

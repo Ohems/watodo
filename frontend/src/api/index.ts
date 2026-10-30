@@ -411,7 +411,7 @@ export const api = createApi({
     getOccurrenceDetailByRef: build.query<EventOccurrenceDetail, string>({
       query: occurrenceRef => `/api/v1/event-occurrences/${encodeURIComponent(occurrenceRef)}`,
       // Provide both the occurrence-specific tag and the series tag so that
-      // job mutations (which invalidate the series tag) refresh this query.
+      // work role slot mutations (which invalidate the series tag) refresh this query.
       providesTags: (result, _error, occurrenceRef) => [
         { type: 'OccurrenceDetail' as const, id: `occ:${occurrenceRef}` },
         ...(result ? [seriesDetailTag(result.series.id)] : []),
@@ -475,7 +475,7 @@ export const api = createApi({
       providesTags: (_result, _error, seriesId) => [{ type: 'EventSeries', id: seriesId }],
     }),
 
-    // --- Event jobs ---
+    // --- Event work role slots ---
 
     listEventWorkRoles: build.query<
       EventWorkRole[],

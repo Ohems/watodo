@@ -84,7 +84,7 @@ export interface EventExceptionResponse {
 
 export interface EventWorkRoleAssignmentResponse {
   id: number;
-  jobId: number;
+  eventWorkRoleId: number;
   userId: string;
   userName: string;
   createdAt: string;
@@ -140,13 +140,13 @@ export interface EventOccurrenceDetailResponse {
   series: EventSeriesResponse;
   occurrence: EventOccurrenceResponse;
   /** Slots visible for this occurrence: occurrence-level + parent-level. */
-  jobs: EventWorkRoleResponse[];
+  workRoles: EventWorkRoleResponse[];
   /** Parent (series-level) slots only. */
-  parentJobs: EventWorkRoleResponse[];
+  parentWorkRoles: EventWorkRoleResponse[];
   /** Occurrence-level (inherited) slots only. */
-  occurrenceJobs: EventWorkRoleResponse[];
+  occurrenceWorkRoles: EventWorkRoleResponse[];
   /** Parent slots not yet imported into this occurrence. */
-  missingParentJobs: EventWorkRoleResponse[];
+  missingParentWorkRoles: EventWorkRoleResponse[];
   comments: EventCommentResponse[];
   readiness: EventReadiness;
 }
@@ -265,7 +265,7 @@ async function lookupOccurrenceIds(
 
 /**
  * Materializes a single occurrence (upsert) and returns its stable ID. Called
- * by write paths (job creation, comments, exceptions, split) so that any
+ * by write paths (slot creation, comments, exceptions, split) so that any
  * instance with attached data gets a permanent identifier. When the
  * occurrence is first created, the series-level (parent) role requirements
  * are copied to the occurrence so it has its own independent set of work
@@ -383,23 +383,23 @@ function serializeException(exception: EventOccurrenceRow): EventExceptionRespon
   };
 }
 
-function serializeJob(
-  job: EventWorkRole,
+function serializeSlot(
+  slot: EventWorkRole,
   workRoleName: string | null = null,
 ): Omit<EventWorkRoleResponse, 'assignments'> {
   return {
-    id: job.id,
-    seriesId: job.event_series_id,
+    id: slot.id,
+    seriesId: slot.event_series_id,
 
-    occurrenceId: job.event_occurrence_id,
-    inheritedFromWorkRoleId: job.inherited_from_work_role_id,
-    title: job.title,
-    description: job.description,
-    isCritical: job.is_critical,
-    workRoleId: job.work_role_id,
+    occurrenceId: slot.event_occurrence_id,
+    inheritedFromWorkRoleId: slot.inherited_from_work_role_id,
+    title: slot.title,
+    description: slot.description,
+    isCritical: slot.is_critical,
+    workRoleId: slot.work_role_id,
     workRoleName,
-    createdAt: job.created_at.toISOString(),
-    updatedAt: job.updated_at.toISOString(),
+    createdAt: slot.created_at.toISOString(),
+    updatedAt: slot.updated_at.toISOString(),
   };
 }
 
@@ -498,12 +498,12 @@ async function fetchExceptionRules(
   return bySeries;
 }
 
-async function attachAssignments(jobs: EventWorkRole[]): Promise<EventWorkRoleResponse[]> {
-  if (jobs.length === 0) return [];
+async function attachAssignments(slots: EventWorkRole[]): Promise<EventWorkRoleResponse[]> {
+  if (slots.length === 0) return [];
 
   // Fetch work role names for linked slots.
   const workRoleIds = [
-    ...new Set(jobs.map(j => j.work_role_id).filter((id): id is number => id !== null)),
+    ...new Set(slots.map(j => j.work_role_id).filter((id): id is number => id !== null)),
   ];
   const workRoleNames = new Map<number, string>();
   if (workRoleIds.length > 0) {
@@ -528,21 +528,21 @@ async function attachAssignments(jobs: EventWorkRole[]): Promise<EventWorkRoleRe
     .where(
       'event_work_role_assignments.event_work_role_id',
       'in',
-      jobs.map(job => job.id),
+      slots.map(slot => slot.id),
     )
     .orderBy('event_work_role_assignments.id', 'asc')
     .execute();
 
-  return jobs.map(job => ({
-    ...serializeJob(
-      job,
-      job.work_role_id !== null ? (workRoleNames.get(job.work_role_id) ?? null) : null,
+  return slots.map(slot => ({
+    ...serializeSlot(
+      slot,
+      slot.work_role_id !== null ? (workRoleNames.get(slot.work_role_id) ?? null) : null,
     ),
     assignments: assignments
-      .filter(assignment => assignment.event_work_role_id === job.id)
+      .filter(assignment => assignment.event_work_role_id === slot.id)
       .map(assignment => ({
         id: assignment.id,
-        jobId: assignment.event_work_role_id,
+        eventWorkRoleId: assignment.event_work_role_id,
         userId: assignment.user_id,
         userName: assignment.user_name,
         createdAt: assignment.created_at.toISOString(),
@@ -693,7 +693,7 @@ export async function deleteEventSeries(seriesId: number): Promise<void> {
  * truncated so it ends just before the split occurrence, and all exceptions
  * from the split occurrence onwards are reset. Splitting at the very first
  * occurrence updates the series in place instead, so no empty leftover series
- * is created and series-wide job slots and comments survive.
+ * is created and series-wide work role slots and comments survive.
  * @param seriesId - The ID of the series to split.
  * @param occurrenceStart - The occurrence at which to split.
  * @param data - The updates for the new series.
@@ -852,23 +852,23 @@ export async function splitEventSeries(
 
 // --- Occurrences ---
 
-interface MyJobAssignments {
-  /** Series with a series-wide job slot assigned to the user. */
+interface MySlotAssignments {
+  /** Series with a series-wide work role slot assigned to the user. */
   seriesWide: Set<number>;
-  /** `${seriesId}:${occurrenceStartISO}` keys of occurrence-scoped job slots. */
+  /** `${seriesId}:${occurrenceStartISO}` keys of occurrence-scoped work role slots. */
   perOccurrence: Set<string>;
 }
 
 /**
- * Collects the job slots of the given series that are assigned to the user,
+ * Collects the work role slots of the given series that are assigned to the user,
  * split into series-wide slots (applying to every occurrence) and
  * occurrence-scoped slots (keyed by the original occurrence start).
  */
-async function fetchMyJobAssignments(
+async function fetchMySlotAssignments(
   seriesIds: number[],
   userId: string,
-): Promise<MyJobAssignments> {
-  const assignments: MyJobAssignments = { seriesWide: new Set(), perOccurrence: new Set() };
+): Promise<MySlotAssignments> {
+  const assignments: MySlotAssignments = { seriesWide: new Set(), perOccurrence: new Set() };
   if (seriesIds.length === 0) return assignments;
   const rows = await db
     .selectFrom('event_work_roles')
@@ -913,7 +913,7 @@ async function fetchMyJobAssignments(
  * Lists the occurrences of all visible series within a time range, optionally
  * narrowed down by organization, calendar, location, team and scope. The
  * `mine` scope keeps only occurrences the user is assigned to (via a
- * series-wide or occurrence-scoped job slot); the `team` scope keeps only
+ * series-wide or occurrence-scoped work role slot); the `team` scope keeps only
  * series linked to a team the user belongs to.
  * @param rangeStart - Start of the range (inclusive).
  * @param rangeEnd - End of the range (inclusive).
@@ -978,7 +978,7 @@ export async function getOccurrences(
   );
   const myAssignments =
     filter?.scope === 'mine' && userId
-      ? await fetchMyJobAssignments(
+      ? await fetchMySlotAssignments(
           series.map(row => row.id),
           userId,
         )
@@ -1074,9 +1074,9 @@ export async function getOccurrenceDetail(
   const occurrenceId = occurrenceIds.get(`${seriesId}:${occurrenceStart.toISOString()}`) ?? null;
 
   // Slots: occurrence-level (inherited) + parent-level, plus the missing ones.
-  const jobs = await listEventWorkRoles(seriesId, { occurrenceStart });
-  const parentJobs = await listEventWorkRoles(seriesId, { parentOnly: true });
-  const occurrenceJobs =
+  const slots = await listEventWorkRoles(seriesId, { occurrenceStart });
+  const parentWorkRoles = await listEventWorkRoles(seriesId, { parentOnly: true });
+  const occurrenceWorkRoles =
     occurrenceId !== null
       ? await listEventWorkRoles(seriesId, { occurrenceId, occurrenceOnly: true })
       : [];
@@ -1086,19 +1086,19 @@ export async function getOccurrenceDetail(
   // inherited_from_work_role_id only.
   const occCountByRole = new Map<number, number>();
   const inheritedParentIds = new Set<number>();
-  for (const j of occurrenceJobs) {
+  for (const j of occurrenceWorkRoles) {
     if (j.workRoleId !== null) {
       occCountByRole.set(j.workRoleId, (occCountByRole.get(j.workRoleId) ?? 0) + 1);
     }
     if (j.inheritedFromWorkRoleId !== null) inheritedParentIds.add(j.inheritedFromWorkRoleId);
   }
   const parentCountByRole = new Map<number, number>();
-  for (const j of parentJobs) {
+  for (const j of parentWorkRoles) {
     if (j.workRoleId !== null) {
       parentCountByRole.set(j.workRoleId, (parentCountByRole.get(j.workRoleId) ?? 0) + 1);
     }
   }
-  const missingParentJobs = parentJobs.filter(j => {
+  const missingParentWorkRoles = parentWorkRoles.filter(j => {
     if (j.workRoleId !== null) {
       const parentCount = parentCountByRole.get(j.workRoleId) ?? 0;
       const occCount = occCountByRole.get(j.workRoleId) ?? 0;
@@ -1136,10 +1136,10 @@ export async function getOccurrenceDetail(
       isCancelled: exception?.isCancelled ?? false,
       exceptionId: exception?.id ?? null,
     },
-    jobs,
-    parentJobs,
-    occurrenceJobs,
-    missingParentJobs,
+    workRoles: slots,
+    parentWorkRoles,
+    occurrenceWorkRoles,
+    missingParentWorkRoles,
     comments,
     readiness,
   };
@@ -1478,7 +1478,7 @@ export async function deleteException(seriesId: number, occurrenceStart: Date): 
   }
 }
 
-// --- Job slots (work role slots) ---
+// --- Work role slots ---
 
 /**
  * Lists work role slots of a series. When `occurrenceId` is given, returns
@@ -1509,20 +1509,27 @@ export async function listEventWorkRoles(
       .executeTakeFirst();
     occurrenceId = occ?.id ?? null;
   }
+  const occurrenceRequested =
+    options?.occurrenceId !== undefined || options?.occurrenceStart !== undefined;
 
   let query = db.selectFrom('event_work_roles').selectAll().where('event_series_id', '=', seriesId);
   if (options?.parentOnly) {
     query = query.where('event_occurrence_id', 'is', null);
-  } else if (options?.occurrenceOnly && occurrenceId !== null) {
-    query = query.where('event_occurrence_id', '=', occurrenceId);
+  } else if (options?.occurrenceOnly) {
+    query = query.where('event_occurrence_id', '=', occurrenceId ?? -1);
   } else if (occurrenceId !== null) {
     // Parent slots + slots scoped to this occurrence.
     query = query.where(eb =>
       eb.or([eb('event_occurrence_id', 'is', null), eb('event_occurrence_id', '=', occurrenceId)]),
     );
+  } else if (occurrenceRequested) {
+    // An occurrence was requested but is not materialized: only parent
+    // (series-level) slots are visible for it, never slots scoped to other
+    // occurrences.
+    query = query.where('event_occurrence_id', 'is', null);
   }
-  const jobs = await query.orderBy('id', 'asc').execute();
-  return attachAssignments(jobs);
+  const slots = await query.orderBy('id', 'asc').execute();
+  return attachAssignments(slots);
 }
 
 export async function createEventWorkRole(
@@ -1565,7 +1572,7 @@ export async function createEventWorkRole(
     workRoleName = workRole.name;
   }
 
-  const job = await db
+  const slot = await db
     .insertInto('event_work_roles')
     .values({
       event_series_id: seriesId,
@@ -1579,25 +1586,25 @@ export async function createEventWorkRole(
     .returningAll()
     .executeTakeFirstOrThrow();
 
-  return (await attachAssignments([job]))[0];
+  return (await attachAssignments([slot]))[0];
 }
 
 export async function updateEventWorkRole(
   seriesId: number,
-  jobId: number,
+  slotId: number,
   data: EventWorkRoleUpdate,
 ): Promise<EventWorkRoleResponse> {
   logger.trace('eventService.updateEventWorkRole');
   const series = await getSeriesRowOrThrow(seriesId);
 
-  const job = await db
+  const slot = await db
     .selectFrom('event_work_roles')
     .selectAll()
-    .where('id', '=', jobId)
+    .where('id', '=', slotId)
     .where('event_series_id', '=', seriesId)
     .executeTakeFirst();
-  if (!job) {
-    throw notFound(`Job slot ${jobId} not found in event series ${seriesId}!`);
+  if (!slot) {
+    throw notFound(`Work role slot ${slotId} not found in event series ${seriesId}!`);
   }
 
   // Validate the work role if given.
@@ -1627,7 +1634,7 @@ export async function updateEventWorkRole(
   const updated = await db
     .updateTable('event_work_roles')
     .set(update)
-    .where('id', '=', jobId)
+    .where('id', '=', slotId)
     .returningAll()
     .executeTakeFirstOrThrow();
 
@@ -1636,7 +1643,7 @@ export async function updateEventWorkRole(
 
 export async function deleteEventWorkRole(
   seriesId: number,
-  jobId: number,
+  slotId: number,
   occurrenceRef?: string,
 ): Promise<void> {
   logger.trace('eventService.deleteEventWorkRole');
@@ -1655,7 +1662,7 @@ export async function deleteEventWorkRole(
       .deleteFrom('event_work_roles')
       .where('event_series_id', '=', seriesId)
       .where('event_occurrence_id', '=', occId)
-      .where('inherited_from_work_role_id', '=', jobId)
+      .where('inherited_from_work_role_id', '=', slotId)
       .executeTakeFirst();
     if (result.numDeletedRows === 0n) {
       // Maybe the occurrence slot was added manually (not inherited): delete
@@ -1663,15 +1670,15 @@ export async function deleteEventWorkRole(
       const slot = await db
         .selectFrom('event_work_roles')
         .select(['id', 'event_occurrence_id'])
-        .where('id', '=', jobId)
+        .where('id', '=', slotId)
         .where('event_series_id', '=', seriesId)
         .executeTakeFirst();
       if (slot && slot.event_occurrence_id === occId) {
-        await db.deleteFrom('event_work_roles').where('id', '=', jobId).execute();
+        await db.deleteFrom('event_work_roles').where('id', '=', slotId).execute();
         return;
       }
       throw notFound(
-        `Work role slot ${jobId} has no occurrence-level copy in occurrence ${occurrenceRef}!`,
+        `Work role slot ${slotId} has no occurrence-level copy in occurrence ${occurrenceRef}!`,
       );
     }
     return;
@@ -1679,30 +1686,30 @@ export async function deleteEventWorkRole(
 
   const result = await db
     .deleteFrom('event_work_roles')
-    .where('id', '=', jobId)
+    .where('id', '=', slotId)
     .where('event_series_id', '=', seriesId)
     .executeTakeFirst();
   if (result.numDeletedRows === 0n) {
-    throw notFound(`Work role slot ${jobId} not found in event series ${seriesId}!`);
+    throw notFound(`Work role slot ${slotId} not found in event series ${seriesId}!`);
   }
 }
 
 export async function assignUserToWorkRole(
   seriesId: number,
-  jobId: number,
+  slotId: number,
   userId: string,
 ): Promise<EventWorkRoleAssignmentResponse> {
   logger.trace('eventService.assignUserToWorkRole');
   await getSeriesRowOrThrow(seriesId);
 
-  const job = await db
+  const slot = await db
     .selectFrom('event_work_roles')
     .select(['id', 'event_occurrence_id'])
-    .where('id', '=', jobId)
+    .where('id', '=', slotId)
     .where('event_series_id', '=', seriesId)
     .executeTakeFirst();
-  if (!job) {
-    throw notFound(`Work role slot ${jobId} not found in event series ${seriesId}!`);
+  if (!slot) {
+    throw notFound(`Work role slot ${slotId} not found in event series ${seriesId}!`);
   }
 
   const user = await db
@@ -1717,19 +1724,19 @@ export async function assignUserToWorkRole(
   try {
     const assignment = await db
       .insertInto('event_work_role_assignments')
-      .values({ event_work_role_id: jobId, user_id: userId })
+      .values({ event_work_role_id: slotId, user_id: userId })
       .returningAll()
       .executeTakeFirstOrThrow();
     return {
       id: assignment.id,
-      jobId: assignment.event_work_role_id,
+      eventWorkRoleId: assignment.event_work_role_id,
       userId: assignment.user_id,
       userName: user.name,
       createdAt: assignment.created_at.toISOString(),
     };
   } catch (error) {
     if (isUniqueViolation(error)) {
-      throw badRequest('User is already assigned to this job slot!');
+      throw badRequest('User is already assigned to this work role slot!');
     }
     throw error;
   }
@@ -1737,7 +1744,7 @@ export async function assignUserToWorkRole(
 
 export async function unassignUserFromWorkRole(
   seriesId: number,
-  jobId: number,
+  slotId: number,
   assignmentId: number,
 ): Promise<void> {
   logger.trace('eventService.unassignUserFromWorkRole');
@@ -1759,7 +1766,7 @@ export async function unassignUserFromWorkRole(
     .executeTakeFirst();
   if (
     !assignment ||
-    assignment.event_work_role_id !== jobId ||
+    assignment.event_work_role_id !== slotId ||
     assignment.event_series_id !== seriesId
   ) {
     throw notFound(`Assignment ${assignmentId} not found in event series ${seriesId}!`);

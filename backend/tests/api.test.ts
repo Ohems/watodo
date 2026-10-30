@@ -360,47 +360,47 @@ describe('Events API', () => {
     );
   });
 
-  describe('GET /api/v1/event-series/:seriesId/jobs', () => {
+  describe('GET /api/v1/event-series/:seriesId/work-roles', () => {
     it(
       'should return 401 without auth token',
-      returns401('GET', `/api/v1/event-series/${seriesId}/jobs`),
+      returns401('GET', `/api/v1/event-series/${seriesId}/work-roles`),
     );
   });
 
-  describe('POST /api/v1/event-series/:seriesId/jobs', () => {
+  describe('POST /api/v1/event-series/:seriesId/work-roles', () => {
     it(
       'should return 401 without auth token',
-      returns401('POST', `/api/v1/event-series/${seriesId}/jobs`, { title: 'Job' }),
+      returns401('POST', `/api/v1/event-series/${seriesId}/work-roles`, { title: 'Slot' }),
     );
   });
 
-  describe('PATCH /api/v1/event-series/:seriesId/jobs/:jobId', () => {
+  describe('PATCH /api/v1/event-series/:seriesId/work-roles/:workRoleId', () => {
     it(
       'should return 401 without auth token',
-      returns401('PATCH', `/api/v1/event-series/${seriesId}/jobs/1`, { title: 'Job' }),
+      returns401('PATCH', `/api/v1/event-series/${seriesId}/work-roles/1`, { title: 'Slot' }),
     );
   });
 
-  describe('DELETE /api/v1/event-series/:seriesId/jobs/:jobId', () => {
+  describe('DELETE /api/v1/event-series/:seriesId/work-roles/:workRoleId', () => {
     it(
       'should return 401 without auth token',
-      returns401('DELETE', `/api/v1/event-series/${seriesId}/jobs/1`),
+      returns401('DELETE', `/api/v1/event-series/${seriesId}/work-roles/1`),
     );
   });
 
-  describe('POST /api/v1/event-series/:seriesId/jobs/:jobId/assignments', () => {
+  describe('POST /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments', () => {
     it(
       'should return 401 without auth token',
-      returns401('POST', `/api/v1/event-series/${seriesId}/jobs/1/assignments`, {
+      returns401('POST', `/api/v1/event-series/${seriesId}/work-roles/1/assignments`, {
         userId: '00000000-0000-0000-0000-000000000001',
       }),
     );
   });
 
-  describe('DELETE /api/v1/event-series/:seriesId/jobs/:jobId/assignments/:assignmentId', () => {
+  describe('DELETE /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments/:assignmentId', () => {
     it(
       'should return 401 without auth token',
-      returns401('DELETE', `/api/v1/event-series/${seriesId}/jobs/1/assignments/1`),
+      returns401('DELETE', `/api/v1/event-series/${seriesId}/work-roles/1/assignments/1`),
     );
   });
 

@@ -259,10 +259,10 @@ export async function listEventWorkRolesHandler(
   reply: FastifyReply,
 ): Promise<void> {
   const query = eventWorkRolesQuerySchema.parse(request.query);
-  const jobs = await listEventWorkRoles(parseId(request.params.seriesId, 'seriesId'), {
+  const slots = await listEventWorkRoles(parseId(request.params.seriesId, 'seriesId'), {
     occurrenceStart: query.occurrenceStart ? new Date(query.occurrenceStart) : undefined,
   });
-  return reply.status(200).send(jobs);
+  return reply.status(200).send(slots);
 }
 
 export async function createEventWorkRoleHandler(
@@ -270,8 +270,8 @@ export async function createEventWorkRoleHandler(
   reply: FastifyReply,
 ): Promise<void> {
   const data = eventWorkRolePushSchema.parse(request.body);
-  const job = await createEventWorkRole(parseId(request.params.seriesId, 'seriesId'), data);
-  return reply.status(200).send(job);
+  const slot = await createEventWorkRole(parseId(request.params.seriesId, 'seriesId'), data);
+  return reply.status(200).send(slot);
 }
 
 export async function updateEventWorkRoleHandler(
@@ -279,12 +279,12 @@ export async function updateEventWorkRoleHandler(
   reply: FastifyReply,
 ): Promise<void> {
   const data = eventWorkRoleUpdateSchema.parse(request.body);
-  const job = await updateEventWorkRole(
+  const slot = await updateEventWorkRole(
     parseId(request.params.seriesId, 'seriesId'),
     parseId(request.params.workRoleId, 'workRoleId'),
     data,
   );
-  return reply.status(200).send(job);
+  return reply.status(200).send(slot);
 }
 
 export async function deleteEventWorkRoleHandler(

@@ -225,7 +225,7 @@ describe('Home', () => {
       userId: '1',
       organizationId: 'org-2',
       organizationName: 'Other Org',
-      title: 'You have been assigned a job',
+      title: 'You have been assigned a work role',
       body: 'You are assigned to "Room setup".',
       isRead: false,
       createdAt: new Date().toISOString(),
@@ -260,7 +260,7 @@ describe('Home', () => {
     // ...each labeled with its organization, as is the notification.
     expect(screen.getAllByText('Community Org').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Other Org').length).toBeGreaterThanOrEqual(2);
-    expect(await screen.findByText('You have been assigned a job')).toBeInTheDocument();
+    expect(await screen.findByText('You have been assigned a work role')).toBeInTheDocument();
     // The Home page is the only view without an organization filter.
     const url = lastCallUrl(mock, '/api/v1/event-series/occurrences');
     expect(url).toBeDefined();

@@ -200,7 +200,7 @@ export interface EventException {
 
 export interface EventWorkRoleAssignment {
   id: number;
-  jobId: number;
+  eventWorkRoleId: number;
   userId: string;
   userName: string;
   createdAt: string;
@@ -211,7 +211,7 @@ export interface EventWorkRole {
   seriesId: number;
   /** NULL = parent (series-level) slot; non-NULL = occurrence-level inherited slot. */
   occurrenceId: number | null;
-  inheritedFromJobId: number | null;
+  inheritedFromWorkRoleId: number | null;
   title: string;
   description: string;
   isCritical: boolean;
@@ -264,13 +264,13 @@ export interface EventOccurrenceDetail {
   series: EventSeries;
   occurrence: EventOccurrence;
   /** Slots visible for this occurrence: occurrence-level + parent-level. */
-  jobs: EventWorkRole[];
+  workRoles: EventWorkRole[];
   /** Parent (series-level) slots only. */
-  parentJobs: EventWorkRole[];
+  parentWorkRoles: EventWorkRole[];
   /** Occurrence-level (inherited) slots only. */
-  occurrenceJobs: EventWorkRole[];
+  occurrenceWorkRoles: EventWorkRole[];
   /** Parent slots not yet imported into this occurrence. */
-  missingParentJobs: EventWorkRole[];
+  missingParentWorkRoles: EventWorkRole[];
   comments: EventComment[];
   readiness: EventReadiness;
 }

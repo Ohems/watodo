@@ -33,7 +33,7 @@ async function seed(): Promise<Seed> {
     .values({
       user_id: user.id,
       organization_id: organizationId,
-      title: 'You have been assigned a job',
+      title: 'You have been assigned a work role',
       body: 'You are assigned to "Room setup".',
       is_read: false,
     })

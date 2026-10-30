@@ -13,10 +13,10 @@ import {
   resetDatabase,
 } from './helpers/fixtures.js';
 
-// Integration tests for event role requirements and critical/non-critical
-// roles (items 3 and 4 of the church organization evaluation). Tests cover
-// the role requirements CRUD API, is_critical on job slots, the readiness
-// computation in the occurrence detail, and permission enforcement.
+// Integration tests for critical/non-critical work role slots on an event
+// series and the readiness computation in the occurrence detail: creating
+// slots with isCritical/workRoleId, updating them, permission enforcement,
+// and how filled/unfilled critical slots drive readiness.
 
 interface Seed {
   organizationId: string;
@@ -57,7 +57,7 @@ async function createFixture(): Promise<Seed> {
     .returningAll()
     .executeTakeFirstOrThrow();
 
-  // Create an event series.
+  // Create an event series (single occurrence at its start).
   const series = await db
     .insertInto('event_series')
     .values({
@@ -101,47 +101,79 @@ function auth(token: string): { headers: Record<string, string> } {
   return { headers: { 'x-token': token } };
 }
 
-describe('Event Role Requirements API', () => {
-  describe('POST /api/v1/event-series/:seriesId/role-requirements', () => {
-    it('creates a role requirement', async () => {
+async function createSlot(
+  seed: Seed,
+  payload: Record<string, unknown>,
+): Promise<{ id: number; isCritical: boolean; workRoleId: number | null }> {
+  const res = await app.inject({
+    method: 'POST',
+    url: `/api/v1/event-series/${seed.seriesId}/work-roles`,
+    ...auth(seed.adminToken),
+    payload,
+  });
+  expect(res.statusCode).toBe(200);
+  return res.json() as { id: number; isCritical: boolean; workRoleId: number | null };
+}
+
+async function assignToSlot(seed: Seed, slotId: number, userId: string): Promise<void> {
+  const res = await app.inject({
+    method: 'POST',
+    url: `/api/v1/event-series/${seed.seriesId}/work-roles/${slotId}/assignments`,
+    ...auth(seed.adminToken),
+    payload: { userId },
+  });
+  expect(res.statusCode).toBe(200);
+}
+
+async function getReadiness(
+  seed: Seed,
+  occurrenceStart: string,
+): Promise<{
+  isReady: boolean;
+  unfilledCriticalCount: number;
+  roles: {
+    workRoleId: number | null;
+    workRoleName: string;
+    required: number;
+    filled: number;
+    isCritical: boolean;
+    isUnfilled: boolean;
+  }[];
+}> {
+  const res = await app.inject({
+    method: 'GET',
+    url: `/api/v1/event-series/${seed.seriesId}/occurrences/${encodeURIComponent(occurrenceStart)}`,
+    ...auth(seed.readerToken),
+  });
+  expect(res.statusCode).toBe(200);
+  return (res.json() as { readiness: never }).readiness;
+}
+
+describe('Critical vs Non-Critical Work Role Slots', () => {
+  describe('POST /api/v1/event-series/:seriesId/work-roles', () => {
+    it('creates a slot with isCritical and workRoleId', async () => {
       const seed = await createFixture();
-      const res = await app.inject({
-        method: 'POST',
-        url: `/api/v1/event-series/${seed.seriesId}/role-requirements`,
-        ...auth(seed.adminToken),
-        payload: { workRoleId: seed.workRoleId, quantity: 1, isCritical: true },
+      const slot = await createSlot(seed, {
+        title: 'Worship Leader',
+        isCritical: true,
+        workRoleId: seed.workRoleId,
       });
-      expect(res.statusCode).toBe(200);
-      const body = res.json();
-      expect(body.workRoleId).toBe(seed.workRoleId);
-      expect(body.workRoleName).toBe('Worship Leader');
-      expect(body.quantity).toBe(1);
-      expect(body.isCritical).toBe(true);
+      expect(slot.isCritical).toBe(true);
+      expect(slot.workRoleId).toBe(seed.workRoleId);
     });
 
-    it('rejects duplicate work role for the same series', async () => {
+    it('defaults isCritical to false', async () => {
       const seed = await createFixture();
-      await app.inject({
-        method: 'POST',
-        url: `/api/v1/event-series/${seed.seriesId}/role-requirements`,
-        ...auth(seed.adminToken),
-        payload: { workRoleId: seed.workRoleId },
-      });
-      const res = await app.inject({
-        method: 'POST',
-        url: `/api/v1/event-series/${seed.seriesId}/role-requirements`,
-        ...auth(seed.adminToken),
-        payload: { workRoleId: seed.workRoleId },
-      });
-      expect(res.statusCode).toBe(400);
+      const slot = await createSlot(seed, { title: 'Greeter' });
+      expect(slot.isCritical).toBe(false);
     });
 
     it('rejects unauthenticated requests', async () => {
       const seed = await createFixture();
       const res = await app.inject({
         method: 'POST',
-        url: `/api/v1/event-series/${seed.seriesId}/role-requirements`,
-        payload: { workRoleId: seed.workRoleId },
+        url: `/api/v1/event-series/${seed.seriesId}/work-roles`,
+        payload: { title: 'Greeter' },
       });
       expect(res.statusCode).toBe(401);
     });
@@ -150,144 +182,26 @@ describe('Event Role Requirements API', () => {
       const seed = await createFixture();
       const res = await app.inject({
         method: 'POST',
-        url: `/api/v1/event-series/${seed.seriesId}/role-requirements`,
+        url: `/api/v1/event-series/${seed.seriesId}/work-roles`,
         ...auth(seed.memberToken),
-        payload: { workRoleId: seed.workRoleId },
+        payload: { title: 'Greeter' },
       });
       expect(res.statusCode).toBe(403);
     });
   });
 
-  describe('GET /api/v1/event-series/:seriesId/role-requirements', () => {
-    it('lists role requirements', async () => {
-      const seed = await createFixture();
-      await app.inject({
-        method: 'POST',
-        url: `/api/v1/event-series/${seed.seriesId}/role-requirements`,
-        ...auth(seed.adminToken),
-        payload: { workRoleId: seed.workRoleId, quantity: 1, isCritical: true },
-      });
-      await app.inject({
-        method: 'POST',
-        url: `/api/v1/event-series/${seed.seriesId}/role-requirements`,
-        ...auth(seed.adminToken),
-        payload: { workRoleId: seed.workRole2Id, quantity: 2, isCritical: false },
-      });
-      const res = await app.inject({
-        method: 'GET',
-        url: `/api/v1/event-series/${seed.seriesId}/role-requirements`,
-        ...auth(seed.readerToken),
-      });
-      expect(res.statusCode).toBe(200);
-      const body = res.json();
-      expect(body).toHaveLength(2);
-      expect(body[0].workRoleName).toBe('Worship Leader');
-      expect(body[0].isCritical).toBe(true);
-      expect(body[1].workRoleName).toBe('Greeter');
-      expect(body[1].quantity).toBe(2);
-    });
-  });
-
-  describe('PATCH /api/v1/event-series/:seriesId/role-requirements/:requirementId', () => {
-    it('updates quantity and isCritical', async () => {
-      const seed = await createFixture();
-      const created = await app.inject({
-        method: 'POST',
-        url: `/api/v1/event-series/${seed.seriesId}/role-requirements`,
-        ...auth(seed.adminToken),
-        payload: { workRoleId: seed.workRoleId, quantity: 1, isCritical: false },
-      });
-      const reqId = created.json().id;
-      const res = await app.inject({
-        method: 'PATCH',
-        url: `/api/v1/event-series/${seed.seriesId}/role-requirements/${reqId}`,
-        ...auth(seed.adminToken),
-        payload: { quantity: 3, isCritical: true },
-      });
-      expect(res.statusCode).toBe(200);
-      const body = res.json();
-      expect(body.quantity).toBe(3);
-      expect(body.isCritical).toBe(true);
-    });
-  });
-
-  describe('DELETE /api/v1/event-series/:seriesId/role-requirements/:requirementId', () => {
-    it('deletes a role requirement', async () => {
-      const seed = await createFixture();
-      const created = await app.inject({
-        method: 'POST',
-        url: `/api/v1/event-series/${seed.seriesId}/role-requirements`,
-        ...auth(seed.adminToken),
-        payload: { workRoleId: seed.workRoleId },
-      });
-      const reqId = created.json().id;
-      const res = await app.inject({
-        method: 'DELETE',
-        url: `/api/v1/event-series/${seed.seriesId}/role-requirements/${reqId}`,
-        ...auth(seed.adminToken),
-      });
-      expect(res.statusCode).toBe(200);
-      const list = await app.inject({
-        method: 'GET',
-        url: `/api/v1/event-series/${seed.seriesId}/role-requirements`,
-        ...auth(seed.readerToken),
-      });
-      expect(list.json()).toHaveLength(0);
-    });
-  });
-});
-
-describe('Critical vs Non-Critical Job Slots', () => {
-  describe('POST /api/v1/event-series/:seriesId/jobs', () => {
-    it('creates a job slot with isCritical and workRoleId', async () => {
-      const seed = await createFixture();
-      const res = await app.inject({
-        method: 'POST',
-        url: `/api/v1/event-series/${seed.seriesId}/jobs`,
-        ...auth(seed.adminToken),
-        payload: {
-          title: 'Worship Leader',
-          isCritical: true,
-          workRoleId: seed.workRoleId,
-        },
-      });
-      expect(res.statusCode).toBe(200);
-      const body = res.json();
-      expect(body.isCritical).toBe(true);
-      expect(body.workRoleId).toBe(seed.workRoleId);
-    });
-
-    it('defaults isCritical to false', async () => {
-      const seed = await createFixture();
-      const res = await app.inject({
-        method: 'POST',
-        url: `/api/v1/event-series/${seed.seriesId}/jobs`,
-        ...auth(seed.adminToken),
-        payload: { title: 'Greeter' },
-      });
-      expect(res.statusCode).toBe(200);
-      expect(res.json().isCritical).toBe(false);
-    });
-  });
-
-  describe('PATCH /api/v1/event-series/:seriesId/jobs/:jobId', () => {
+  describe('PATCH /api/v1/event-series/:seriesId/work-roles/:workRoleId', () => {
     it('updates isCritical', async () => {
       const seed = await createFixture();
-      const created = await app.inject({
-        method: 'POST',
-        url: `/api/v1/event-series/${seed.seriesId}/jobs`,
-        ...auth(seed.adminToken),
-        payload: { title: 'Greeter', isCritical: false },
-      });
-      const jobId = created.json().id;
+      const slot = await createSlot(seed, { title: 'Greeter', isCritical: false });
       const res = await app.inject({
         method: 'PATCH',
-        url: `/api/v1/event-series/${seed.seriesId}/jobs/${jobId}`,
+        url: `/api/v1/event-series/${seed.seriesId}/work-roles/${slot.id}`,
         ...auth(seed.adminToken),
         payload: { isCritical: true },
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json().isCritical).toBe(true);
+      expect((res.json() as { isCritical: boolean }).isCritical).toBe(true);
     });
   });
 });
@@ -295,148 +209,91 @@ describe('Critical vs Non-Critical Job Slots', () => {
 describe('Event Readiness (occurrence detail)', () => {
   const occurrenceStart = '2025-01-05T10:00:00.000Z';
 
-  async function setupReadinessFixture(): Promise<Seed> {
+  it('reports not ready when a critical slot is unfilled', async () => {
     const seed = await createFixture();
-    // Add role requirements: 1 Worship Leader (critical), 2 Greeters (optional).
-    await app.inject({
-      method: 'POST',
-      url: `/api/v1/event-series/${seed.seriesId}/role-requirements`,
-      ...auth(seed.adminToken),
-      payload: { workRoleId: seed.workRoleId, quantity: 1, isCritical: true },
+    // Critical slot linked to Worship Leader, but no assignments.
+    await createSlot(seed, {
+      title: 'Worship Leader',
+      isCritical: true,
+      workRoleId: seed.workRoleId,
     });
-    await app.inject({
-      method: 'POST',
-      url: `/api/v1/event-series/${seed.seriesId}/role-requirements`,
-      ...auth(seed.adminToken),
-      payload: { workRoleId: seed.workRole2Id, quantity: 2, isCritical: false },
+    const readiness = await getReadiness(seed, occurrenceStart);
+    expect(readiness.isReady).toBe(false);
+    expect(readiness.unfilledCriticalCount).toBe(1);
+    const criticalRole = readiness.roles.find(r => r.workRoleId === seed.workRoleId);
+    expect(criticalRole).toMatchObject({
+      workRoleName: 'Worship Leader',
+      required: 1,
+      filled: 0,
+      isCritical: true,
+      isUnfilled: true,
     });
-    return seed;
-  }
-
-  it('reports not ready when critical role is unfilled', async () => {
-    const seed = await setupReadinessFixture();
-    // Create a critical job slot linked to Worship Leader, but no assignments.
-    await app.inject({
-      method: 'POST',
-      url: `/api/v1/event-series/${seed.seriesId}/jobs`,
-      ...auth(seed.adminToken),
-      payload: {
-        title: 'Worship Leader',
-        isCritical: true,
-        workRoleId: seed.workRoleId,
-        occurrenceStart,
-      },
-    });
-    const res = await app.inject({
-      method: 'GET',
-      url: `/api/v1/event-series/${seed.seriesId}/occurrences/${encodeURIComponent(occurrenceStart)}`,
-      ...auth(seed.readerToken),
-    });
-    expect(res.statusCode).toBe(200);
-    const body = res.json();
-    expect(body.readiness.isReady).toBe(false);
-    expect(body.readiness.unfilledCriticalCount).toBe(1);
-    const criticalRole = body.readiness.roles.find(
-      (r: { workRoleId: number }) => r.workRoleId === seed.workRoleId,
-    );
-    expect(criticalRole.isUnfilled).toBe(true);
-    expect(criticalRole.filled).toBe(0);
-    expect(criticalRole.required).toBe(1);
   });
 
-  it('reports ready when critical role is filled', async () => {
-    const seed = await setupReadinessFixture();
-    const jobRes = await app.inject({
-      method: 'POST',
-      url: `/api/v1/event-series/${seed.seriesId}/jobs`,
-      ...auth(seed.adminToken),
-      payload: {
-        title: 'Worship Leader',
-        isCritical: true,
-        workRoleId: seed.workRoleId,
-        occurrenceStart,
-      },
-    });
-    const jobId = jobRes.json().id;
-    await app.inject({
-      method: 'POST',
-      url: `/api/v1/event-series/${seed.seriesId}/jobs/${jobId}/assignments`,
-      ...auth(seed.adminToken),
-      payload: { userId: seed.memberId },
-    });
-    const res = await app.inject({
-      method: 'GET',
-      url: `/api/v1/event-series/${seed.seriesId}/occurrences/${encodeURIComponent(occurrenceStart)}`,
-      ...auth(seed.readerToken),
-    });
-    expect(res.statusCode).toBe(200);
-    const body = res.json();
-    expect(body.readiness.isReady).toBe(true);
-    expect(body.readiness.unfilledCriticalCount).toBe(0);
-    const criticalRole = body.readiness.roles.find(
-      (r: { workRoleId: number }) => r.workRoleId === seed.workRoleId,
-    );
-    expect(criticalRole.filled).toBe(1);
-    expect(criticalRole.isUnfilled).toBe(false);
-  });
-
-  it('optional unfilled roles do not affect readiness', async () => {
-    const seed = await setupReadinessFixture();
-    // Fill the critical role but leave greeters unfilled.
-    const jobRes = await app.inject({
-      method: 'POST',
-      url: `/api/v1/event-series/${seed.seriesId}/jobs`,
-      ...auth(seed.adminToken),
-      payload: {
-        title: 'Worship Leader',
-        isCritical: true,
-        workRoleId: seed.workRoleId,
-        occurrenceStart,
-      },
-    });
-    const jobId = jobRes.json().id;
-    await app.inject({
-      method: 'POST',
-      url: `/api/v1/event-series/${seed.seriesId}/jobs/${jobId}/assignments`,
-      ...auth(seed.adminToken),
-      payload: { userId: seed.memberId },
-    });
-    const res = await app.inject({
-      method: 'GET',
-      url: `/api/v1/event-series/${seed.seriesId}/occurrences/${encodeURIComponent(occurrenceStart)}`,
-      ...auth(seed.readerToken),
-    });
-    const body = res.json();
-    expect(body.readiness.isReady).toBe(true);
-    const greeterRole = body.readiness.roles.find(
-      (r: { workRoleId: number }) => r.workRoleId === seed.workRole2Id,
-    );
-    expect(greeterRole.isCritical).toBe(false);
-    expect(greeterRole.filled).toBe(0);
-    expect(greeterRole.isUnfilled).toBe(false);
-  });
-
-  it('includes roleRequirements in the detail response', async () => {
-    const seed = await setupReadinessFixture();
-    const res = await app.inject({
-      method: 'GET',
-      url: `/api/v1/event-series/${seed.seriesId}/occurrences/${encodeURIComponent(occurrenceStart)}`,
-      ...auth(seed.readerToken),
-    });
-    const body = res.json();
-    expect(body.roleRequirements).toHaveLength(2);
-    expect(body.roleRequirements[0].workRoleName).toBe('Worship Leader');
-  });
-
-  it('returns ready with no requirements when none are defined', async () => {
+  it('reports ready when the critical slot is filled', async () => {
     const seed = await createFixture();
-    const res = await app.inject({
-      method: 'GET',
-      url: `/api/v1/event-series/${seed.seriesId}/occurrences/${encodeURIComponent(occurrenceStart)}`,
-      ...auth(seed.readerToken),
+    const slot = await createSlot(seed, {
+      title: 'Worship Leader',
+      isCritical: true,
+      workRoleId: seed.workRoleId,
     });
-    const body = res.json();
-    expect(body.readiness.isReady).toBe(true);
-    expect(body.readiness.roles).toHaveLength(0);
+    await assignToSlot(seed, slot.id, seed.memberId);
+    const readiness = await getReadiness(seed, occurrenceStart);
+    expect(readiness.isReady).toBe(true);
+    expect(readiness.unfilledCriticalCount).toBe(0);
+    const criticalRole = readiness.roles.find(r => r.workRoleId === seed.workRoleId);
+    expect(criticalRole).toMatchObject({ filled: 1, isUnfilled: false });
+  });
+
+  it('optional unfilled slots do not affect readiness', async () => {
+    const seed = await createFixture();
+    // Fill the critical slot but leave the optional greeter slot unfilled.
+    const slot = await createSlot(seed, {
+      title: 'Worship Leader',
+      isCritical: true,
+      workRoleId: seed.workRoleId,
+    });
+    await assignToSlot(seed, slot.id, seed.memberId);
+    await createSlot(seed, {
+      title: 'Greeter',
+      isCritical: false,
+      workRoleId: seed.workRole2Id,
+    });
+    const readiness = await getReadiness(seed, occurrenceStart);
+    expect(readiness.isReady).toBe(true);
+    expect(readiness.unfilledCriticalCount).toBe(0);
+    const greeterRole = readiness.roles.find(r => r.workRoleId === seed.workRole2Id);
+    expect(greeterRole).toMatchObject({
+      workRoleName: 'Greeter',
+      required: 1,
+      filled: 0,
+      isCritical: false,
+      isUnfilled: false,
+    });
+  });
+
+  it('groups the readiness roles by work role in the detail response', async () => {
+    const seed = await createFixture();
+    await createSlot(seed, {
+      title: 'Worship Leader',
+      isCritical: true,
+      workRoleId: seed.workRoleId,
+    });
+    await createSlot(seed, { title: 'Greeter', workRoleId: seed.workRole2Id });
+    const readiness = await getReadiness(seed, occurrenceStart);
+    expect(readiness.roles).toHaveLength(2);
+    expect(readiness.roles.find(r => r.workRoleId === seed.workRoleId)?.workRoleName).toBe(
+      'Worship Leader',
+    );
+    expect(readiness.roles.find(r => r.workRoleId === seed.workRole2Id)?.workRoleName).toBe(
+      'Greeter',
+    );
+  });
+
+  it('reports ready with no roles when no slots are defined', async () => {
+    const seed = await createFixture();
+    const readiness = await getReadiness(seed, occurrenceStart);
+    expect(readiness.isReady).toBe(true);
+    expect(readiness.roles).toHaveLength(0);
   });
 });

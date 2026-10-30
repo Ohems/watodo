@@ -7,11 +7,13 @@
 // creates a second organization and fills both organizations with mock users
 // (no login accounts attached), roles, teams, sites with rooms, calendars,
 // event types, event series across the previous, current and next month (with
-// exceptions, job slots, assignments and comments), and a set of operations.
+// exceptions, work role slots, assignments and comments), and a set of operations.
 //
 // When a feature that persists data is added, extend this script so the seed
 // data keeps covering it (see AGENTS.md).
 
+import { realpathSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import type { Kysely, Transaction } from 'kysely';
 import { db, disconnectDatabase } from '../src/database.js';
 import type {
@@ -54,7 +56,7 @@ interface MockUserSeed {
 }
 
 // Mock users have no auth accounts: they cannot log in, they only exist so
-// that role assignments, job assignments and comments have someone to point at.
+// that role assignments, work role slot assignments and comments have someone to point at.
 const MOCK_USERS_ORG_ONE: MockUserSeed[] = [
   {
     name: 'Anna Korhonen',
@@ -570,7 +572,7 @@ async function materializeOccurrence(
   return existing.id;
 }
 
-async function addJob(
+async function addWorkRoleSlot(
   tx: Tx,
   seriesId: number,
   occurrenceStart: Date | null,
@@ -598,10 +600,10 @@ async function addJob(
     .executeTakeFirstOrThrow();
 }
 
-async function assignUser(tx: Tx, jobId: number, userId: string): Promise<void> {
+async function assignUser(tx: Tx, slotId: number, userId: string): Promise<void> {
   await tx
     .insertInto('event_work_role_assignments')
-    .values({ event_work_role_id: jobId, user_id: userId })
+    .values({ event_work_role_id: slotId, user_id: userId })
     .execute();
 }
 
@@ -799,7 +801,7 @@ interface WeeklyMeetingUsers {
 }
 
 // Creates a weekly recurring series (Mondays 18:00-19:30 local) with
-// series-wide and occurrence-specific job slots, one cancelled occurrence in
+// series-wide and occurrence-specific work role slots, one cancelled occurrence in
 // the current month and one rescheduled occurrence in the next month, plus
 // series-wide and occurrence-specific comments.
 async function seedWeeklyMeeting(
@@ -828,22 +830,22 @@ async function seedWeeklyMeeting(
     timezone,
   });
 
-  const setupJob = await addJob(
+  const setupSlot = await addWorkRoleSlot(
     tx,
     series.id,
     null,
     'Room setup',
     'Open the venue and arrange the chairs before the meeting.',
   );
-  await assignUser(tx, setupJob.id, users.setup.id);
-  const coffeeJob = await addJob(
+  await assignUser(tx, setupSlot.id, users.setup.id);
+  const coffeeSlot = await addWorkRoleSlot(
     tx,
     series.id,
     null,
     'Coffee and tea',
     'Make sure there is coffee, tea and water for everyone.',
   );
-  await assignUser(tx, coffeeJob.id, users.coffee.id);
+  await assignUser(tx, coffeeSlot.id, users.coffee.id);
 
   const rule: RecurrenceSeriesRule = {
     start: series.start,
@@ -855,14 +857,14 @@ async function seedWeeklyMeeting(
   const currentOccurrences = expandOccurrences(rule, [], currentMonthStart, nextMonthStart);
   if (currentOccurrences.length > 0) {
     const occurrence = currentOccurrences[0];
-    const avJob = await addJob(
+    const avSlot = await addWorkRoleSlot(
       tx,
       series.id,
       occurrence.occurrenceStart,
       'AV support',
       'Run the projector and the microphones during the meeting.',
     );
-    await assignUser(tx, avJob.id, users.av.id);
+    await assignUser(tx, avSlot.id, users.av.id);
     await addComment(
       tx,
       series.id,
@@ -1203,7 +1205,7 @@ export async function seedTestData(tx: Tx): Promise<void> {
     is_all_day: true,
     timezone: 'UTC',
   });
-  const cleanupSetupJob = await addJob(
+  const cleanupSetupSlot = await addWorkRoleSlot(
     tx,
     cleanupDay.id,
     null,
@@ -1212,8 +1214,8 @@ export async function seedTestData(tx: Tx): Promise<void> {
     true,
     workRolesOne[0].id,
   );
-  await assignUser(tx, cleanupSetupJob.id, mockUsersOne[0].id);
-  const cleanupJob = await addJob(
+  await assignUser(tx, cleanupSetupSlot.id, mockUsersOne[0].id);
+  const cleanupSlot = await addWorkRoleSlot(
     tx,
     cleanupDay.id,
     null,
@@ -1222,8 +1224,8 @@ export async function seedTestData(tx: Tx): Promise<void> {
     true,
     workRolesOne[1].id,
   );
-  await assignUser(tx, cleanupJob.id, mockUsersOne[1].id);
-  await assignUser(tx, cleanupJob.id, mockUsersOne[6].id);
+  await assignUser(tx, cleanupSlot.id, mockUsersOne[1].id);
+  await assignUser(tx, cleanupSlot.id, mockUsersOne[6].id);
   await addComment(
     tx,
     cleanupDay.id,
@@ -1234,7 +1236,7 @@ export async function seedTestData(tx: Tx): Promise<void> {
 
   // Work role slots on the parent series (inherited by occurrences on
   // materialization): Setup (critical), Cleanup (critical, 2 slots).
-  await addJob(
+  await addWorkRoleSlot(
     tx,
     cleanupDay.id,
     null,
@@ -1243,8 +1245,24 @@ export async function seedTestData(tx: Tx): Promise<void> {
     true,
     workRolesOne[0].id,
   );
-  await addJob(tx, cleanupDay.id, null, 'Cleanup', 'Clean the hall.', true, workRolesOne[1].id);
-  await addJob(tx, cleanupDay.id, null, 'Cleanup', 'Clean the yard.', true, workRolesOne[1].id);
+  await addWorkRoleSlot(
+    tx,
+    cleanupDay.id,
+    null,
+    'Cleanup',
+    'Clean the hall.',
+    true,
+    workRolesOne[1].id,
+  );
+  await addWorkRoleSlot(
+    tx,
+    cleanupDay.id,
+    null,
+    'Cleanup',
+    'Clean the yard.',
+    true,
+    workRolesOne[1].id,
+  );
 
   // A weekly recurring meeting spanning all three months, with a
   // cancelled occurrence in the current month and a rescheduled
@@ -1291,14 +1309,14 @@ export async function seedTestData(tx: Tx): Promise<void> {
     rrule: buildRruleString({ start: generalMeetingStart, timezone: 'UTC' }, { freq: 'MONTHLY' }),
     timezone: 'UTC',
   });
-  const chairJob = await addJob(
+  const chairSlot = await addWorkRoleSlot(
     tx,
     generalMeeting.id,
     null,
     'Chair the meeting',
     'Prepare the agenda and chair the meeting.',
   );
-  await assignUser(tx, chairJob.id, mockUsersOne[0].id);
+  await assignUser(tx, chairSlot.id, mockUsersOne[0].id);
   await addComment(
     tx,
     generalMeeting.id,
@@ -1307,7 +1325,7 @@ export async function seedTestData(tx: Tx): Promise<void> {
     'The annual report will be presented at this meeting.',
   );
 
-  // A one-off event in the current month, with an unassigned job slot.
+  // A one-off event in the current month, with an unassigned work role slot.
   const festivalPlanning = await createSeries(tx, {
     title: 'Summer Festival Planning',
     description: "Planning meeting for this year's summer festival.",
@@ -1316,15 +1334,15 @@ export async function seedTestData(tx: Tx): Promise<void> {
     duration_minutes: 120,
     timezone: 'UTC',
   });
-  const stageJob = await addJob(
+  const stageSlot = await addWorkRoleSlot(
     tx,
     festivalPlanning.id,
     null,
     'Book the stage',
     'Find and book a stage for the festival.',
   );
-  await assignUser(tx, stageJob.id, mockUsersOne[1].id);
-  await addJob(
+  await assignUser(tx, stageSlot.id, mockUsersOne[1].id);
+  await addWorkRoleSlot(
     tx,
     festivalPlanning.id,
     null,
@@ -1348,15 +1366,15 @@ export async function seedTestData(tx: Tx): Promise<void> {
     duration_minutes: 180,
     timezone: 'UTC',
   });
-  const venueJob = await addJob(
+  const venueSlot = await addWorkRoleSlot(
     tx,
     kickoff.id,
     null,
     'Book the venue',
     'Reserve the hall for the kickoff event.',
   );
-  await assignUser(tx, venueJob.id, mockUsersOne[2].id);
-  await addJob(
+  await assignUser(tx, venueSlot.id, mockUsersOne[2].id);
+  await addWorkRoleSlot(
     tx,
     kickoff.id,
     null,
@@ -1384,14 +1402,14 @@ export async function seedTestData(tx: Tx): Promise<void> {
     duration_minutes: 60,
     timezone: 'Europe/Helsinki',
   });
-  const webinarJob = await addJob(
+  const webinarSlot = await addWorkRoleSlot(
     tx,
     webinar.id,
     null,
     'Host the webinar',
     'Start the stream and moderate the chat.',
   );
-  await assignUser(tx, webinarJob.id, realUser.id);
+  await assignUser(tx, webinarSlot.id, realUser.id);
 
   // Set site/room assignments and assign teams to event series.
   // cleanupDay: Downtown Community Center, Main Hall
@@ -1443,7 +1461,7 @@ export async function seedTestData(tx: Tx): Promise<void> {
     tx,
     mockUsersOne[0].id,
     firstOrganization.id,
-    'You have been assigned a job',
+    'You have been assigned a work role',
     'You are assigned to "Room setup" for the Weekly Community Meeting.',
     true,
   );
@@ -1649,23 +1667,23 @@ export async function seedTestData(tx: Tx): Promise<void> {
     is_all_day: true,
     timezone: 'Europe/Helsinki',
   });
-  const glovesJob = await addJob(
+  const glovesSlot = await addWorkRoleSlot(
     tx,
     beachCleanup.id,
     null,
     'Hand out gloves and bags',
     'Welcome the volunteers and hand out equipment.',
   );
-  await assignUser(tx, glovesJob.id, mockUsersTwo[0].id);
-  const vanJob = await addJob(
+  await assignUser(tx, glovesSlot.id, mockUsersTwo[0].id);
+  const vanSlot = await addWorkRoleSlot(
     tx,
     beachCleanup.id,
     null,
     'Drive the van',
     'Drive the collected waste to the recycling center.',
   );
-  await assignUser(tx, vanJob.id, mockUsersTwo[1].id);
-  await assignUser(tx, vanJob.id, mockUsersTwo[5].id);
+  await assignUser(tx, vanSlot.id, mockUsersTwo[1].id);
+  await assignUser(tx, vanSlot.id, mockUsersTwo[5].id);
   await addComment(
     tx,
     beachCleanup.id,
@@ -1720,14 +1738,14 @@ export async function seedTestData(tx: Tx): Promise<void> {
     ),
     timezone: 'Europe/Helsinki',
   });
-  const agendaJob = await addJob(
+  const agendaSlot = await addWorkRoleSlot(
     tx,
     boardMeeting.id,
     null,
     'Prepare the agenda',
     'Collect agenda items and prepare the agenda.',
   );
-  await assignUser(tx, agendaJob.id, mockUsersTwo[0].id);
+  await assignUser(tx, agendaSlot.id, mockUsersTwo[0].id);
   await addComment(
     tx,
     boardMeeting.id,
@@ -1736,7 +1754,7 @@ export async function seedTestData(tx: Tx): Promise<void> {
     'Send your agenda items to Sofia by Friday.',
   );
 
-  // A one-off event in the current month, with an unassigned job slot.
+  // A one-off event in the current month, with an unassigned work role slot.
   const potluck = await createSeries(tx, {
     title: 'Community Potluck',
     description: 'Shared meal where everyone brings a dish.',
@@ -1745,15 +1763,15 @@ export async function seedTestData(tx: Tx): Promise<void> {
     duration_minutes: 180,
     timezone: 'Europe/Helsinki',
   });
-  const tablesJob = await addJob(
+  const tablesSlot = await addWorkRoleSlot(
     tx,
     potluck.id,
     null,
     'Organize tables and chairs',
     'Set up tables and chairs for the potluck.',
   );
-  await assignUser(tx, tablesJob.id, mockUsersTwo[4].id);
-  await addJob(
+  await assignUser(tx, tablesSlot.id, mockUsersTwo[4].id);
+  await addWorkRoleSlot(
     tx,
     potluck.id,
     null,
@@ -1777,15 +1795,15 @@ export async function seedTestData(tx: Tx): Promise<void> {
     duration_minutes: 120,
     timezone: 'Europe/Helsinki',
   });
-  const fieldJob = await addJob(
+  const fieldSlot = await addWorkRoleSlot(
     tx,
     seasonKickoff.id,
     null,
     'Book the field',
     'Reserve the sports field for the kickoff.',
   );
-  await assignUser(tx, fieldJob.id, mockUsersTwo[3].id);
-  await addJob(
+  await assignUser(tx, fieldSlot.id, mockUsersTwo[3].id);
+  await addWorkRoleSlot(
     tx,
     seasonKickoff.id,
     null,
@@ -1813,14 +1831,14 @@ export async function seedTestData(tx: Tx): Promise<void> {
     duration_minutes: 90,
     timezone: 'UTC',
   });
-  const moderatorJob = await addJob(
+  const moderatorSlot = await addWorkRoleSlot(
     tx,
     streamedWorkshop.id,
     null,
     'Moderate the stream',
     'Start the stream and moderate the chat.',
   );
-  await assignUser(tx, moderatorJob.id, realUser.id);
+  await assignUser(tx, moderatorSlot.id, realUser.id);
 
   // Set site/room assignments and assign teams to event series for the
   // second org.
@@ -1912,7 +1930,16 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch(error => {
-  logger.fatal({ error }, 'Failed to seed test data');
-  process.exit(1);
-});
+// Only run main() when this file is executed directly (npm run seed:data).
+// tests/seed-data.test.ts imports seedTestData from this module and must not
+// trigger main(), which would call process.exit() and kill the test worker.
+const isDirectRun =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+
+if (isDirectRun) {
+  main().catch(error => {
+    logger.fatal({ error }, 'Failed to seed test data');
+    process.exit(1);
+  });
+}

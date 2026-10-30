@@ -513,7 +513,7 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
   pgm.createIndex('event_work_roles', 'event_occurrence_id');
   pgm.createIndex('event_work_roles', 'inherited_from_work_role_id');
 
-  // Event job assignments: users assigned to a job slot.
+  // Event work role slot assignments: users assigned to a work role slot.
   pgm.createTable('event_work_role_assignments', {
     id: { type: 'serial', primaryKey: true },
     event_work_role_id: {
@@ -527,7 +527,7 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
   });
   pgm.addConstraint(
     'event_work_role_assignments',
-    'event_work_role_assignments_job_user_unique',
+    'event_work_role_assignments_work_role_user_unique',
     'UNIQUE(event_work_role_id, user_id)',
   );
   pgm.createIndex('event_work_role_assignments', 'user_id');
