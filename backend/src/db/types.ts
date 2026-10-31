@@ -292,25 +292,6 @@ export interface EventComments {
   updated_at: Generated<Date>;
 }
 
-export interface Operations {
-  id: Generated<number>;
-  name: string;
-  description: Generated<string>;
-  requirements: Generated<string>;
-  location: Generated<string>;
-  created_at: Generated<Date>;
-  updated_at: Generated<Date>;
-}
-
-export interface OpAssignments {
-  id: Generated<number>;
-  operation_id: number;
-  name: string;
-  description: Generated<string>;
-  created_at: Generated<Date>;
-  updated_at: Generated<Date>;
-}
-
 export interface Database {
   users: Users;
   auth_accounts: AuthAccounts;
@@ -341,8 +322,6 @@ export interface Database {
   event_work_roles: EventWorkRoles;
   event_work_role_assignments: EventWorkRoleAssignments;
   event_comments: EventComments;
-  operations: Operations;
-  op_assignments: OpAssignments;
 }
 
 export type User = Selectable<Users>;
@@ -433,11 +412,3 @@ export type NewEventWorkRoleAssignment = Insertable<EventWorkRoleAssignments>;
 export type EventComment = Selectable<EventComments>;
 export type NewEventComment = Insertable<EventComments>;
 export type EventCommentUpdate = Updateable<EventComments>;
-
-export type Operation = Selectable<Operations>;
-export type NewOperation = Insertable<Operations>;
-export type OperationUpdate = Updateable<Operations>;
-
-export type OpAssignment = Selectable<OpAssignments>;
-export type NewOpAssignment = Insertable<OpAssignments>;
-export type OpAssignmentUpdate = Updateable<OpAssignments>;

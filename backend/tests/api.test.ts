@@ -152,41 +152,6 @@ describe('Users API', () => {
   });
 });
 
-describe('Operations API', () => {
-  let app: FastifyInstance;
-
-  beforeAll(async () => {
-    app = await buildApp();
-    await app.ready();
-  });
-
-  afterAll(async () => {
-    await app.close();
-  });
-
-  describe('GET /api/v1/operations', () => {
-    it('should return 401 without auth token', async () => {
-      const response = await app.inject({
-        method: 'GET',
-        url: '/api/v1/operations',
-      });
-
-      expect(response.statusCode).toBe(401);
-    });
-
-    it('should return 403 with invalid token', async () => {
-      const response = await app.inject({
-        method: 'GET',
-        url: '/api/v1/operations',
-        headers: { 'x-token': 'invalid-token' },
-      });
-
-      // 403 if DB is available (auth check runs), 500 if DB connection fails
-      expect([403, 500]).toContain(response.statusCode);
-    });
-  });
-});
-
 describe('Roles API', () => {
   let app: FastifyInstance;
 

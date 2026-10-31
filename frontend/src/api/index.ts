@@ -23,9 +23,6 @@ import type {
   EventWorkRoleUpdate,
   Notification,
   OccurrenceFilter,
-  OpAssignment,
-  Operation,
-  OperationInput,
   Organization,
   OrganizationUpdate,
   OrganizationUser,
@@ -171,7 +168,6 @@ export const api = createApi({
     'Notifications',
     'OrganizationUsers',
     'EventSeriesManagement',
-    'Operation',
   ],
   endpoints: build => ({
     // --- Auth ---
@@ -242,54 +238,6 @@ export const api = createApi({
     unlinkAuthAccount: build.mutation<void, string>({
       query: provider => ({ url: `/api/v1/users/@me/auth-accounts/${provider}`, method: 'DELETE' }),
       invalidatesTags: ['AuthAccounts'],
-    }),
-
-    // --- Operations ---
-
-    getOperations: build.query<Operation[], void>({
-      query: () => '/api/v1/operations',
-      providesTags: ['Operation'],
-    }),
-    getOperation: build.query<Operation, number>({
-      query: id => `/api/v1/operations/${id}`,
-      providesTags: (_result, _error, id) => [{ type: 'Operation', id }],
-    }),
-    upsertOperation: build.mutation<Operation, OperationInput>({
-      query: data => ({ url: '/api/v1/operations', method: 'POST', body: data }),
-      invalidatesTags: ['Operation'],
-    }),
-    deleteOperation: build.mutation<void, number>({
-      query: id => ({ url: `/api/v1/operations/${id}`, method: 'DELETE' }),
-      invalidatesTags: ['Operation'],
-    }),
-    addAssignment: build.mutation<
-      OpAssignment,
-      { operationId: number; data: { name: string; description?: string } }
-    >({
-      query: ({ operationId, data }) => ({
-        url: `/api/v1/operations/${operationId}/assignments`,
-        method: 'POST',
-        body: data,
-      }),
-      invalidatesTags: ['Operation'],
-    }),
-    updateAssignment: build.mutation<
-      OpAssignment,
-      { operationId: number; assignmentId: number; data: { name: string; description?: string } }
-    >({
-      query: ({ operationId, assignmentId, data }) => ({
-        url: `/api/v1/operations/${operationId}/assignments/${assignmentId}`,
-        method: 'PATCH',
-        body: data,
-      }),
-      invalidatesTags: ['Operation'],
-    }),
-    deleteAssignment: build.mutation<void, { operationId: number; assignmentId: number }>({
-      query: ({ operationId, assignmentId }) => ({
-        url: `/api/v1/operations/${operationId}/assignments/${assignmentId}`,
-        method: 'DELETE',
-      }),
-      invalidatesTags: ['Operation'],
     }),
 
     // --- Organizations ---
@@ -1149,13 +1097,6 @@ export const {
   useDeleteCurrentUserMutation,
   useGetAuthAccountsQuery,
   useUnlinkAuthAccountMutation,
-  useGetOperationsQuery,
-  useGetOperationQuery,
-  useUpsertOperationMutation,
-  useDeleteOperationMutation,
-  useAddAssignmentMutation,
-  useUpdateAssignmentMutation,
-  useDeleteAssignmentMutation,
   useGetMyOrganizationsQuery,
   useGetOrganizationQuery,
   useUpdateOrganizationMutation,

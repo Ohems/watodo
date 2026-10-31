@@ -37,10 +37,10 @@ async function seed(): Promise<Seed> {
     await addUserToOrganization(user.id, organizationId);
   }
 
-  // Both members share the same role (operations:read only). The plain member
+  // Both members share the same role (events:read only). The plain member
   // never receives additional roles, so permission checks that must keep
   // failing can use it regardless of the order the tests run in.
-  const memberRole = await createRole(organizationId, 'Member Role', ['operations:read']);
+  const memberRole = await createRole(organizationId, 'Member Role', ['events:read']);
   await assignRole(member.id, memberRole);
   await assignRole(plainMember.id, memberRole);
 
@@ -114,7 +114,7 @@ describe('Users API', () => {
       expect(response.statusCode).toBe(200);
       const body = response.json();
       expect(body.id).toBe(seedData.memberUserId);
-      expect(body.permissions).toContain('operations:read');
+      expect(body.permissions).toContain('events:read');
       expect(body.permissions).not.toContain('user-management:write');
     });
   });
@@ -141,33 +141,6 @@ describe('Users API', () => {
 
       expect(response.statusCode).toBe(200);
       expect(response.json().name).toBe('Renamed User');
-    });
-  });
-});
-
-describe('Operations API', () => {
-  describe('GET /api/v1/operations', () => {
-    it('allows reading operations with operations:read', async () => {
-      const response = await app.inject({
-        method: 'GET',
-        url: '/api/v1/operations',
-        headers: auth(seedData.memberToken),
-      });
-
-      expect(response.statusCode).toBe(200);
-    });
-  });
-
-  describe('POST /api/v1/operations', () => {
-    it('denies writing operations without operations:write', async () => {
-      const response = await app.inject({
-        method: 'POST',
-        url: '/api/v1/operations',
-        headers: auth(seedData.memberToken),
-        payload: { name: 'Forbidden Operation' },
-      });
-
-      expect(response.statusCode).toBe(403);
     });
   });
 });

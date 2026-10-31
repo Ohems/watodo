@@ -48,35 +48,6 @@ export interface AuthProviderInfo {
   configured: boolean;
 }
 
-export interface OpAssignment {
-  id: number;
-  operationId: number;
-  name: string;
-  description: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface Operation {
-  id: number;
-  name: string;
-  description: string;
-  requirements: string;
-  location: string;
-  createdAt: string;
-  updatedAt: string;
-  assignments: OpAssignment[];
-}
-
-export interface OperationInput {
-  id?: number;
-  name: string;
-  description?: string;
-  requirements?: string;
-  location?: string;
-  assignments?: Array<{ id?: number; name: string; description?: string }>;
-}
-
 /** Maps field names to their validation error messages. */
 export type FieldErrors = Record<string, string>;
 

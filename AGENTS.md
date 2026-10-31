@@ -148,7 +148,6 @@ backend/src/
 │   ├── events.ts         # Event series, occurrences, work role slots, comments routes
 │   ├── calendars.ts      # Calendar routes
 │   ├── notifications.ts  # Notification routes
-│   ├── operations.ts     # Operations + assignments routes
 │   ├── organizations.ts  # Organization, team, site/room routes
 │   ├── roles.ts          # Role + role assignment routes (organization scoped)
 │   ├── sites.ts          # Site routes
@@ -216,13 +215,6 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 - `GET /api/v1/organizations` - List the current user's organizations (auth required)
 - `GET /api/v1/organizations/:organizationId` - Get organization details (members only)
 - `PATCH /api/v1/organizations/:organizationId` - Update organization details (`organization:write`)
-- `GET /api/v1/operations` - List operations with assignments (`operations:read`)
-- `GET /api/v1/operations/:id` - Get operation (`operations:read`)
-- `POST /api/v1/operations` - Create/update operation (`operations:write`)
-- `DELETE /api/v1/operations/:id` - Delete operation (`operations:write`)
-- `POST /api/v1/operations/:id/assignments` - Add assignment (`operations:write`)
-- `PATCH /api/v1/operations/:id/assignments/:aid` - Update assignment (`operations:write`)
-- `DELETE /api/v1/operations/:id/assignments/:aid` - Delete assignment (`operations:write`)
 - `GET /api/v1/event-series` - List event series (`events:read`, requires `organizationId` query)
 - `POST /api/v1/event-series` - Create event series (`events:write`)
 - `GET /api/v1/event-series/management` - Paginated series list for the management view (`events:read`)
@@ -318,7 +310,7 @@ frontend/src/
 ├── api/
 │   └── index.ts          # RTK Query api (createApi): queries, mutations, cache tags
 ├── types/
-│   └── index.ts          # TypeScript types (User, Operation, etc.)
+│   └── index.ts          # TypeScript types (User, Organization, etc.)
 ├── store/
 │   ├── index.ts          # Redux store configuration (api reducer + middleware)
 │   ├── organization-slice.ts # Active organization selection (persisted to localStorage)
@@ -384,7 +376,7 @@ frontend/src/
   user work roles (availability/qualification), user certifications,
   certification work roles (mandatory certifications per role),
   event series, event occurrences, event work roles (slots), event work role
-  assignments, event comments, operations, and operation assignments.
+  assignments, and event comments.
   Events can be assigned to a site (optionally reserving the whole site)
   and/or a specific room within a site.
 - **Occurrence model**: `event_series` is expanded on the fly by the recurrence
@@ -555,8 +547,8 @@ See `.env.sample` for all variables. Key ones:
   `npm run seed:data -w backend`) so the generated test data covers the new feature. The script
   generates semi-realistic test data for both organizations, mock users, roles, teams, calendars,
   event types, event series (previous/current/next month), materialized occurrences (with
-  cancel/reschedule flags), work role slots with assignments, comments and
-  operations. It must keep refusing to run unless the database has exactly one user and one
+  cancel/reschedule flags), work role slots with assignments and comments.
+  It must keep refusing to run unless the database has exactly one user and one
   organization (the state after the first login). The core seeding logic is exported as
   `seedTestData(tx)` so `backend/tests/seed-data.test.ts` can run it against PGlite and assert
   the row counts.

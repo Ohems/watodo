@@ -7,7 +7,7 @@
 // creates a second organization and fills both organizations with mock users
 // (no login accounts attached), roles, teams, sites with rooms, calendars,
 // event types, event series across the previous, current and next month (with
-// exceptions, work role slots, assignments and comments), and a set of operations.
+// exceptions, work role slots, assignments and comments).
 //
 // When a feature that persists data is added, extend this script so the seed
 // data keeps covering it (see AGENTS.md).
@@ -223,73 +223,6 @@ const MOCK_USERS_ORG_TWO: MockUserSeed[] = [
   },
 ];
 
-interface OperationSeed {
-  name: string;
-  description: string;
-  requirements: string;
-  location: string;
-  assignments: { name: string; description: string }[];
-}
-
-// Operations are not organization-scoped; a shared set exercises the
-// operations feature for everyone.
-const OPERATION_SEEDS: OperationSeed[] = [
-  {
-    name: 'Summer Festival',
-    description: 'Annual community festival with food stalls, music and games.',
-    requirements: 'Volunteer badge and a short orientation.',
-    location: 'Central Park',
-    assignments: [
-      { name: 'Logistics Lead', description: 'Coordinates vendors and deliveries.' },
-      { name: 'Security Lead', description: 'Runs the security rota for the festival.' },
-      {
-        name: 'First Aid Station',
-        description: 'Staffs the first aid station. Certified first aiders only.',
-      },
-      { name: 'Food Stalls', description: 'Runs the food stall area.' },
-    ],
-  },
-  {
-    name: 'Weekly Meeting Setup',
-    description: 'Prepare the community hall before the weekly meeting.',
-    requirements: 'Arrive 30 minutes before the meeting starts.',
-    location: 'Community Hall',
-    assignments: [
-      { name: 'Room Setup', description: 'Arrange the chairs and tables.' },
-      { name: 'Coffee and Tea', description: 'Make coffee and tea.' },
-      { name: 'AV Check', description: 'Test the projector and microphones.' },
-    ],
-  },
-  {
-    name: 'Community Kitchen',
-    description: 'Cook and serve the weekly community lunch.',
-    requirements: 'Food hygiene certificate.',
-    location: 'Community Kitchen',
-    assignments: [
-      { name: 'Head Cook', description: 'Plans and cooks the main dish.' },
-      { name: 'Dishes', description: 'Washes the dishes after the lunch.' },
-      { name: 'Shopping', description: 'Buys the ingredients for the lunch.' },
-    ],
-  },
-  {
-    name: 'Sports Field Maintenance',
-    description: 'Keep the sports grounds in good shape.',
-    requirements: '',
-    location: 'Sports Grounds',
-    assignments: [
-      { name: 'Mowing', description: 'Mows the field every week.' },
-      { name: 'Line Marking', description: 'Marks the lines before games.' },
-    ],
-  },
-  {
-    name: 'Upcoming Fundraiser',
-    description: 'Plan the upcoming fundraiser. No assignments yet.',
-    requirements: '',
-    location: 'To be decided',
-    assignments: [],
-  },
-];
-
 const SUMMARY_TABLES = [
   'users',
   'organizations',
@@ -315,8 +248,6 @@ const SUMMARY_TABLES = [
   'event_work_roles',
   'event_work_role_assignments',
   'event_comments',
-  'operations',
-  'op_assignments',
 ] as const;
 
 const now = new Date();
@@ -924,31 +855,6 @@ async function seedWeeklyMeeting(
   );
 }
 
-async function seedOperations(tx: Tx): Promise<void> {
-  for (const seed of OPERATION_SEEDS) {
-    const operation = await tx
-      .insertInto('operations')
-      .values({
-        name: seed.name,
-        description: seed.description,
-        requirements: seed.requirements,
-        location: seed.location,
-      })
-      .returningAll()
-      .executeTakeFirstOrThrow();
-    for (const assignment of seed.assignments) {
-      await tx
-        .insertInto('op_assignments')
-        .values({
-          operation_id: operation.id,
-          name: assignment.name,
-          description: assignment.description,
-        })
-        .execute();
-    }
-  }
-}
-
 /**
  * Seeds semi-realistic test data inside the given transaction. Exported so
  * the test suite can run it against PGlite and assert the resulting row
@@ -982,7 +888,6 @@ export async function seedTestData(tx: Tx): Promise<void> {
   const coordinatorPermissions = permissionIdList(permissionIds, [
     PERMISSIONS.EVENTS_READ,
     PERMISSIONS.EVENTS_WRITE,
-    PERMISSIONS.OPERATIONS_READ,
     PERMISSIONS.ORGANIZATION_WRITE,
   ]);
   const memberPermissions = permissionIdList(permissionIds, [PERMISSIONS.EVENTS_READ]);
@@ -1004,7 +909,7 @@ export async function seedTestData(tx: Tx): Promise<void> {
     tx,
     firstOrganization.id,
     'Event Coordinator',
-    'Organizes events and operations.',
+    'Organizes events.',
     coordinatorPermissions,
   );
   const memberRoleOne = await createRole(
@@ -1488,7 +1393,7 @@ export async function seedTestData(tx: Tx): Promise<void> {
     tx,
     secondOrganization.id,
     'Event Coordinator',
-    'Organizes events and operations.',
+    'Organizes events.',
     coordinatorPermissions,
   );
   const memberRoleTwo = await createRole(
@@ -1897,10 +1802,6 @@ export async function seedTestData(tx: Tx): Promise<void> {
   );
 
   logger.info(`Seeded event series for "${secondOrganization.name}"`);
-
-  // --- Operations (not organization-scoped) ---
-  await seedOperations(tx);
-  logger.info(`Seeded ${OPERATION_SEEDS.length} operations with assignments`);
 
   logger.info('Test data seeded successfully:');
   for (const table of SUMMARY_TABLES) {

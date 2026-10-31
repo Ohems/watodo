@@ -555,39 +555,14 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
   pgm.createIndex('event_comments', 'event_series_id');
   pgm.createIndex('event_comments', 'event_occurrence_id');
 
-  // Operations
-  pgm.createTable('operations', {
-    id: { type: 'serial', primaryKey: true },
-    name: { type: 'text', notNull: true },
-    description: { type: 'text', notNull: true, default: '' },
-    requirements: { type: 'text', notNull: true, default: '' },
-    location: { type: 'text', notNull: true, default: '' },
-    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
-    updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
-  });
-
-  // Operation assignments
-  pgm.createTable('op_assignments', {
-    id: { type: 'serial', primaryKey: true },
-    operation_id: { type: 'integer', notNull: true, references: 'operations', onDelete: 'CASCADE' },
-    name: { type: 'text', notNull: true },
-    description: { type: 'text', notNull: true, default: '' },
-    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
-    updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
-  });
-
   // Indexes
   pgm.createIndex('users', 'state');
   pgm.createIndex('access_tokens', 'user_id');
-  pgm.createIndex('operations', 'name');
-  pgm.createIndex('op_assignments', 'operation_id');
   pgm.createIndex('teams', 'organization_id');
   pgm.createIndex('event_series', 'title');
 }
 
 export async function down(pgm: MigrationBuilder): Promise<void> {
-  pgm.dropTable('op_assignments');
-  pgm.dropTable('operations');
   pgm.dropTable('event_comments');
   pgm.dropTable('event_work_role_assignments');
   pgm.dropTable('event_work_roles');

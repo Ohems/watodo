@@ -11,8 +11,6 @@ import {
   eventWorkRoleUpdateSchema,
   incrementalSchema,
   occurrenceRangeQuerySchema,
-  opAssignmentSchema,
-  operationSchema,
   providerSchema,
   recurrenceSchema,
   rescheduleOccurrenceSchema,
@@ -60,8 +58,8 @@ describe('Schemas', () => {
     it('should accept a role with permissions', () => {
       const result = rolePushSchema.safeParse({
         name: 'Moderator',
-        description: 'Can manage operations',
-        permissions: ['operations:read', 'operations:write'],
+        description: 'Can manage events',
+        permissions: ['events:read', 'events:write'],
       });
       expect(result.success).toBe(true);
     });
@@ -116,35 +114,6 @@ describe('Schemas', () => {
 
     it('should reject limit over 100', () => {
       expect(userQuerySchema.safeParse({ limit: '101' }).success).toBe(false);
-    });
-  });
-
-  describe('operationSchema', () => {
-    it('should accept valid operation with assignments', () => {
-      const result = operationSchema.safeParse({
-        name: 'Test Operation',
-        description: 'A test',
-        requirements: 'None',
-        location: 'Helsinki',
-        assignments: [{ name: 'Assignment 1', description: 'First' }],
-      });
-      expect(result.success).toBe(true);
-    });
-
-    it('should require name', () => {
-      expect(operationSchema.safeParse({ description: 'No name' }).success).toBe(false);
-    });
-  });
-
-  describe('opAssignmentSchema', () => {
-    it('should accept valid assignment', () => {
-      expect(
-        opAssignmentSchema.safeParse({ name: 'Task 1', description: 'Do something' }).success,
-      ).toBe(true);
-    });
-
-    it('should require name', () => {
-      expect(opAssignmentSchema.safeParse({ description: 'No name' }).success).toBe(false);
     });
   });
 

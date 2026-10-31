@@ -14,8 +14,6 @@ export const PERMISSIONS = {
   ROLE_MANAGEMENT_WRITE: 'role-management:write',
   ORGANIZATION_WRITE: 'organization:write',
   ORGANIZATION_READ: 'organization:read',
-  OPERATIONS_READ: 'operations:read',
-  OPERATIONS_WRITE: 'operations:write',
   EVENTS_READ: 'events:read',
   EVENTS_WRITE: 'events:write',
   TEAM_MANAGEMENT_READ: 'team-management:read',
@@ -63,11 +61,6 @@ export const PERMISSION_DEFINITIONS: { code: Permission; description: string }[]
   {
     code: PERMISSIONS.ORGANIZATION_READ,
     description: 'View organization members, teams, sites, rooms and work roles.',
-  },
-  { code: PERMISSIONS.OPERATIONS_READ, description: 'View operations.' },
-  {
-    code: PERMISSIONS.OPERATIONS_WRITE,
-    description: 'Create, update and delete operations.',
   },
   { code: PERMISSIONS.EVENTS_READ, description: 'View event series and their occurrences.' },
   {

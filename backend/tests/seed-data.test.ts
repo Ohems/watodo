@@ -43,7 +43,7 @@ describe('seed-data script', () => {
       users: 17,
       organizations: 2,
       roles: 6,
-      role_permissions: 12,
+      role_permissions: 10,
       user_roles: 17,
       teams: 5,
       team_members: 13,
@@ -64,8 +64,6 @@ describe('seed-data script', () => {
       event_work_roles: 37,
       event_work_role_assignments: 32,
       event_comments: 10,
-      operations: 5,
-      op_assignments: 12,
     };
 
     for (const [table, expectedCount] of Object.entries(expected)) {
