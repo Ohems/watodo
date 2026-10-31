@@ -73,6 +73,7 @@ Run from `backend/`:
 | `npm run migrate:create -- <name>` | Create a new migration file |
 | `npm run migrate:status` | Show migration status |
 | `npm run migrate:redo` | Revert and re-apply the latest migration |
+| `npm run db:reset` | Clear the database (drop and recreate the public schema) and re-apply all migrations |
 | `npm run seed:permissions` | Seed the permissions table from the registry (idempotent) |
 | `npm run seed:data` | Generate semi-realistic test data (only on a fresh database: exactly one user and one organization) |
 
@@ -258,8 +259,11 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 - `PATCH /api/v1/organizations/:organizationId/teams/:teamId` - Update team, including type/leader/links (`team-management:write`)
 - `DELETE /api/v1/organizations/:organizationId/teams/:teamId` - Delete team (`team-management:write`)
 - `GET /api/v1/organizations/:organizationId/teams/:teamId/members` - List team members (`team-management:read`)
-- `POST /api/v1/organizations/:organizationId/teams/:teamId/members` - Add team member (`team-management:write`)
+- `POST /api/v1/organizations/:organizationId/teams/:teamId/members` - Add team member, optionally with the manager toggle (`team-management:write`)
+- `PATCH /api/v1/organizations/:organizationId/teams/:teamId/members/:userId` - Update team member, e.g. toggle `isManager` (`team-management:write`)
 - `DELETE /api/v1/organizations/:organizationId/teams/:teamId/members/:userId` - Remove team member (`team-management:write`)
+
+Team-scoped routes (get/update team, members) also accept users who have the manager toggle (`team_members.is_manager`) on that specific team, even without organization-wide team-management permissions; the team list then shows only the teams they manage. Creating and deleting teams always requires organization-wide `team-management:write`.
 - `GET /api/v1/organizations/:organizationId/roles` - List roles with permissions (`role-management:read`)
 - `POST /api/v1/organizations/:organizationId/roles` - Create role (`role-management:write`)
 - `PATCH /api/v1/organizations/:organizationId/roles/:roleId` - Update role (`role-management:write`)
@@ -383,7 +387,8 @@ frontend/src/
   access tokens, records, permissions, roles, role permissions, user roles,
   organizations, teams (with a team type of `general`, `event_organizers` or
   `role_group`, an optional team leader, and an optional link to an event type
-  or work role), sites (physical locations), rooms (within sites),
+  or work role), team members (with an `is_manager` toggle granting management
+  of that specific team), sites (physical locations), rooms (within sites),
   calendars, event types, work roles (the role catalog), certifications,
   user work roles (availability/qualification), user certifications,
   certification work roles (mandatory certifications per role),
@@ -411,7 +416,7 @@ frontend/src/
 1. Create a migration: `npm run migrate:create -w backend -- <name>`
 2. Edit the migration file in `backend/migrations/`
 3. Apply it: `npm run migrate -w backend`
-4. Never edit or delete existing migration files. (The PGlite test snapshot is rebuilt automatically by `tests/global-setup.ts` on every test run.)
+4. Never edit or delete existing migration files. Exception: while the schema is still being reworked, the initial migration `001_init.ts` may be edited in place, but then the development database must be rebuilt with `npm run db:reset` (node-pg-migrate records `001_init` as applied and never re-runs it on an existing database). (The PGlite test snapshot is rebuilt automatically by `tests/global-setup.ts` on every test run.)
 
 ## Testing
 

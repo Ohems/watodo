@@ -27,6 +27,7 @@
     "migrate:create": "node-pg-migrate create",
     "migrate:redo": "node-pg-migrate redo",
     "migrate:status": "node-pg-migrate status",
+    "db:reset": "tsx scripts/reset-database.ts && npm run migrate",
     "seed:permissions": "tsx scripts/seed-permissions.ts",
     "seed:data": "tsx scripts/seed-data.ts"
   },
