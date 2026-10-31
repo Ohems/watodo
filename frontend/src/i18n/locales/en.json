@@ -86,7 +86,18 @@
     "noMembers": "No members in this team",
     "deleteTeam": "Delete team",
     "deleteTeamConfirm": "Delete the team \"{{name}}\"?",
-    "backToList": "Back to teams"
+    "backToList": "Back to teams",
+    "type": "Type",
+    "leader": "Team leader",
+    "eventType": "Event type",
+    "workRole": "Work role",
+    "manager": "Manager",
+    "canManageTeam": "Can manage this team",
+    "teamType": {
+      "general": "General",
+      "event_organizers": "Event organizers",
+      "role_group": "Role group"
+    }
   },
   "sites": {
     "title": "Sites",

@@ -93,10 +93,21 @@ export interface UserOrganizations {
   created_at: Generated<Date>;
 }
 
+/** The purpose of a team: a plain group, an event-organizing team, or a role roster. */
+export type TeamType = 'general' | 'event_organizers' | 'role_group';
+
 export interface Teams {
   id: Generated<string>;
   name: string;
   description: Generated<string>;
+  /** The purpose of the team; see TeamType. */
+  team_type: Generated<TeamType>;
+  /** Designated team leader (NULL = none). */
+  team_leader_id: string | null;
+  /** For event_organizers teams: the event type they organize (NULL otherwise). */
+  event_type_id: number | null;
+  /** For role_group teams: the work role the team is the roster of (NULL otherwise). */
+  work_role_id: number | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
   organization_id: string;
@@ -106,6 +117,8 @@ export interface TeamMembers {
   id: Generated<number>;
   team_id: string;
   user_id: string;
+  /** When true, the member can manage this specific team without org-wide team-management permissions. */
+  is_manager: Generated<boolean>;
   created_at: Generated<Date>;
 }
 

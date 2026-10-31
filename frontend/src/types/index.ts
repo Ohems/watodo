@@ -248,11 +248,20 @@ export interface EventOccurrenceDetail {
 
 // --- Teams ---
 
+export type TeamType = 'general' | 'event_organizers' | 'role_group';
+
 export interface Team {
   id: string;
   name: string;
   description: string;
   organizationId: string;
+  teamType: TeamType;
+  teamLeaderId: string | null;
+  teamLeaderName: string | null;
+  eventTypeId: number | null;
+  eventTypeName: string | null;
+  workRoleId: number | null;
+  workRoleName: string | null;
   memberCount: number;
   createdAt: string;
   updatedAt: string;
@@ -262,11 +271,19 @@ export interface TeamPush {
   name: string;
   description?: string;
   organizationId: string;
+  teamType?: TeamType;
+  teamLeaderId?: string | null;
+  eventTypeId?: number | null;
+  workRoleId?: number | null;
 }
 
 export interface TeamUpdate {
   name?: string;
   description?: string;
+  teamType?: TeamType;
+  teamLeaderId?: string | null;
+  eventTypeId?: number | null;
+  workRoleId?: number | null;
 }
 
 export interface TeamMember {
@@ -275,7 +292,13 @@ export interface TeamMember {
   userId: string;
   userName: string;
   userEmail: string;
+  /** When true, the member can manage this specific team. */
+  isManager: boolean;
   createdAt: string;
+}
+
+export interface TeamMemberUpdate {
+  isManager?: boolean;
 }
 
 // --- Sites ---
@@ -469,6 +492,16 @@ export interface OrganizationUser {
 }
 
 // --- Event series management ---
+
+export interface EventType {
+  id: number;
+  name: string;
+  description: string;
+  recurrence: string | null;
+  calendarId: string;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export interface EventSeriesTeam {
   id: string;

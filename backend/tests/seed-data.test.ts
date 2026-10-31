@@ -45,8 +45,8 @@ describe('seed-data script', () => {
       roles: 6,
       role_permissions: 10,
       user_roles: 17,
-      teams: 5,
-      team_members: 13,
+      teams: 6,
+      team_members: 15,
       sites: 6,
       rooms: 12,
       work_roles: 7,
@@ -95,5 +95,42 @@ describe('seed-data script', () => {
       .where(eb => eb.or([eb('is_cancelled', '=', true), eb('override_start', 'is not', null)]))
       .execute();
     expect(flagged.length).toBeGreaterThan(0);
+  });
+
+  it('seeds teams of every type with leaders and links', async () => {
+    await db.transaction().execute(seedTestData);
+
+    const teams = await db.selectFrom('teams').selectAll().execute();
+    const byType = new Map<string, number>();
+    for (const team of teams) {
+      byType.set(team.team_type, (byType.get(team.team_type) ?? 0) + 1);
+    }
+    expect(byType.get('general')).toBeGreaterThan(0);
+    expect(byType.get('event_organizers')).toBeGreaterThan(0);
+    expect(byType.get('role_group')).toBeGreaterThan(0);
+
+    // Every team has a leader, and the links match the team type.
+    for (const team of teams) {
+      expect(team.team_leader_id).not.toBeNull();
+      if (team.team_type === 'event_organizers') {
+        expect(team.event_type_id).not.toBeNull();
+        expect(team.work_role_id).toBeNull();
+      } else if (team.team_type === 'role_group') {
+        expect(team.work_role_id).not.toBeNull();
+        expect(team.event_type_id).toBeNull();
+      } else {
+        expect(team.event_type_id).toBeNull();
+        expect(team.work_role_id).toBeNull();
+      }
+    }
+
+    // Every team has at least one member with the manager toggle.
+    const managers = await db
+      .selectFrom('team_members')
+      .select(['team_id', db.fn.countAll().as('count')])
+      .where('is_manager', '=', true)
+      .groupBy('team_id')
+      .execute();
+    expect(managers.length).toBe(teams.length);
   });
 });

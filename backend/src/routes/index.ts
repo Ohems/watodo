@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { authRoutes } from './auth.js';
 import { calendarRoutes } from './calendars.js';
 import { certificationRoutes } from './certifications.js';
+import { eventTypeRoutes } from './event-types.js';
 import { eventRoutes } from './events.js';
 import { notificationRoutes } from './notifications.js';
 import { organizationRoutes } from './organizations.js';
@@ -21,6 +22,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   await organizationRoutes(app);
   await calendarRoutes(app);
   await eventRoutes(app);
+  await eventTypeRoutes(app);
   await teamRoutes(app);
   await siteRoutes(app);
   await roomRoutes(app);

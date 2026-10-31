@@ -146,6 +146,7 @@ backend/src/
 │   ├── auth.ts           # OAuth login/callback routes per provider + logout
 │   ├── users.ts          # User CRUD routes
 │   ├── events.ts         # Event series, occurrences, work role slots, comments routes
+│   ├── event-types.ts    # Event type list route
 │   ├── calendars.ts      # Calendar routes
 │   ├── notifications.ts  # Notification routes
 │   ├── organizations.ts  # Organization, team, site/room routes
@@ -250,6 +251,15 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 - `POST /api/v1/event-series/:seriesId/comments` - Add comment (`events:write`)
 - `PATCH /api/v1/event-series/:seriesId/comments/:commentId` - Update comment (author only, `events:write`)
 - `DELETE /api/v1/event-series/:seriesId/comments/:commentId` - Delete comment (author only, `events:write`)
+- `GET /api/v1/organizations/:organizationId/event-types` - List all event types of an organization (no pagination, `events:read`)
+- `GET /api/v1/organizations/:organizationId/teams` - List teams with type, leader and links (paginated, `team-management:read`)
+- `POST /api/v1/organizations/:organizationId/teams` - Create team (`team-management:write`; body may include `teamType`, `teamLeaderId`, `eventTypeId`, `workRoleId`)
+- `GET /api/v1/organizations/:organizationId/teams/:teamId` - Get team (`team-management:read`)
+- `PATCH /api/v1/organizations/:organizationId/teams/:teamId` - Update team, including type/leader/links (`team-management:write`)
+- `DELETE /api/v1/organizations/:organizationId/teams/:teamId` - Delete team (`team-management:write`)
+- `GET /api/v1/organizations/:organizationId/teams/:teamId/members` - List team members (`team-management:read`)
+- `POST /api/v1/organizations/:organizationId/teams/:teamId/members` - Add team member (`team-management:write`)
+- `DELETE /api/v1/organizations/:organizationId/teams/:teamId/members/:userId` - Remove team member (`team-management:write`)
 - `GET /api/v1/organizations/:organizationId/roles` - List roles with permissions (`role-management:read`)
 - `POST /api/v1/organizations/:organizationId/roles` - Create role (`role-management:write`)
 - `PATCH /api/v1/organizations/:organizationId/roles/:roleId` - Update role (`role-management:write`)
@@ -371,7 +381,9 @@ frontend/src/
 - **Migrations**: node-pg-migrate. Migration files live in `backend/migrations/`.
 - **Schema**: tables covering users, authentication accounts (multi-provider),
   access tokens, records, permissions, roles, role permissions, user roles,
-  organizations, teams, sites (physical locations), rooms (within sites),
+  organizations, teams (with a team type of `general`, `event_organizers` or
+  `role_group`, an optional team leader, and an optional link to an event type
+  or work role), sites (physical locations), rooms (within sites),
   calendars, event types, work roles (the role catalog), certifications,
   user work roles (availability/qualification), user certifications,
   certification work roles (mandatory certifications per role),
@@ -490,7 +502,7 @@ Shared helpers live in `frontend/e2e/helpers.ts`:
 - `mockCommonApis(page, user, orgs)` sets up auth token, current user,
   organizations, auth providers, notifications, and occurrences mocks.
 - `mockOrgApis(page, orgId, options)` mocks all organization-scoped endpoints
-  (sites, rooms, teams, work roles, certifications, org users).
+  (sites, rooms, teams, work roles, certifications, org users, event types).
 - `mockMyWorkRolesAndCerts(page, orgId, options)` mocks self-service endpoints.
 - `interceptMutation(page, urlPattern, method, response)` captures mutation
   requests so tests can assert the URL, method, and body.
@@ -545,7 +557,7 @@ See `.env.sample` for all variables. Key ones:
 - Always run `npm run check:fix` and `npm run test` before finishing work.
 - When you add a feature that persists data, update `backend/scripts/seed-data.ts` (run with
   `npm run seed:data -w backend`) so the generated test data covers the new feature. The script
-  generates semi-realistic test data for both organizations, mock users, roles, teams, calendars,
+  generates semi-realistic test data for both organizations, mock users, roles, teams (with types, leaders and links), calendars,
   event types, event series (previous/current/next month), materialized occurrences (with
   cancel/reschedule flags), work role slots with assignments and comments.
   It must keep refusing to run unless the database has exactly one user and one

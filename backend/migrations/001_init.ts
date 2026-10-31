@@ -109,11 +109,18 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     'UNIQUE(user_id, organization_id)',
   );
 
-  // Teams
+  // Teams. A team has a purpose (`team_type`): a plain group of people
+  // (`general`), an `event_organizers` team linked to an event type, or a
+  // `role_group` team linked to a work role. `event_type_id` / `work_role_id`
+  // get their foreign keys after the referenced tables are created below.
   pgm.createTable('teams', {
     id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
     name: { type: 'text', notNull: true },
     description: { type: 'text', notNull: true, default: '' },
+    team_type: { type: 'text', notNull: true, default: 'general' },
+    team_leader_id: { type: 'uuid', references: 'users', onDelete: 'SET NULL' },
+    event_type_id: { type: 'integer' },
+    work_role_id: { type: 'integer' },
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     organization_id: {
@@ -123,12 +130,20 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
       onDelete: 'CASCADE',
     },
   });
+  pgm.addConstraint(
+    'teams',
+    'teams_team_type_check',
+    "CHECK (team_type IN ('general', 'event_organizers', 'role_group'))",
+  );
 
-  // Team members: users belonging to a team.
+  // Team members: users belonging to a team. `is_manager` marks members who
+  // can manage this specific team (edit it, manage its members) without
+  // holding the organization-wide team-management permissions.
   pgm.createTable('team_members', {
     id: { type: 'serial', primaryKey: true },
     team_id: { type: 'uuid', notNull: true, references: 'teams', onDelete: 'CASCADE' },
     user_id: { type: 'uuid', notNull: true, references: 'users', onDelete: 'CASCADE' },
+    is_manager: { type: 'boolean', notNull: true, default: false },
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
   pgm.addConstraint('team_members', 'team_members_team_user_unique', 'UNIQUE(team_id, user_id)');
@@ -316,6 +331,17 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     calendar_id: { type: 'uuid', notNull: true, references: 'calendars', onDelete: 'CASCADE' },
   });
+  // Team purpose links (the referenced tables exist from here on).
+  pgm.addConstraint(
+    'teams',
+    'teams_event_type_id_fkey',
+    'FOREIGN KEY (event_type_id) REFERENCES event_types(id) ON DELETE SET NULL',
+  );
+  pgm.addConstraint(
+    'teams',
+    'teams_work_role_id_fkey',
+    'FOREIGN KEY (work_role_id) REFERENCES work_roles(id) ON DELETE SET NULL',
+  );
 
   // Roles (organization-specific)
   pgm.createTable('roles', {
@@ -559,6 +585,9 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
   pgm.createIndex('users', 'state');
   pgm.createIndex('access_tokens', 'user_id');
   pgm.createIndex('teams', 'organization_id');
+  pgm.createIndex('teams', 'event_type_id');
+  pgm.createIndex('teams', 'work_role_id');
+  pgm.createIndex('teams', 'team_leader_id');
   pgm.createIndex('event_series', 'title');
 }
 

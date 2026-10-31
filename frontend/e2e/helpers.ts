@@ -168,6 +168,7 @@ export async function mockOrgApis(
     workRoles?: unknown[];
     certifications?: unknown[];
     orgUsers?: unknown[];
+    eventTypes?: unknown[];
   } = {},
 ): Promise<void> {
   const {
@@ -177,6 +178,7 @@ export async function mockOrgApis(
     workRoles = [],
     certifications = [],
     orgUsers = [],
+    eventTypes = [],
   } = options;
 
   // Use predicates to avoid intercepting single-entity requests (e.g. /sites/site-1)
@@ -204,6 +206,10 @@ export async function mockOrgApis(
   await page.route(
     url => url.pathname === `/api/v1/organizations/${orgId}/work-roles/all`,
     route => route.fulfill({ json: workRoles }),
+  );
+  await page.route(
+    url => url.pathname === `/api/v1/organizations/${orgId}/event-types`,
+    route => route.fulfill({ json: eventTypes }),
   );
   await page.route(
     url =>

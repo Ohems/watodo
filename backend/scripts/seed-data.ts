@@ -25,6 +25,7 @@ import type {
   Role,
   Room,
   Site,
+  TeamType,
   User,
 } from '../src/db/types.js';
 import { createLogger } from '../src/logger.js';
@@ -382,6 +383,23 @@ async function createTeams(
   return teams;
 }
 
+/**
+ * Sets the purpose of a team (type, leader and the linked event type or work
+ * role). Called after work roles and event types exist.
+ */
+async function setTeamPurpose(
+  tx: Tx,
+  teamId: string,
+  purpose: {
+    team_type: TeamType;
+    team_leader_id?: string | null;
+    event_type_id?: number | null;
+    work_role_id?: number | null;
+  },
+): Promise<void> {
+  await tx.updateTable('teams').set(purpose).where('id', '=', teamId).execute();
+}
+
 async function createCalendar(tx: Tx, organizationId: string, name: string): Promise<Calendar> {
   return tx
     .insertInto('calendars')
@@ -694,9 +712,17 @@ async function linkCertificationToWorkRole(
     .execute();
 }
 
-async function addTeamMembers(tx: Tx, teamId: string, userIds: string[]): Promise<void> {
+async function addTeamMembers(
+  tx: Tx,
+  teamId: string,
+  userIds: string[],
+  managerIds: string[] = [],
+): Promise<void> {
   for (const userId of userIds) {
-    await tx.insertInto('team_members').values({ team_id: teamId, user_id: userId }).execute();
+    await tx
+      .insertInto('team_members')
+      .values({ team_id: teamId, user_id: userId, is_manager: managerIds.includes(userId) })
+      .execute();
   }
 }
 
@@ -937,10 +963,26 @@ export async function seedTestData(tx: Tx): Promise<void> {
     { name: 'Community Kitchen', description: 'Cooks and serves the community lunch.' },
   ]);
 
-  // Team members: assign mock users (and the real user) to teams.
-  await addTeamMembers(tx, teamsOne[0].id, [mockUsersOne[0].id, mockUsersOne[6].id, realUser.id]);
-  await addTeamMembers(tx, teamsOne[1].id, [mockUsersOne[1].id, mockUsersOne[4].id]);
-  await addTeamMembers(tx, teamsOne[2].id, [mockUsersOne[2].id, mockUsersOne[7].id]);
+  // Team members: assign mock users (and the real user) to teams. The first
+  // member of each team gets the manager toggle.
+  await addTeamMembers(
+    tx,
+    teamsOne[0].id,
+    [mockUsersOne[0].id, mockUsersOne[6].id, realUser.id],
+    [mockUsersOne[0].id],
+  );
+  await addTeamMembers(
+    tx,
+    teamsOne[1].id,
+    [mockUsersOne[1].id, mockUsersOne[4].id],
+    [mockUsersOne[1].id],
+  );
+  await addTeamMembers(
+    tx,
+    teamsOne[2].id,
+    [mockUsersOne[2].id, mockUsersOne[7].id],
+    [mockUsersOne[2].id],
+  );
 
   // Sites and rooms for the first organization.
   const { sites: sitesOne, rooms: roomsOne } = await createSites(tx, firstOrganization.id, [
@@ -1097,6 +1139,37 @@ export async function seedTestData(tx: Tx): Promise<void> {
       description: 'Prepares the agenda and chairs the meeting.',
     })
     .execute();
+
+  // Team purposes: role group teams are linked to a work role, an event
+  // organizer team is linked to an event type, and each team gets a leader.
+  await setTeamPurpose(tx, teamsOne[0].id, {
+    team_type: 'role_group',
+    team_leader_id: mockUsersOne[0].id,
+    work_role_id: workRolesOne[0].id,
+  });
+  await setTeamPurpose(tx, teamsOne[1].id, {
+    team_type: 'general',
+    team_leader_id: mockUsersOne[1].id,
+  });
+  await setTeamPurpose(tx, teamsOne[2].id, {
+    team_type: 'role_group',
+    team_leader_id: mockUsersOne[2].id,
+    work_role_id: workRolesOne[2].id,
+  });
+  const eventsTeamOne = await createTeams(tx, firstOrganization.id, [
+    { name: 'Events Team', description: 'Organizes the weekly meetings and other events.' },
+  ]);
+  await setTeamPurpose(tx, eventsTeamOne[0].id, {
+    team_type: 'event_organizers',
+    team_leader_id: mockUsersOne[0].id,
+    event_type_id: weeklyMeetingTypeOne.id,
+  });
+  await addTeamMembers(
+    tx,
+    eventsTeamOne[0].id,
+    [mockUsersOne[1].id, realUser.id],
+    [mockUsersOne[1].id],
+  );
 
   // --- Event series for the first organization (timezone: UTC) ---
 
@@ -1421,12 +1494,18 @@ export async function seedTestData(tx: Tx): Promise<void> {
   ]);
 
   // Team members for the second organization.
-  await addTeamMembers(tx, teamsTwo[0].id, [mockUsersTwo[0].id, mockUsersTwo[2].id, realUser.id]);
-  await addTeamMembers(tx, teamsTwo[1].id, [
-    mockUsersTwo[1].id,
-    mockUsersTwo[3].id,
-    mockUsersTwo[5].id,
-  ]);
+  await addTeamMembers(
+    tx,
+    teamsTwo[0].id,
+    [mockUsersTwo[0].id, mockUsersTwo[2].id, realUser.id],
+    [mockUsersTwo[0].id],
+  );
+  await addTeamMembers(
+    tx,
+    teamsTwo[1].id,
+    [mockUsersTwo[1].id, mockUsersTwo[3].id, mockUsersTwo[5].id],
+    [mockUsersTwo[1].id],
+  );
 
   // Sites and rooms for the second organization.
   const { sites: sitesTwo, rooms: roomsTwo } = await createSites(tx, secondOrganization.id, [
@@ -1559,6 +1638,18 @@ export async function seedTestData(tx: Tx): Promise<void> {
       description: 'Prepares the agenda and chairs the meeting.',
     })
     .execute();
+
+  // Team purposes for the second organization.
+  await setTeamPurpose(tx, teamsTwo[0].id, {
+    team_type: 'event_organizers',
+    team_leader_id: mockUsersTwo[0].id,
+    event_type_id: weeklyMeetingTypeTwo.id,
+  });
+  await setTeamPurpose(tx, teamsTwo[1].id, {
+    team_type: 'role_group',
+    team_leader_id: mockUsersTwo[1].id,
+    work_role_id: workRolesTwo[1].id,
+  });
 
   // --- Event series for the second organization (timezone: Europe/Helsinki) ---
 

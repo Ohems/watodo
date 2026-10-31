@@ -17,6 +17,7 @@ import type {
   EventSeriesManagement,
   EventSeriesPush,
   EventSeriesUpdate,
+  EventType,
   EventWorkRole,
   EventWorkRoleAssignment,
   EventWorkRolePush,
@@ -37,6 +38,7 @@ import type {
   TableQuery,
   Team,
   TeamMember,
+  TeamMemberUpdate,
   TeamPush,
   TeamUpdate,
   User,
@@ -168,6 +170,7 @@ export const api = createApi({
     'Notifications',
     'OrganizationUsers',
     'EventSeriesManagement',
+    'EventTypes',
   ],
   endpoints: build => ({
     // --- Auth ---
@@ -590,6 +593,13 @@ export const api = createApi({
       invalidatesTags: ['OccurrenceDetail'],
     }),
 
+    // --- Event types ---
+
+    getEventTypes: build.query<EventType[], string>({
+      query: organizationId => `/api/v1/organizations/${organizationId}/event-types`,
+      providesTags: ['EventTypes'],
+    }),
+
     // --- Teams ---
 
     getTeams: build.query<Paginated<Team>, { organizationId: string; query?: TableQuery }>({
@@ -632,12 +642,23 @@ export const api = createApi({
     }),
     addTeamMember: build.mutation<
       TeamMember,
-      { organizationId: string; teamId: string; userId: string }
+      { organizationId: string; teamId: string; userId: string; isManager?: boolean }
     >({
-      query: ({ organizationId, teamId, userId }) => ({
+      query: ({ organizationId, teamId, userId, isManager }) => ({
         url: `/api/v1/organizations/${organizationId}/teams/${teamId}/members`,
         method: 'POST',
-        body: { userId },
+        body: { userId, isManager },
+      }),
+      invalidatesTags: ['Team'],
+    }),
+    updateTeamMember: build.mutation<
+      TeamMember,
+      { organizationId: string; teamId: string; userId: string; data: TeamMemberUpdate }
+    >({
+      query: ({ organizationId, teamId, userId, data }) => ({
+        url: `/api/v1/organizations/${organizationId}/teams/${teamId}/members/${userId}`,
+        method: 'PATCH',
+        body: data,
       }),
       invalidatesTags: ['Team'],
     }),
@@ -1132,6 +1153,7 @@ export const {
   useDeleteOccurrenceWorkRoleMutation,
   useAssignUserToOccurrenceWorkRoleMutation,
   useUnassignUserFromOccurrenceWorkRoleMutation,
+  useGetEventTypesQuery,
   useGetTeamsQuery,
   useGetTeamQuery,
   useCreateTeamMutation,
@@ -1139,6 +1161,7 @@ export const {
   useDeleteTeamMutation,
   useGetTeamMembersQuery,
   useAddTeamMemberMutation,
+  useUpdateTeamMemberMutation,
   useRemoveTeamMemberMutation,
   useGetSitesQuery,
   useGetAllSitesQuery,

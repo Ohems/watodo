@@ -247,19 +247,37 @@ export type EventWorkRolesQuery = z.infer<typeof eventWorkRolesQuerySchema>;
 
 // --- Teams ---
 
+export const teamTypeSchema = z.enum(['general', 'event_organizers', 'role_group']);
+
 export const teamPushSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   organizationId: z.uuid(),
+  teamType: teamTypeSchema.optional(),
+  teamLeaderId: z.uuid().nullable().optional(),
+  /** Required when teamType is 'event_organizers'; must be null otherwise. */
+  eventTypeId: z.number().int().nullable().optional(),
+  /** Required when teamType is 'role_group'; must be null otherwise. */
+  workRoleId: z.number().int().nullable().optional(),
 });
 
 export const teamUpdateSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
+  teamType: teamTypeSchema.optional(),
+  teamLeaderId: z.uuid().nullable().optional(),
+  eventTypeId: z.number().int().nullable().optional(),
+  workRoleId: z.number().int().nullable().optional(),
 });
 
 export const teamMemberSchema = z.object({
   userId: z.uuid(),
+  /** When true, the new member can manage this specific team. */
+  isManager: z.boolean().optional(),
+});
+
+export const teamMemberUpdateSchema = z.object({
+  isManager: z.boolean().optional(),
 });
 
 // --- Sites ---
@@ -441,9 +459,11 @@ export const eventSeriesConfigSchema = z.object({
   teamIds: z.array(z.uuid()).optional(),
 });
 
+export type TeamType = z.infer<typeof teamTypeSchema>;
 export type TeamPush = z.infer<typeof teamPushSchema>;
 export type TeamUpdate = z.infer<typeof teamUpdateSchema>;
 export type TeamMemberInput = z.infer<typeof teamMemberSchema>;
+export type TeamMemberUpdate = z.infer<typeof teamMemberUpdateSchema>;
 export type SitePush = z.infer<typeof sitePushSchema>;
 export type SiteUpdate = z.infer<typeof siteUpdateSchema>;
 export type RoomPush = z.infer<typeof roomPushSchema>;

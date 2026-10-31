@@ -8,8 +8,9 @@ import {
   listTeamsHandler,
   removeTeamMemberHandler,
   updateTeamHandler,
+  updateTeamMemberHandler,
 } from '../controllers/team-controller.js';
-import { requirePermissions } from '../middleware/auth.js';
+import { requirePermissions, requireTeamAccess } from '../middleware/auth.js';
 import { PERMISSIONS } from '../permissions.js';
 
 interface OrgParams {
@@ -25,8 +26,11 @@ interface MemberParams {
 }
 
 export async function teamRoutes(app: FastifyInstance): Promise<void> {
-  const read = requirePermissions(PERMISSIONS.TEAM_MANAGEMENT_READ);
-  const write = requirePermissions(PERMISSIONS.TEAM_MANAGEMENT_WRITE);
+  // Organization-wide permissions. Team-scoped routes additionally accept
+  // members with the manager toggle on that team (requireTeamAccess).
+  const orgWrite = requirePermissions(PERMISSIONS.TEAM_MANAGEMENT_WRITE);
+  const read = requireTeamAccess(PERMISSIONS.TEAM_MANAGEMENT_READ);
+  const write = requireTeamAccess(PERMISSIONS.TEAM_MANAGEMENT_WRITE);
 
   app.get<OrgParams>(
     '/api/v1/organizations/:organizationId/teams',
@@ -34,9 +38,10 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     listTeamsHandler,
   );
 
+  // Creating and deleting teams is organization-level only.
   app.post<OrgParams>(
     '/api/v1/organizations/:organizationId/teams',
-    { preHandler: write },
+    { preHandler: orgWrite },
     createTeamHandler,
   );
 
@@ -54,7 +59,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
 
   app.delete<TeamParams>(
     '/api/v1/organizations/:organizationId/teams/:teamId',
-    { preHandler: write },
+    { preHandler: orgWrite },
     deleteTeamHandler,
   );
 
@@ -68,6 +73,12 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     '/api/v1/organizations/:organizationId/teams/:teamId/members',
     { preHandler: write },
     addTeamMemberHandler,
+  );
+
+  app.patch<MemberParams>(
+    '/api/v1/organizations/:organizationId/teams/:teamId/members/:userId',
+    { preHandler: write },
+    updateTeamMemberHandler,
   );
 
   app.delete<MemberParams>(

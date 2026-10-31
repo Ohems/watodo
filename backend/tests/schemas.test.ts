@@ -17,6 +17,10 @@ import {
   roleAssignmentSchema,
   rolePushSchema,
   roleUpdateSchema,
+  teamMemberUpdateSchema,
+  teamPushSchema,
+  teamTypeSchema,
+  teamUpdateSchema,
   userPushSchema,
   userQuerySchema,
 } from '../src/schemas/index.js';
@@ -95,6 +99,80 @@ describe('Schemas', () => {
 
     it('should require a user id', () => {
       expect(roleAssignmentSchema.safeParse({}).success).toBe(false);
+    });
+  });
+
+  describe('teamTypeSchema', () => {
+    it('should accept all team types', () => {
+      for (const type of ['general', 'event_organizers', 'role_group']) {
+        expect(teamTypeSchema.safeParse(type).success).toBe(true);
+      }
+    });
+
+    it('should reject unknown team types', () => {
+      expect(teamTypeSchema.safeParse('unknown').success).toBe(false);
+    });
+  });
+
+  describe('teamPushSchema', () => {
+    it('should accept a plain team', () => {
+      const result = teamPushSchema.safeParse({
+        name: 'Setup Crew',
+        organizationId: '123e4567-e89b-42d3-a456-426614174000',
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('should accept a team with type, leader and links', () => {
+      const result = teamPushSchema.safeParse({
+        name: 'Events Team',
+        organizationId: '123e4567-e89b-42d3-a456-426614174000',
+        teamType: 'event_organizers',
+        teamLeaderId: '123e4567-e89b-42d3-a456-426614174001',
+        eventTypeId: 3,
+        workRoleId: null,
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('should reject an invalid team type', () => {
+      expect(
+        teamPushSchema.safeParse({
+          name: 'Team',
+          organizationId: '123e4567-e89b-42d3-a456-426614174000',
+          teamType: 'admins',
+        }).success,
+      ).toBe(false);
+    });
+
+    it('should require a name', () => {
+      expect(
+        teamPushSchema.safeParse({
+          organizationId: '123e4567-e89b-42d3-a456-426614174000',
+        }).success,
+      ).toBe(false);
+    });
+  });
+
+  describe('teamUpdateSchema', () => {
+    it('should accept partial updates including clearing the leader', () => {
+      expect(teamUpdateSchema.safeParse({ teamLeaderId: null }).success).toBe(true);
+      expect(teamUpdateSchema.safeParse({ teamType: 'role_group', workRoleId: 2 }).success).toBe(
+        true,
+      );
+      expect(teamUpdateSchema.safeParse({}).success).toBe(true);
+    });
+  });
+
+  describe('teamMemberUpdateSchema', () => {
+    it('should accept the manager toggle', () => {
+      expect(teamMemberUpdateSchema.safeParse({ isManager: true }).success).toBe(true);
+      expect(teamMemberUpdateSchema.safeParse({ isManager: false }).success).toBe(true);
+      expect(teamMemberUpdateSchema.safeParse({}).success).toBe(true);
+    });
+
+    it('should reject non-boolean values', () => {
+      expect(teamMemberUpdateSchema.safeParse({ isManager: 'yes' }).success).toBe(false);
     });
   });
 

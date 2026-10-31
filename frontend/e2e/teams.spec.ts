@@ -19,6 +19,13 @@ const mockTeams = [
     name: 'Setup Team',
     description: 'Handles venue setup',
     organizationId: ORG_ID,
+    teamType: 'role_group',
+    teamLeaderId: 'user-9',
+    teamLeaderName: 'Dana Leader',
+    eventTypeId: null,
+    eventTypeName: null,
+    workRoleId: 1,
+    workRoleName: 'Setup',
     memberCount: 3,
     createdAt: '2025-01-01T00:00:00.000Z',
     updatedAt: '2025-01-01T00:00:00.000Z',
@@ -28,6 +35,13 @@ const mockTeams = [
     name: 'Security Team',
     description: '',
     organizationId: ORG_ID,
+    teamType: 'general',
+    teamLeaderId: null,
+    teamLeaderName: null,
+    eventTypeId: null,
+    eventTypeName: null,
+    workRoleId: null,
+    workRoleName: null,
     memberCount: 5,
     createdAt: '2025-01-02T00:00:00.000Z',
     updatedAt: '2025-01-02T00:00:00.000Z',
@@ -35,6 +49,15 @@ const mockTeams = [
 ];
 
 const mockTeamDetail = mockTeams[0];
+const mockWorkRoles = [{ id: 1, name: 'Setup', description: '', organizationId: ORG_ID }];
+const mockEventTypes = [
+  { id: 7, name: 'Weekly Meeting', description: '', recurrence: null, calendarId: 'cal-1' },
+];
+const mockOrgUsers = [
+  { id: 'user-1', name: 'Alice Anderson', email: 'alice@example.com' },
+  { id: 'user-2', name: 'Bob Brown', email: 'bob@example.com' },
+  { id: 'user-9', name: 'Dana Leader', email: 'dana@example.com' },
+];
 const mockMembers = [
   {
     id: 1,
@@ -42,6 +65,7 @@ const mockMembers = [
     userId: 'user-1',
     userName: 'Alice Anderson',
     userEmail: 'alice@example.com',
+    isManager: true,
     createdAt: '2025-01-01T00:00:00.000Z',
   },
   {
@@ -50,6 +74,7 @@ const mockMembers = [
     userId: 'user-2',
     userName: 'Bob Brown',
     userEmail: 'bob@example.com',
+    isManager: false,
     createdAt: '2025-01-01T00:00:00.000Z',
   },
 ];
@@ -71,7 +96,12 @@ async function setupTeamsPage(
 
 async function setupTeamDetail(page: import('@playwright/test').Page, user = adminUser()) {
   await mockCommonApis(page, user, [testOrg]);
-  await mockOrgApis(page, ORG_ID, { teams: mockTeams });
+  await mockOrgApis(page, ORG_ID, {
+    teams: mockTeams,
+    workRoles: mockWorkRoles,
+    eventTypes: mockEventTypes,
+    orgUsers: mockOrgUsers,
+  });
   await mockUserList(page, mockAllUsers);
   await page.route(`**/api/v1/organizations/${ORG_ID}/teams/team-1`, route =>
     route.fulfill({ json: mockTeamDetail }),
@@ -83,7 +113,7 @@ async function setupTeamDetail(page: import('@playwright/test').Page, user = adm
 
 test.describe('Teams page', () => {
   test.describe('data display', () => {
-    test('shows teams in a table with member counts', async ({ page }) => {
+    test('shows teams in a table with member counts and type badges', async ({ page }) => {
       await setupTeamsPage(page);
       await page.goto('/teams');
 
@@ -93,6 +123,8 @@ test.describe('Teams page', () => {
       await expect(page.getByText('3', { exact: true })).toBeVisible();
       await expect(page.getByText('Security Team')).toBeVisible();
       await expect(page.getByText('5', { exact: true })).toBeVisible();
+      await expect(page.getByText('Role group')).toBeVisible();
+      await expect(page.getByText('General')).toBeVisible();
     });
 
     test('shows empty state when no teams', async ({ page }) => {
@@ -159,6 +191,48 @@ test.describe('Teams page', () => {
       expect(captured[0].body).toMatchObject({
         name: 'Catering Team',
         description: 'Food and drinks',
+        teamType: 'general',
+      });
+    });
+
+    test('admin can create a role group team and POST includes the work role link', async ({
+      page,
+    }) => {
+      await mockCommonApis(page, adminUser(), [testOrg]);
+      await mockOrgApis(page, ORG_ID, { teams: [], workRoles: mockWorkRoles });
+
+      const newTeam = {
+        ...mockTeams[1],
+        id: 'team-new',
+        name: 'Setup Crew',
+        teamType: 'role_group',
+        workRoleId: 1,
+      };
+      const captured = await interceptMutation(
+        page,
+        `**/api/v1/organizations/${ORG_ID}/teams`,
+        'POST',
+        newTeam,
+      );
+
+      await page.goto('/teams');
+      await page.getByRole('button', { name: 'Add' }).click();
+      await page.getByRole('textbox', { name: 'Name' }).fill('Setup Crew');
+
+      await page.getByRole('combobox', { name: 'Type' }).click();
+      await page.getByRole('option', { name: 'Role group' }).click();
+
+      await page.getByRole('combobox', { name: 'Work role' }).click();
+      await page.getByRole('option', { name: 'Setup' }).click();
+
+      await page.getByRole('button', { name: 'Save' }).click();
+
+      await expect.poll(() => captured.length, { message: 'POST /teams was called' }).toBe(1);
+      expect(captured[0].body).toMatchObject({
+        name: 'Setup Crew',
+        teamType: 'role_group',
+        workRoleId: 1,
+        eventTypeId: null,
       });
     });
   });
@@ -176,12 +250,15 @@ test.describe('Teams page', () => {
 
 test.describe('Team Management page', () => {
   test.describe('data display', () => {
-    test('shows team details and members', async ({ page }) => {
+    test('shows team details, type, leader, work role link and members', async ({ page }) => {
       await setupTeamDetail(page);
       await page.goto('/teams/team-1');
 
       await expect(page.getByRole('heading', { name: 'Setup Team' })).toBeVisible();
       await expect(page.getByText('Handles venue setup')).toBeVisible();
+      await expect(page.getByText('Role group')).toBeVisible();
+      await expect(page.getByText('Dana Leader')).toBeVisible();
+      await expect(page.getByText('Setup', { exact: true })).toBeVisible();
 
       // Members table
       await expect(page.getByRole('heading', { name: 'Members' })).toBeVisible();
@@ -189,6 +266,10 @@ test.describe('Team Management page', () => {
       await expect(page.getByText('alice@example.com')).toBeVisible();
       await expect(page.getByText('Bob Brown')).toBeVisible();
       await expect(page.getByText('bob@example.com')).toBeVisible();
+
+      // Manager toggles: Alice is a manager, Bob is not
+      await expect(page.getByRole('switch', { name: 'Manager: Alice Anderson' })).toBeChecked();
+      await expect(page.getByRole('switch', { name: 'Manager: Bob Brown' })).not.toBeChecked();
     });
   });
 
@@ -202,20 +283,42 @@ test.describe('Team Management page', () => {
     });
 
     test('regular user sees no edit/add buttons', async ({ page }) => {
-      await setupTeamDetail(page, regularUser());
+      // user-2 (Bob Brown) is a plain member without the manager toggle.
+      await setupTeamDetail(page, regularUser({ id: 'user-2', name: 'Bob Brown' }));
       await page.goto('/teams/team-1');
 
       await expect(page.getByRole('button', { name: 'Edit' })).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Add member' })).toHaveCount(0);
+      await expect(page.getByRole('switch', { name: 'Manager: Alice Anderson' })).toHaveCount(0);
+      // Manager badge shown read-only instead of the toggle
+      await expect(page.getByRole('columnheader', { name: 'Manager' })).toBeVisible();
+      const aliceRow = page.locator('tr', { hasText: 'Alice Anderson' });
+      await expect(aliceRow.getByText('Manager', { exact: true })).toBeVisible();
       // Members still visible
       await expect(page.getByText('Alice Anderson')).toBeVisible();
+    });
+
+    test('team manager without org write permission sees edit/add buttons', async ({ page }) => {
+      // user-1 (Alice Anderson) has the manager toggle on team-1 but no
+      // team-management permissions.
+      await setupTeamDetail(page, userWithPermissions(['events:read']));
+      await page.goto('/teams/team-1');
+
+      await expect(page.getByRole('button', { name: 'Edit' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Add member' })).toBeVisible();
+      await expect(page.getByRole('switch', { name: 'Manager: Alice Anderson' })).toBeChecked();
     });
   });
 
   test.describe('editing team', () => {
     test('admin can edit team and save calls PATCH endpoint', async ({ page }) => {
       await mockCommonApis(page, adminUser(), [testOrg]);
-      await mockOrgApis(page, ORG_ID, { teams: mockTeams });
+      await mockOrgApis(page, ORG_ID, {
+        teams: mockTeams,
+        workRoles: mockWorkRoles,
+        eventTypes: mockEventTypes,
+        orgUsers: mockOrgUsers,
+      });
       await mockUserList(page, mockAllUsers);
       await page.route(`**/api/v1/organizations/${ORG_ID}/teams/team-1/members`, route =>
         route.fulfill({ json: mockMembers }),
@@ -241,12 +344,28 @@ test.describe('Team Management page', () => {
       const nameInput = page.getByRole('textbox').first();
       await nameInput.fill('Setup Team Renamed');
 
+      // Change the team type to event organizers and link an event type.
+      await page.getByRole('combobox', { name: 'Type' }).click();
+      await page.getByRole('option', { name: 'Event organizers' }).click();
+      await page.getByRole('combobox', { name: 'Event type' }).click();
+      await page.getByRole('option', { name: 'Weekly Meeting' }).click();
+
+      // Set the team leader.
+      await page.getByRole('combobox', { name: 'Team leader' }).click();
+      await page.getByRole('option', { name: 'Alice Anderson' }).click();
+
       await page.getByRole('button', { name: 'Save' }).click();
 
       await expect
         .poll(() => captured.length, { message: 'PATCH /teams/team-1 was called' })
         .toBe(1);
-      expect(captured[0].body).toMatchObject({ name: 'Setup Team Renamed' });
+      expect(captured[0].body).toMatchObject({
+        name: 'Setup Team Renamed',
+        teamType: 'event_organizers',
+        eventTypeId: 7,
+        workRoleId: null,
+        teamLeaderId: 'user-1',
+      });
     });
   });
 
@@ -277,12 +396,37 @@ test.describe('Team Management page', () => {
       await page.getByPlaceholder('Select...').click();
       await page.getByRole('option', { name: 'Charlie Clark' }).click();
 
+      // Mark the new member as a team manager
+      await page.getByRole('switch', { name: 'Can manage this team' }).click();
+
       await page.getByRole('button', { name: 'Add', exact: true }).click();
 
       await expect
         .poll(() => captured.length, { message: 'POST /teams/team-1/members was called' })
         .toBe(1);
-      expect(captured[0].body).toEqual({ userId: 'user-3' });
+      expect(captured[0].body).toEqual({ userId: 'user-3', isManager: true });
+    });
+
+    test('admin can toggle the manager flag and PATCH is called', async ({ page }) => {
+      await setupTeamDetail(page, adminUser());
+
+      const captured = await interceptMutation(
+        page,
+        `**/api/v1/organizations/${ORG_ID}/teams/team-1/members/user-2`,
+        'PATCH',
+        { ...mockMembers[1], isManager: true },
+      );
+
+      await page.goto('/teams/team-1');
+
+      const toggle = page.getByRole('switch', { name: 'Manager: Bob Brown' });
+      await expect(toggle).not.toBeChecked();
+      await toggle.click();
+
+      await expect
+        .poll(() => captured.length, { message: 'PATCH /teams/team-1/members/user-2 was called' })
+        .toBe(1);
+      expect(captured[0].body).toEqual({ isManager: true });
     });
 
     test('admin can remove a member', async ({ page }) => {
