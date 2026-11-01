@@ -51,6 +51,17 @@ export interface EventSeriesResponse {
   updatedAt: string;
 }
 
+/** Status indicator for a single work role slot of an occurrence. */
+export interface OccurrenceSlotStatus {
+  slotId: number;
+  title: string;
+  workRoleId: number | null;
+  workRoleName: string | null;
+  isCritical: boolean;
+  /** Number of users assigned to this slot. */
+  assigneeCount: number;
+}
+
 export interface EventOccurrenceResponse {
   /** Stable ID of the materialized occurrence instance, or null if not yet materialized. */
   occurrenceId: number | null;
@@ -69,6 +80,14 @@ export interface EventOccurrenceResponse {
   isRescheduled: boolean;
   isCancelled: boolean;
   exceptionId: number | null;
+  /** True when the requesting user is assigned to a work role slot of this occurrence or its series. */
+  isParticipant: boolean;
+  /** True when the requesting user manages this series via a connected team (team leader or manager member). */
+  isManager: boolean;
+  /** Work role slot status indicators for this occurrence. */
+  workRoleSlots: OccurrenceSlotStatus[];
+  /** Titles of critical, unfilled slots whose work role the requesting user manages for this series. */
+  managedUnfilledCriticalSlots: string[];
 }
 
 export interface EventExceptionResponse {
@@ -344,11 +363,27 @@ async function ensureOccurrenceMaterialized(
   return existing.id;
 }
 
+/** Per-user enrichment attached to a listed occurrence. */
+export interface OccurrenceEnrichment {
+  isParticipant: boolean;
+  isManager: boolean;
+  workRoleSlots: OccurrenceSlotStatus[];
+  managedUnfilledCriticalSlots: string[];
+}
+
+const EMPTY_ENRICHMENT: OccurrenceEnrichment = {
+  isParticipant: false,
+  isManager: false,
+  workRoleSlots: [],
+  managedUnfilledCriticalSlots: [],
+};
+
 function serializeOccurrence(
   series: EventSeries,
   occurrence: ExpandedOccurrence,
   organization: CalendarOrganization,
   occurrenceId: number | null,
+  enrichment: OccurrenceEnrichment = EMPTY_ENRICHMENT,
 ): EventOccurrenceResponse {
   return {
     occurrenceId,
@@ -367,6 +402,10 @@ function serializeOccurrence(
     isRescheduled: occurrence.exception?.overrideStart != null,
     isCancelled: occurrence.exception?.isCancelled ?? false,
     exceptionId: occurrence.exception?.id ?? null,
+    isParticipant: enrichment.isParticipant,
+    isManager: enrichment.isManager,
+    workRoleSlots: enrichment.workRoleSlots,
+    managedUnfilledCriticalSlots: enrichment.managedUnfilledCriticalSlots,
   };
 }
 
@@ -909,17 +948,211 @@ async function fetchMySlotAssignments(
   return assignments;
 }
 
+/** Raw slot row with its work role name, as loaded for status computation. */
+interface SlotStatusRow {
+  id: number;
+  event_series_id: number;
+  event_occurrence_id: number | null;
+  title: string;
+  is_critical: boolean;
+  work_role_id: number | null;
+  work_role_name: string | null;
+}
+
+/** Team IDs of the teams the user leads or manages (manager toggle). */
+async function fetchManagedTeamIds(userId: string): Promise<Set<string>> {
+  const rows = await db
+    .selectFrom('team_members')
+    .select('team_id')
+    .where('user_id', '=', userId)
+    .where('is_manager', '=', true)
+    .union(db.selectFrom('teams').select('id as team_id').where('team_leader_id', '=', userId))
+    .execute();
+  return new Set(rows.map(r => r.team_id));
+}
+
+/** Maps each series ID to the IDs of all teams connected to it. */
+async function fetchSeriesTeamIds(seriesIds: number[]): Promise<Map<number, string[]>> {
+  const result = new Map<number, string[]>();
+  if (seriesIds.length === 0) return result;
+  const rows = await db
+    .selectFrom('event_series_teams')
+    .select(['event_series_id', 'team_id'])
+    .where('event_series_id', 'in', seriesIds)
+    .execute();
+  for (const row of rows) {
+    const list = result.get(row.event_series_id) ?? [];
+    list.push(row.team_id);
+    result.set(row.event_series_id, list);
+  }
+  return result;
+}
+
+/** Maps each team ID to the IDs of the work roles assigned to it. */
+async function fetchTeamWorkRoleIds(teamIds: string[]): Promise<Map<string, number[]>> {
+  const result = new Map<string, number[]>();
+  if (teamIds.length === 0) return result;
+  const rows = await db
+    .selectFrom('team_work_roles')
+    .select(['team_id', 'work_role_id'])
+    .where('team_id', 'in', teamIds)
+    .execute();
+  for (const row of rows) {
+    const list = result.get(row.team_id) ?? [];
+    list.push(row.work_role_id);
+    result.set(row.team_id, list);
+  }
+  return result;
+}
+
+/** Per-user series management context used for the manager flags and scope. */
+interface SeriesManagementContext {
+  /** Series IDs the user manages via a connected team (leader or manager member). */
+  managedSeriesIds: Set<number>;
+  /** seriesId -> work role IDs the user manages for that series. */
+  managedWorkRolesBySeries: Map<number, Set<number>>;
+}
+
+async function buildSeriesManagementContext(
+  seriesIds: number[],
+  userId: string,
+): Promise<SeriesManagementContext> {
+  const context: SeriesManagementContext = {
+    managedSeriesIds: new Set(),
+    managedWorkRolesBySeries: new Map(),
+  };
+  const managedTeamIds = await fetchManagedTeamIds(userId);
+  if (managedTeamIds.size === 0) return context;
+  const seriesTeamIds = await fetchSeriesTeamIds(seriesIds);
+  const teamWorkRoleIds = await fetchTeamWorkRoleIds([...managedTeamIds]);
+  for (const [seriesId, teamIds] of seriesTeamIds) {
+    const managed = teamIds.filter(teamId => managedTeamIds.has(teamId));
+    if (managed.length === 0) continue;
+    context.managedSeriesIds.add(seriesId);
+    const roles = new Set<number>();
+    for (const teamId of managed) {
+      for (const workRoleId of teamWorkRoleIds.get(teamId) ?? []) {
+        roles.add(workRoleId);
+      }
+    }
+    context.managedWorkRolesBySeries.set(seriesId, roles);
+  }
+  return context;
+}
+
+/**
+ * Loads all slots of the given series (parent and occurrence-level) plus the
+ * assignment count per slot, for building per-occurrence slot status lists.
+ */
+async function fetchSlotStatusData(seriesIds: number[]): Promise<{
+  parentSlotsBySeries: Map<number, SlotStatusRow[]>;
+  occurrenceSlotsByOccurrence: Map<number, SlotStatusRow[]>;
+  assigneeCountBySlot: Map<number, number>;
+}> {
+  const parentSlotsBySeries = new Map<number, SlotStatusRow[]>();
+  const occurrenceSlotsByOccurrence = new Map<number, SlotStatusRow[]>();
+  const assigneeCountBySlot = new Map<number, number>();
+  if (seriesIds.length === 0) {
+    return { parentSlotsBySeries, occurrenceSlotsByOccurrence, assigneeCountBySlot };
+  }
+  const slotRows = await db
+    .selectFrom('event_work_roles')
+    .leftJoin('work_roles', 'work_roles.id', 'event_work_roles.work_role_id')
+    .select([
+      'event_work_roles.id',
+      'event_work_roles.event_series_id',
+      'event_work_roles.event_occurrence_id',
+      'event_work_roles.title',
+      'event_work_roles.is_critical',
+      'event_work_roles.work_role_id',
+      'work_roles.name as work_role_name',
+    ])
+    .where('event_work_roles.event_series_id', 'in', seriesIds)
+    .execute();
+  for (const row of slotRows) {
+    if (row.event_occurrence_id === null) {
+      const list = parentSlotsBySeries.get(row.event_series_id) ?? [];
+      list.push(row);
+      parentSlotsBySeries.set(row.event_series_id, list);
+    } else {
+      const list = occurrenceSlotsByOccurrence.get(row.event_occurrence_id) ?? [];
+      list.push(row);
+      occurrenceSlotsByOccurrence.set(row.event_occurrence_id, list);
+    }
+  }
+  const slotIds = slotRows.map(r => r.id);
+  if (slotIds.length > 0) {
+    const countRows = await db
+      .selectFrom('event_work_role_assignments')
+      .select(['event_work_role_id', db.fn.countAll().as('count')])
+      .where('event_work_role_id', 'in', slotIds)
+      .groupBy('event_work_role_id')
+      .execute();
+    for (const row of countRows) {
+      assigneeCountBySlot.set(row.event_work_role_id, Number(row.count));
+    }
+  }
+  return { parentSlotsBySeries, occurrenceSlotsByOccurrence, assigneeCountBySlot };
+}
+
+/**
+ * Computes the slot status indicators and managed-critical warnings for one
+ * occurrence. Occurrence-level slots are used when the occurrence is
+ * materialized and has its own slots; otherwise the parent (series-level)
+ * slots apply.
+ */
+function computeOccurrenceEnrichment(
+  seriesId: number,
+  occurrenceId: number | null,
+  isParticipant: boolean,
+  isManager: boolean,
+  management: SeriesManagementContext | null,
+  slotData: {
+    parentSlotsBySeries: Map<number, SlotStatusRow[]>;
+    occurrenceSlotsByOccurrence: Map<number, SlotStatusRow[]>;
+    assigneeCountBySlot: Map<number, number>;
+  },
+): OccurrenceEnrichment {
+  const occurrenceSlots =
+    occurrenceId !== null ? (slotData.occurrenceSlotsByOccurrence.get(occurrenceId) ?? []) : [];
+  const slots =
+    occurrenceSlots.length > 0
+      ? occurrenceSlots
+      : (slotData.parentSlotsBySeries.get(seriesId) ?? []);
+  const workRoleSlots: OccurrenceSlotStatus[] = slots.map(slot => ({
+    slotId: slot.id,
+    title: slot.title,
+    workRoleId: slot.work_role_id,
+    workRoleName: slot.work_role_name,
+    isCritical: slot.is_critical,
+    assigneeCount: slotData.assigneeCountBySlot.get(slot.id) ?? 0,
+  }));
+  const managedRoles = management?.managedWorkRolesBySeries.get(seriesId);
+  const managedUnfilledCriticalSlots = workRoleSlots
+    .filter(
+      slot =>
+        slot.isCritical &&
+        slot.assigneeCount === 0 &&
+        slot.workRoleId !== null &&
+        managedRoles?.has(slot.workRoleId),
+    )
+    .map(slot => slot.title);
+  return { isParticipant, isManager, workRoleSlots, managedUnfilledCriticalSlots };
+}
+
 /**
  * Lists the occurrences of all visible series within a time range, optionally
  * narrowed down by organization, calendar, location, team and scope. The
  * `mine` scope keeps only occurrences the user is assigned to (via a
  * series-wide or occurrence-scoped work role slot); the `team` scope keeps only
- * series linked to a team the user belongs to.
+ * series linked to a team the user belongs to; the `involved` scope keeps only
+ * occurrences the user is a participant of or a manager of. Every occurrence
+ * carries participant/manager flags and work role slot status indicators.
  * @param rangeStart - Start of the range (inclusive).
  * @param rangeEnd - End of the range (inclusive).
  * @param calendarId - Optional calendar to restrict the series to.
  * @param filter - Optional location, team and scope filters.
- * @param userId - The current user, required for the `mine` and `team` scopes.
+ * @param userId - The current user, required for the `mine`, `team` and `involved` scopes.
  * @param organizationId - Optional organization to restrict the series to.
  * @returns The occurrences in the range, sorted by start.
  */
@@ -972,34 +1205,40 @@ export async function getOccurrences(
       .groupBy('event_series.id');
   }
   const series = await query.orderBy('event_series.start', 'asc').execute();
-  const exceptionsBySeries = await fetchExceptionRules(series.map(row => row.id));
+  const seriesIds = series.map(row => row.id);
+  const exceptionsBySeries = await fetchExceptionRules(seriesIds);
   const organizationsByCalendar = await getCalendarOrganizations(
     series.map(row => row.calendar_id),
   );
-  const myAssignments =
-    filter?.scope === 'mine' && userId
-      ? await fetchMySlotAssignments(
-          series.map(row => row.id),
-          userId,
-        )
-      : null;
+  const myAssignments = userId ? await fetchMySlotAssignments(seriesIds, userId) : null;
+  const management = userId ? await buildSeriesManagementContext(seriesIds, userId) : null;
 
   const occurrences: EventOccurrenceResponse[] = [];
-  const allExpanded: { series: EventSeries; occurrence: ExpandedOccurrence }[] = [];
+  const allExpanded: {
+    series: EventSeries;
+    occurrence: ExpandedOccurrence;
+    isParticipant: boolean;
+    isManager: boolean;
+  }[] = [];
   for (const row of series) {
     const exceptions = exceptionsBySeries.get(row.id) ?? [];
     const organization = organizationsByCalendar.get(row.calendar_id);
     if (!organization) {
       throw new Error(`Organization for calendar ${row.calendar_id} not found!`);
     }
+    const isManager = management?.managedSeriesIds.has(row.id) ?? false;
     for (const occurrence of expandOccurrences(toRule(row), exceptions, rangeStart, rangeEnd)) {
-      if (myAssignments) {
-        const key = `${row.id}:${occurrence.occurrenceStart.toISOString()}`;
-        if (!myAssignments.seriesWide.has(row.id) && !myAssignments.perOccurrence.has(key)) {
-          continue;
-        }
+      const key = `${row.id}:${occurrence.occurrenceStart.toISOString()}`;
+      const isParticipant = myAssignments
+        ? myAssignments.seriesWide.has(row.id) || myAssignments.perOccurrence.has(key)
+        : false;
+      if (filter?.scope === 'mine' && !isParticipant) {
+        continue;
       }
-      allExpanded.push({ series: row, occurrence });
+      if (filter?.scope === 'involved' && !isParticipant && !isManager) {
+        continue;
+      }
+      allExpanded.push({ series: row, occurrence, isParticipant, isManager });
     }
   }
 
@@ -1010,16 +1249,24 @@ export async function getOccurrences(
       occurrenceStart: e.occurrence.occurrenceStart,
     })),
   );
+  const slotData = await fetchSlotStatusData(seriesIds);
 
-  for (const { series: row, occurrence } of allExpanded) {
+  for (const { series: row, occurrence, isParticipant, isManager } of allExpanded) {
     const organization = organizationsByCalendar.get(row.calendar_id);
     if (!organization) {
       throw new Error(`Organization for calendar ${row.calendar_id} not found!`);
     }
     const key = `${row.id}:${occurrence.occurrenceStart.toISOString()}`;
-    occurrences.push(
-      serializeOccurrence(row, occurrence, organization, occurrenceIds.get(key) ?? null),
+    const occurrenceId = occurrenceIds.get(key) ?? null;
+    const enrichment = computeOccurrenceEnrichment(
+      row.id,
+      occurrenceId,
+      isParticipant,
+      isManager,
+      management,
+      slotData,
     );
+    occurrences.push(serializeOccurrence(row, occurrence, organization, occurrenceId, enrichment));
   }
   occurrences.sort((a, b) => a.start.localeCompare(b.start));
   return occurrences;
@@ -1029,6 +1276,7 @@ export async function getSeriesOccurrences(
   seriesId: number,
   rangeStart: Date,
   rangeEnd: Date,
+  userId?: string,
 ): Promise<EventOccurrenceResponse[]> {
   logger.trace('eventService.getSeriesOccurrences');
   validateRange(rangeStart, rangeEnd);
@@ -1040,9 +1288,25 @@ export async function getSeriesOccurrences(
   const occurrenceIds = await lookupOccurrenceIds(
     expanded.map(o => ({ seriesId, occurrenceStart: o.occurrenceStart })),
   );
+  const myAssignments = userId ? await fetchMySlotAssignments([seriesId], userId) : null;
+  const management = userId ? await buildSeriesManagementContext([seriesId], userId) : null;
+  const slotData = await fetchSlotStatusData([seriesId]);
   return expanded.map(occurrence => {
     const key = `${seriesId}:${occurrence.occurrenceStart.toISOString()}`;
-    return serializeOccurrence(series, occurrence, organization, occurrenceIds.get(key) ?? null);
+    const occurrenceId = occurrenceIds.get(key) ?? null;
+    const isParticipant = myAssignments
+      ? myAssignments.seriesWide.has(seriesId) || myAssignments.perOccurrence.has(key)
+      : false;
+    const isManager = management?.managedSeriesIds.has(seriesId) ?? false;
+    const enrichment = computeOccurrenceEnrichment(
+      seriesId,
+      occurrenceId,
+      isParticipant,
+      isManager,
+      management,
+      slotData,
+    );
+    return serializeOccurrence(series, occurrence, organization, occurrenceId, enrichment);
   });
 }
 
@@ -1135,6 +1399,10 @@ export async function getOccurrenceDetail(
       isRescheduled: exception?.overrideStart != null,
       isCancelled: exception?.isCancelled ?? false,
       exceptionId: exception?.id ?? null,
+      isParticipant: false,
+      isManager: false,
+      workRoleSlots: [],
+      managedUnfilledCriticalSlots: [],
     },
     workRoles: slots,
     parentWorkRoles,

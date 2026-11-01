@@ -158,6 +158,17 @@ interface OccurrenceResponse {
   isRescheduled: boolean;
   isCancelled: boolean;
   exceptionId: number | null;
+  isParticipant: boolean;
+  isManager: boolean;
+  workRoleSlots: {
+    slotId: number;
+    title: string;
+    workRoleId: number | null;
+    workRoleName: string | null;
+    isCritical: boolean;
+    assigneeCount: number;
+  }[];
+  managedUnfilledCriticalSlots: string[];
 }
 
 interface ExceptionResponse {
@@ -777,6 +788,168 @@ describe('Events API', () => {
       // The admin has no slot assignments, so "my events" is empty for them.
       const adminMine = await getOccurrences(seed.adminToken, '&scope=mine');
       expect(adminMine).toHaveLength(0);
+    });
+
+    it('supports the involved scope with participant/manager flags and slot status', async () => {
+      const seed = await createEventsFixture();
+      const suffix = randomUUID();
+
+      // Series A: connected to a team the reader manages; has a critical
+      // slot linked to the team's work role with no assignee.
+      // Series B: the reader is assigned to a slot (participant).
+      // Series C: no connection to the reader at all.
+      const seriesAId = (
+        await createSeries(seed, {
+          title: `Involved A ${suffix}`,
+          start: '2026-10-21T16:00:00.000Z',
+          durationMinutes: 60,
+          timezone: 'UTC',
+        })
+      ).id;
+      const seriesBId = (
+        await createSeries(seed, {
+          title: `Involved B ${suffix}`,
+          start: '2026-10-22T16:00:00.000Z',
+          durationMinutes: 60,
+          timezone: 'UTC',
+        })
+      ).id;
+      const seriesCId = (
+        await createSeries(seed, {
+          title: `Involved C ${suffix}`,
+          start: '2026-10-23T16:00:00.000Z',
+          durationMinutes: 60,
+          timezone: 'UTC',
+        })
+      ).id;
+      const mySeriesIds = [seriesAId, seriesBId, seriesCId];
+
+      const workRoleId = (
+        await db
+          .insertInto('work_roles')
+          .values({ name: `Cook ${suffix}`, organization_id: seed.organizationId })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+      const teamId = (
+        await db
+          .insertInto('teams')
+          .values({
+            name: `Managed Team ${suffix}`,
+            description: '',
+            organization_id: seed.organizationId,
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+      // The reader is a manager member of the team; the team is connected to
+      // series A and assigned the work role.
+      await db
+        .insertInto('team_members')
+        .values({ team_id: teamId, user_id: seed.readerUserId, is_manager: true })
+        .execute();
+      await db
+        .insertInto('team_work_roles')
+        .values({ team_id: teamId, work_role_id: workRoleId })
+        .execute();
+      await db
+        .insertInto('event_series_teams')
+        .values({ event_series_id: seriesAId, team_id: teamId })
+        .execute();
+
+      // Series A: critical slot linked to the team's work role, unfilled; plus
+      // a filled non-critical slot.
+      const criticalSlot = await createWorkRole(seed, seriesAId, {
+        title: 'Critical cook',
+        isCritical: true,
+        workRoleId,
+      });
+      const filledSlot = await createWorkRole(seed, seriesAId, {
+        title: 'Helper',
+        isCritical: false,
+      });
+      await assignToWorkRole(seed, seriesAId, filledSlot.id, seed.memberUserId);
+
+      // Series B: the reader is assigned to a slot (participant).
+      const slotB = await createWorkRole(seed, seriesBId, { title: 'Reader slot' });
+      await assignToWorkRole(seed, seriesBId, slotB.id, seed.readerUserId);
+
+      const range = 'start=2026-10-21T00:00:00.000Z&end=2026-10-25T00:00:00.000Z';
+      const getOccurrences = async (token: string, query = '') => {
+        const response = await app.inject({
+          method: 'GET',
+          url: `/api/v1/event-series/occurrences?${range}${query}`,
+          headers: auth(token),
+        });
+        expect(response.statusCode).toBe(200);
+        return (response.json() as OccurrenceResponse[]).filter(o =>
+          mySeriesIds.includes(o.seriesId),
+        );
+      };
+
+      // Scope "involved": series A (manager via team) and series B
+      // (participant); series C is excluded.
+      const involved = await getOccurrences(seed.readerToken, '&scope=involved');
+      expect([...new Set(involved.map(o => o.seriesId))].sort((a, b) => a - b)).toEqual([
+        seriesAId,
+        seriesBId,
+      ]);
+
+      const occA = involved.find(o => o.seriesId === seriesAId);
+      expect(occA?.isManager).toBe(true);
+      expect(occA?.isParticipant).toBe(false);
+      // Slot status indicators include both slots with their assignee counts.
+      expect(occA?.workRoleSlots).toHaveLength(2);
+      const critical = occA?.workRoleSlots.find(s => s.slotId === criticalSlot.id);
+      expect(critical?.isCritical).toBe(true);
+      expect(critical?.assigneeCount).toBe(0);
+      expect(critical?.workRoleId).toBe(workRoleId);
+      expect(critical?.workRoleName).toBe(`Cook ${suffix}`);
+      const helper = occA?.workRoleSlots.find(s => s.slotId === filledSlot.id);
+      expect(helper?.assigneeCount).toBe(1);
+      // The unfilled critical slot of the managed work role is flagged.
+      expect(occA?.managedUnfilledCriticalSlots).toEqual(['Critical cook']);
+
+      const occB = involved.find(o => o.seriesId === seriesBId);
+      expect(occB?.isParticipant).toBe(true);
+      expect(occB?.isManager).toBe(false);
+      expect(occB?.managedUnfilledCriticalSlots).toEqual([]);
+      expect(occB?.workRoleSlots[0]?.assigneeCount).toBe(1);
+
+      // The member (events:read only) is a participant of series A (assigned
+      // to the helper slot) but not a manager of anything.
+      const memberRole = await createRole(seed.organizationId, 'Involved Member Role', [
+        'events:read',
+      ]);
+      await assignRole(seed.memberUserId, memberRole);
+      const memberInvolved = await getOccurrences(seed.memberToken, '&scope=involved');
+      expect(memberInvolved.map(o => o.seriesId)).toEqual([seriesAId]);
+      expect(memberInvolved[0]?.isParticipant).toBe(true);
+      expect(memberInvolved[0]?.isManager).toBe(false);
+      expect(memberInvolved[0]?.managedUnfilledCriticalSlots).toEqual([]);
+
+      // Without a scope, all three series are listed and the flags are set.
+      const all = await getOccurrences(seed.readerToken);
+      expect(all).toHaveLength(3);
+      expect(all.find(o => o.seriesId === seriesCId)?.isManager).toBe(false);
+      expect(all.find(o => o.seriesId === seriesCId)?.isParticipant).toBe(false);
+      expect(all.find(o => o.seriesId === seriesCId)?.workRoleSlots).toEqual([]);
+
+      // A team leader (not a manager member) also counts as manager.
+      await db
+        .updateTable('team_members')
+        .set({ is_manager: false })
+        .where('team_id', '=', teamId)
+        .execute();
+      await db
+        .updateTable('teams')
+        .set({ team_leader_id: seed.readerUserId })
+        .where('id', '=', teamId)
+        .execute();
+      const leaderInvolved = await getOccurrences(seed.readerToken, '&scope=involved');
+      const leaderOccA = leaderInvolved.find(o => o.seriesId === seriesAId);
+      expect(leaderOccA?.isManager).toBe(true);
+      expect(leaderOccA?.managedUnfilledCriticalSlots).toEqual(['Critical cook']);
     });
   });
 

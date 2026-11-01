@@ -21,11 +21,28 @@ import {
   useMarkAllNotificationsReadMutation,
   useMarkNotificationReadMutation,
 } from '../../api/index.js';
-import type { EventOccurrence, Notification } from '../../types/index.js';
+import type { EventOccurrence, Notification, OccurrenceSlotStatus } from '../../types/index.js';
 import { occurrenceRef } from '../../types/index.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const UPCOMING_DAYS = 14;
+
+/** Slot status indicator: filled/total slots, red when a critical slot is unfilled. */
+function SlotStatusBadge({ slots }: { slots: OccurrenceSlotStatus[] }) {
+  const { t } = useTranslation();
+  const filled = slots.filter(s => s.assigneeCount > 0).length;
+  const hasUnfilledCritical = slots.some(s => s.isCritical && s.assigneeCount === 0);
+  return (
+    <Badge
+      size="sm"
+      variant="light"
+      color={hasUnfilledCritical ? 'red' : filled === slots.length ? 'green' : 'yellow'}
+      title={hasUnfilledCritical ? t('home.slotsUnfilledCritical') : undefined}
+    >
+      {t('home.slotsFilled', { filled, total: slots.length })}
+    </Badge>
+  );
+}
 
 function Home() {
   const { t } = useTranslation();
@@ -45,7 +62,13 @@ function Home() {
     page: 0,
     limit: 10,
   });
-  const { data: occurrencesData, isLoading: loadingEvents } = useGetOccurrencesQuery(range);
+  // Only show occurrences the current user is involved in: either assigned to
+  // a work role slot (participant) or managing the series via a connected
+  // team (manager).
+  const { data: occurrencesData, isLoading: loadingEvents } = useGetOccurrencesQuery({
+    ...range,
+    filter: { scope: 'involved' },
+  });
   const [markAllRead] = useMarkAllNotificationsReadMutation();
   const [markRead] = useMarkNotificationReadMutation();
 
@@ -205,7 +228,29 @@ function Home() {
                         : new Date(occ.start).toLocaleString()}
                     </Text>
                   </Box>
-                  <Group gap="xs" wrap="nowrap">
+                  <Group
+                    gap="xs"
+                    wrap="wrap"
+                    style={{ flex: '0 1 auto', maxWidth: '60%', justifyContent: 'flex-end' }}
+                  >
+                    {occ.managedUnfilledCriticalSlots.length > 0 && (
+                      <Badge size="sm" variant="filled" color="red">
+                        {t('home.missingManagedCritical', {
+                          slots: occ.managedUnfilledCriticalSlots.join(', '),
+                        })}
+                      </Badge>
+                    )}
+                    {occ.workRoleSlots.length > 0 && <SlotStatusBadge slots={occ.workRoleSlots} />}
+                    {occ.isParticipant && (
+                      <Badge size="sm" variant="light" color="green">
+                        {t('home.participant')}
+                      </Badge>
+                    )}
+                    {occ.isManager && (
+                      <Badge size="sm" variant="light" color="violet">
+                        {t('home.manager')}
+                      </Badge>
+                    )}
                     {occ.isRescheduled && (
                       <Badge size="sm" variant="light" color="orange">
                         {t('events.rescheduled')}

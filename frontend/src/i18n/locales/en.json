@@ -48,7 +48,12 @@
     "noNotifications": "No notifications",
     "noUpcomingEvents": "No upcoming events",
     "markAllRead": "Mark all as read",
-    "unread": "unread"
+    "unread": "unread",
+    "participant": "Participant",
+    "manager": "Manager",
+    "slotsFilled": "Slots {{filled}}/{{total}}",
+    "slotsUnfilledCritical": "Unfilled critical slots",
+    "missingManagedCritical": "Missing in your area: {{slots}}"
   },
   "login": {
     "signInToContinue": "Sign in to continue",
@@ -87,17 +92,11 @@
     "deleteTeam": "Delete team",
     "deleteTeamConfirm": "Delete the team \"{{name}}\"?",
     "backToList": "Back to teams",
-    "type": "Type",
     "leader": "Team leader",
-    "eventType": "Event type",
-    "workRole": "Work role",
+    "workRoles": "Work roles",
+    "eventSeries": "Event series",
     "manager": "Manager",
-    "canManageTeam": "Can manage this team",
-    "teamType": {
-      "general": "General",
-      "event_organizers": "Event organizers",
-      "role_group": "Role group"
-    }
+    "canManageTeam": "Can manage this team"
   },
   "sites": {
     "title": "Sites",

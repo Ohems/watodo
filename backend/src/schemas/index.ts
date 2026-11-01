@@ -163,7 +163,7 @@ export const eventSeriesUpdateSchema = eventSeriesPushSchema.partial();
 // --- Occurrence filter ---
 
 export const occurrenceFilterSchema = z.object({
-  scope: z.enum(['all', 'team', 'mine']).optional(),
+  scope: z.enum(['all', 'team', 'mine', 'involved']).optional(),
   siteId: z.uuid().optional(),
   roomId: z.uuid().optional(),
   teamId: z.uuid().optional(),
@@ -247,27 +247,23 @@ export type EventWorkRolesQuery = z.infer<typeof eventWorkRolesQuerySchema>;
 
 // --- Teams ---
 
-export const teamTypeSchema = z.enum(['general', 'event_organizers', 'role_group']);
-
 export const teamPushSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   organizationId: z.uuid(),
-  teamType: teamTypeSchema.optional(),
   teamLeaderId: z.uuid().nullable().optional(),
-  /** Required when teamType is 'event_organizers'; must be null otherwise. */
-  eventTypeId: z.number().int().nullable().optional(),
-  /** Required when teamType is 'role_group'; must be null otherwise. */
-  workRoleId: z.number().int().nullable().optional(),
+  /** Work roles assigned to the team. */
+  workRoleIds: z.array(z.number().int()).optional(),
+  /** Event series assigned to the team. */
+  eventSeriesIds: z.array(z.number().int()).optional(),
 });
 
 export const teamUpdateSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
-  teamType: teamTypeSchema.optional(),
   teamLeaderId: z.uuid().nullable().optional(),
-  eventTypeId: z.number().int().nullable().optional(),
-  workRoleId: z.number().int().nullable().optional(),
+  workRoleIds: z.array(z.number().int()).optional(),
+  eventSeriesIds: z.array(z.number().int()).optional(),
 });
 
 export const teamMemberSchema = z.object({
@@ -459,7 +455,6 @@ export const eventSeriesConfigSchema = z.object({
   teamIds: z.array(z.uuid()).optional(),
 });
 
-export type TeamType = z.infer<typeof teamTypeSchema>;
 export type TeamPush = z.infer<typeof teamPushSchema>;
 export type TeamUpdate = z.infer<typeof teamUpdateSchema>;
 export type TeamMemberInput = z.infer<typeof teamMemberSchema>;

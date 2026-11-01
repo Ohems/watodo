@@ -1,5 +1,6 @@
+import type { Transaction } from 'kysely';
 import { db } from '../database.js';
-import type { Team, TeamType } from '../db/types.js';
+import type { Database, Team } from '../db/types.js';
 import { badRequest, isUniqueViolation, notFound } from '../http-error.js';
 import { createLogger } from '../logger.js';
 import type {
@@ -23,18 +24,27 @@ export interface TeamMemberResponse {
   createdAt: string;
 }
 
+export interface TeamWorkRoleLink {
+  id: number;
+  name: string;
+}
+
+export interface TeamEventSeriesLink {
+  id: number;
+  title: string;
+}
+
 export interface TeamResponse {
   id: string;
   name: string;
   description: string;
   organizationId: string;
-  teamType: TeamType;
   teamLeaderId: string | null;
   teamLeaderName: string | null;
-  eventTypeId: number | null;
-  eventTypeName: string | null;
-  workRoleId: number | null;
-  workRoleName: string | null;
+  /** Work roles assigned to the team. */
+  workRoles: TeamWorkRoleLink[];
+  /** Event series assigned to the team. */
+  eventSeries: TeamEventSeriesLink[];
   memberCount: number;
   createdAt: string;
   updatedAt: string;
@@ -47,122 +57,117 @@ export interface PaginatedTeams {
   limit: number;
 }
 
-/** Display names for the optional team links, resolved in batch. */
-interface TeamLinkNames {
+/** Resolved team links (leader name, work roles, event series), per team. */
+interface TeamLinks {
   teamLeaderName: string | null;
-  eventTypeName: string | null;
-  workRoleName: string | null;
+  workRoles: TeamWorkRoleLink[];
+  eventSeries: TeamEventSeriesLink[];
 }
 
-function serializeTeam(team: Team, memberCount: number, links: TeamLinkNames): TeamResponse {
+function serializeTeam(team: Team, memberCount: number, links: TeamLinks): TeamResponse {
   return {
     id: team.id,
     name: team.name,
     description: team.description,
     organizationId: team.organization_id,
-    teamType: team.team_type,
     teamLeaderId: team.team_leader_id,
     teamLeaderName: links.teamLeaderName,
-    eventTypeId: team.event_type_id,
-    eventTypeName: links.eventTypeName,
-    workRoleId: team.work_role_id,
-    workRoleName: links.workRoleName,
+    workRoles: links.workRoles,
+    eventSeries: links.eventSeries,
     memberCount,
     createdAt: team.created_at.toISOString(),
     updatedAt: team.updated_at.toISOString(),
   };
 }
 
-async function getTeamLinkNames(teams: Team[]): Promise<Map<string, TeamLinkNames>> {
-  const result = new Map<string, TeamLinkNames>();
+async function getTeamLinks(teams: Team[]): Promise<Map<string, TeamLinks>> {
+  const result = new Map<string, TeamLinks>();
   if (teams.length === 0) return result;
+  const teamIds = teams.map(t => t.id);
   const leaderIds = [
     ...new Set(teams.map(t => t.team_leader_id).filter((id): id is string => id !== null)),
   ];
-  const eventTypeIds = [
-    ...new Set(teams.map(t => t.event_type_id).filter((id): id is number => id !== null)),
-  ];
-  const workRoleIds = [
-    ...new Set(teams.map(t => t.work_role_id).filter((id): id is number => id !== null)),
-  ];
-  const [leaders, eventTypes, workRoles] = await Promise.all([
+  const [leaders, workRoleRows, seriesRows] = await Promise.all([
     leaderIds.length > 0
       ? db.selectFrom('users').select(['id', 'name']).where('id', 'in', leaderIds).execute()
       : Promise.resolve([]),
-    eventTypeIds.length > 0
-      ? db
-          .selectFrom('event_types')
-          .select(['id', 'name'])
-          .where('id', 'in', eventTypeIds)
-          .execute()
-      : Promise.resolve([]),
-    workRoleIds.length > 0
-      ? db.selectFrom('work_roles').select(['id', 'name']).where('id', 'in', workRoleIds).execute()
-      : Promise.resolve([]),
+    db
+      .selectFrom('team_work_roles')
+      .innerJoin('work_roles', 'work_roles.id', 'team_work_roles.work_role_id')
+      .select([
+        'team_work_roles.team_id',
+        'work_roles.id as work_role_id',
+        'work_roles.name as work_role_name',
+      ])
+      .where('team_work_roles.team_id', 'in', teamIds)
+      .orderBy('work_roles.name', 'asc')
+      .execute(),
+    db
+      .selectFrom('event_series_teams')
+      .innerJoin('event_series', 'event_series.id', 'event_series_teams.event_series_id')
+      .select([
+        'event_series_teams.team_id',
+        'event_series.id as event_series_id',
+        'event_series.title as event_series_title',
+      ])
+      .where('event_series_teams.team_id', 'in', teamIds)
+      .orderBy('event_series.title', 'asc')
+      .execute(),
   ]);
   const leaderNames = new Map(leaders.map(l => [l.id, l.name]));
-  const eventTypeNames = new Map(eventTypes.map(e => [e.id, e.name]));
-  const workRoleNames = new Map(workRoles.map(w => [w.id, w.name]));
+  const workRolesByTeam = new Map<string, TeamWorkRoleLink[]>();
+  for (const row of workRoleRows) {
+    const list = workRolesByTeam.get(row.team_id) ?? [];
+    list.push({ id: row.work_role_id, name: row.work_role_name });
+    workRolesByTeam.set(row.team_id, list);
+  }
+  const seriesByTeam = new Map<string, TeamEventSeriesLink[]>();
+  for (const row of seriesRows) {
+    const list = seriesByTeam.get(row.team_id) ?? [];
+    list.push({ id: row.event_series_id, title: row.event_series_title });
+    seriesByTeam.set(row.team_id, list);
+  }
   for (const team of teams) {
     result.set(team.id, {
       teamLeaderName: team.team_leader_id ? (leaderNames.get(team.team_leader_id) ?? null) : null,
-      eventTypeName: team.event_type_id ? (eventTypeNames.get(team.event_type_id) ?? null) : null,
-      workRoleName: team.work_role_id ? (workRoleNames.get(team.work_role_id) ?? null) : null,
+      workRoles: workRolesByTeam.get(team.id) ?? [],
+      eventSeries: seriesByTeam.get(team.id) ?? [],
     });
   }
   return result;
 }
 
 /**
- * Validates the team purpose links against the organization: the linked event
- * type, work role and team leader must all belong to the organization, and the
- * links must match the team type.
+ * Validates the team links against the organization: the assigned work roles
+ * and event series and the team leader must all belong to the organization.
  */
 async function validateTeamLinks(
   organizationId: string,
-  teamType: TeamType,
-  eventTypeId: number | null,
-  workRoleId: number | null,
+  workRoleIds: number[],
+  eventSeriesIds: number[],
   teamLeaderId: string | null,
 ): Promise<void> {
-  if (teamType === 'event_organizers' && eventTypeId === null) {
-    throw badRequest('An event organizer team must be linked to an event type!');
-  }
-  if (teamType === 'role_group' && workRoleId === null) {
-    throw badRequest('A role group team must be linked to a work role!');
-  }
-  if (teamType === 'general' && (eventTypeId !== null || workRoleId !== null)) {
-    throw badRequest(
-      'Only event organizer or role group teams can have an event type or work role link!',
-    );
-  }
-  if (teamType === 'event_organizers' && workRoleId !== null) {
-    throw badRequest('An event organizer team cannot be linked to a work role!');
-  }
-  if (teamType === 'role_group' && eventTypeId !== null) {
-    throw badRequest('A role group team cannot be linked to an event type!');
-  }
-  if (eventTypeId !== null) {
-    const eventType = await db
-      .selectFrom('event_types')
-      .innerJoin('calendars', 'calendars.id', 'event_types.calendar_id')
-      .select('event_types.id')
-      .where('event_types.id', '=', eventTypeId)
-      .where('calendars.organization_id', '=', organizationId)
-      .executeTakeFirst();
-    if (!eventType) {
-      throw notFound(`Event type ${eventTypeId} not found in organization ${organizationId}!`);
-    }
-  }
-  if (workRoleId !== null) {
-    const workRole = await db
+  if (workRoleIds.length > 0) {
+    const workRoles = await db
       .selectFrom('work_roles')
       .select('id')
-      .where('id', '=', workRoleId)
+      .where('id', 'in', workRoleIds)
       .where('organization_id', '=', organizationId)
-      .executeTakeFirst();
-    if (!workRole) {
-      throw notFound(`Work role ${workRoleId} not found in organization ${organizationId}!`);
+      .execute();
+    if (workRoles.length !== new Set(workRoleIds).size) {
+      throw notFound(`One or more work roles not found in organization ${organizationId}!`);
+    }
+  }
+  if (eventSeriesIds.length > 0) {
+    const series = await db
+      .selectFrom('event_series')
+      .innerJoin('calendars', 'calendars.id', 'event_series.calendar_id')
+      .select('event_series.id')
+      .where('event_series.id', 'in', eventSeriesIds)
+      .where('calendars.organization_id', '=', organizationId)
+      .execute();
+    if (series.length !== new Set(eventSeriesIds).size) {
+      throw notFound(`One or more event series not found in organization ${organizationId}!`);
     }
   }
   if (teamLeaderId !== null) {
@@ -175,6 +180,29 @@ async function validateTeamLinks(
     if (!membership) {
       throw notFound(`User ${teamLeaderId} is not a member of organization ${organizationId}!`);
     }
+  }
+}
+
+/** Replaces the team's work role and event series assignments in a transaction. */
+async function syncTeamLinks(
+  tx: Transaction<Database>,
+  teamId: string,
+  workRoleIds: number[],
+  eventSeriesIds: number[],
+): Promise<void> {
+  await tx.deleteFrom('team_work_roles').where('team_id', '=', teamId).execute();
+  if (workRoleIds.length > 0) {
+    await tx
+      .insertInto('team_work_roles')
+      .values(workRoleIds.map(workRoleId => ({ team_id: teamId, work_role_id: workRoleId })))
+      .execute();
+  }
+  await tx.deleteFrom('event_series_teams').where('team_id', '=', teamId).execute();
+  if (eventSeriesIds.length > 0) {
+    await tx
+      .insertInto('event_series_teams')
+      .values(eventSeriesIds.map(seriesId => ({ event_series_id: seriesId, team_id: teamId })))
+      .execute();
   }
 }
 
@@ -239,19 +267,15 @@ export async function listTeams(
     countQuery.executeTakeFirstOrThrow(),
   ]);
 
-  const [counts, linkNames] = await Promise.all([
+  const [counts, links] = await Promise.all([
     getMemberCounts(rows.map(r => r.id)),
-    getTeamLinkNames(rows),
+    getTeamLinks(rows),
   ]);
   const items = rows.map(row =>
     serializeTeam(
       row,
       counts.get(row.id) ?? 0,
-      linkNames.get(row.id) ?? {
-        teamLeaderName: null,
-        eventTypeName: null,
-        workRoleName: null,
-      },
+      links.get(row.id) ?? { teamLeaderName: null, workRoles: [], eventSeries: [] },
     ),
   );
 
@@ -274,14 +298,11 @@ export async function getTeam(teamId: string): Promise<TeamResponse> {
   if (!team) {
     throw notFound(`Team ${teamId} not found!`);
   }
-  const [counts, linkNames] = await Promise.all([
-    getMemberCounts([team.id]),
-    getTeamLinkNames([team]),
-  ]);
+  const [counts, links] = await Promise.all([getMemberCounts([team.id]), getTeamLinks([team])]);
   return serializeTeam(
     team,
     counts.get(team.id) ?? 0,
-    linkNames.get(team.id) ?? { teamLeaderName: null, eventTypeName: null, workRoleName: null },
+    links.get(team.id) ?? { teamLeaderName: null, workRoles: [], eventSeries: [] },
   );
 }
 
@@ -292,34 +313,33 @@ export async function getTeam(teamId: string): Promise<TeamResponse> {
  */
 export async function createTeam(data: TeamPush): Promise<TeamResponse> {
   logger.trace('teamService.createTeam');
-  const teamType = data.teamType ?? 'general';
-  const eventTypeId = data.eventTypeId ?? null;
-  const workRoleId = data.workRoleId ?? null;
+  const workRoleIds = data.workRoleIds ?? [];
+  const eventSeriesIds = data.eventSeriesIds ?? [];
   await validateTeamLinks(
     data.organizationId,
-    teamType,
-    eventTypeId,
-    workRoleId,
+    workRoleIds,
+    eventSeriesIds,
     data.teamLeaderId ?? null,
   );
-  const team = await db
-    .insertInto('teams')
-    .values({
-      name: data.name,
-      description: data.description ?? '',
-      organization_id: data.organizationId,
-      team_type: teamType,
-      team_leader_id: data.teamLeaderId ?? null,
-      event_type_id: eventTypeId,
-      work_role_id: workRoleId,
-    })
-    .returningAll()
-    .executeTakeFirstOrThrow();
-  const linkNames = await getTeamLinkNames([team]);
+  const team = await db.transaction().execute(async tx => {
+    const created = await tx
+      .insertInto('teams')
+      .values({
+        name: data.name,
+        description: data.description ?? '',
+        organization_id: data.organizationId,
+        team_leader_id: data.teamLeaderId ?? null,
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    await syncTeamLinks(tx, created.id, workRoleIds, eventSeriesIds);
+    return created;
+  });
+  const links = await getTeamLinks([team]);
   return serializeTeam(
     team,
     0,
-    linkNames.get(team.id) ?? { teamLeaderName: null, eventTypeName: null, workRoleName: null },
+    links.get(team.id) ?? { teamLeaderName: null, workRoles: [], eventSeries: [] },
   );
 }
 
@@ -339,42 +359,56 @@ export async function updateTeam(teamId: string, data: TeamUpdate): Promise<Team
   if (!existing) {
     throw notFound(`Team ${teamId} not found!`);
   }
-  // Merge with the existing row so partial updates keep the current purpose
-  // links, then validate the merged state as a whole.
-  const teamType = data.teamType ?? existing.team_type;
-  const eventTypeId = data.eventTypeId !== undefined ? data.eventTypeId : existing.event_type_id;
-  const workRoleId = data.workRoleId !== undefined ? data.workRoleId : existing.work_role_id;
+  // Merge with the existing links so partial updates keep the current
+  // assignments, then validate the merged state as a whole.
+  let workRoleIds = data.workRoleIds;
+  let eventSeriesIds = data.eventSeriesIds;
+  if (workRoleIds === undefined || eventSeriesIds === undefined) {
+    const [currentWorkRoles, currentSeries] = await Promise.all([
+      workRoleIds === undefined
+        ? db
+            .selectFrom('team_work_roles')
+            .select('work_role_id')
+            .where('team_id', '=', teamId)
+            .execute()
+        : Promise.resolve(null),
+      eventSeriesIds === undefined
+        ? db
+            .selectFrom('event_series_teams')
+            .select('event_series_id')
+            .where('team_id', '=', teamId)
+            .execute()
+        : Promise.resolve(null),
+    ]);
+    workRoleIds = workRoleIds ?? (currentWorkRoles ?? []).map(r => r.work_role_id);
+    eventSeriesIds = eventSeriesIds ?? (currentSeries ?? []).map(r => r.event_series_id);
+  }
   const teamLeaderId =
     data.teamLeaderId !== undefined ? data.teamLeaderId : existing.team_leader_id;
-  await validateTeamLinks(
-    existing.organization_id,
-    teamType,
-    eventTypeId,
-    workRoleId,
-    teamLeaderId,
-  );
-  const updated = await db
-    .updateTable('teams')
-    .set({
-      ...(data.name !== undefined ? { name: data.name } : {}),
-      ...(data.description !== undefined ? { description: data.description } : {}),
-      ...(data.teamType !== undefined ? { team_type: teamType } : {}),
-      ...(data.teamLeaderId !== undefined ? { team_leader_id: teamLeaderId } : {}),
-      ...(data.eventTypeId !== undefined ? { event_type_id: eventTypeId } : {}),
-      ...(data.workRoleId !== undefined ? { work_role_id: workRoleId } : {}),
-      updated_at: new Date(),
-    })
-    .where('id', '=', teamId)
-    .returningAll()
-    .executeTakeFirstOrThrow();
-  const [counts, linkNames] = await Promise.all([
+  await validateTeamLinks(existing.organization_id, workRoleIds, eventSeriesIds, teamLeaderId);
+  const updated = await db.transaction().execute(async tx => {
+    const row = await tx
+      .updateTable('teams')
+      .set({
+        ...(data.name !== undefined ? { name: data.name } : {}),
+        ...(data.description !== undefined ? { description: data.description } : {}),
+        ...(data.teamLeaderId !== undefined ? { team_leader_id: teamLeaderId } : {}),
+        updated_at: new Date(),
+      })
+      .where('id', '=', teamId)
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    await syncTeamLinks(tx, teamId, workRoleIds, eventSeriesIds);
+    return row;
+  });
+  const [counts, links] = await Promise.all([
     getMemberCounts([updated.id]),
-    getTeamLinkNames([updated]),
+    getTeamLinks([updated]),
   ]);
   return serializeTeam(
     updated,
     counts.get(updated.id) ?? 0,
-    linkNames.get(updated.id) ?? { teamLeaderName: null, eventTypeName: null, workRoleName: null },
+    links.get(updated.id) ?? { teamLeaderName: null, workRoles: [], eventSeries: [] },
   );
 }
 

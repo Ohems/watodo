@@ -220,7 +220,7 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 - `GET /api/v1/event-series` - List event series (`events:read`, requires `organizationId` query)
 - `POST /api/v1/event-series` - Create event series (`events:write`)
 - `GET /api/v1/event-series/management` - Paginated series list for the management view (`events:read`)
-- `GET /api/v1/event-series/occurrences` - Occurrences in a time range (used by calendars; `events:read`)
+- `GET /api/v1/event-series/occurrences` - Occurrences in a time range (used by calendars and the Home page; `events:read`). Each occurrence includes `isParticipant`, `isManager`, `workRoleSlots` (per-slot status indicators) and `managedUnfilledCriticalSlots` for the requesting user. The `scope` filter accepts `all`, `mine` (assigned to a slot), `team` (series linked to one of the user's teams) and `involved` (participant or manager; used by the Home page)
 - `GET /api/v1/event-occurrences/:occurrenceRef` - Single occurrence detail by ref (numeric ID or `tmp:{seriesId}:{isoStart}`; `events:read`)
 - `POST /api/v1/event-occurrences/:occurrenceRef/materialize` - Materialize a tmp ref into a stable numeric ID, inheriting parent slots (`events:write`)
 - `POST /api/v1/event-occurrences/:occurrenceRef/import-slots` - Import parent series slots into a materialized occurrence (`events:write`)
@@ -253,10 +253,10 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 - `PATCH /api/v1/event-series/:seriesId/comments/:commentId` - Update comment (author only, `events:write`)
 - `DELETE /api/v1/event-series/:seriesId/comments/:commentId` - Delete comment (author only, `events:write`)
 - `GET /api/v1/organizations/:organizationId/event-types` - List all event types of an organization (no pagination, `events:read`)
-- `GET /api/v1/organizations/:organizationId/teams` - List teams with type, leader and links (paginated, `team-management:read`)
-- `POST /api/v1/organizations/:organizationId/teams` - Create team (`team-management:write`; body may include `teamType`, `teamLeaderId`, `eventTypeId`, `workRoleId`)
+- `GET /api/v1/organizations/:organizationId/teams` - List teams with leader, assigned work roles and assigned event series (paginated, `team-management:read`)
+- `POST /api/v1/organizations/:organizationId/teams` - Create team (`team-management:write`; body may include `teamLeaderId`, `workRoleIds`, `eventSeriesIds`)
 - `GET /api/v1/organizations/:organizationId/teams/:teamId` - Get team (`team-management:read`)
-- `PATCH /api/v1/organizations/:organizationId/teams/:teamId` - Update team, including type/leader/links (`team-management:write`)
+- `PATCH /api/v1/organizations/:organizationId/teams/:teamId` - Update team, including leader/work roles/event series (`team-management:write`)
 - `DELETE /api/v1/organizations/:organizationId/teams/:teamId` - Delete team (`team-management:write`)
 - `GET /api/v1/organizations/:organizationId/teams/:teamId/members` - List team members (`team-management:read`)
 - `POST /api/v1/organizations/:organizationId/teams/:teamId/members` - Add team member, optionally with the manager toggle (`team-management:write`)
@@ -385,10 +385,10 @@ frontend/src/
 - **Migrations**: node-pg-migrate. Migration files live in `backend/migrations/`.
 - **Schema**: tables covering users, authentication accounts (multi-provider),
   access tokens, records, permissions, roles, role permissions, user roles,
-  organizations, teams (with a team type of `general`, `event_organizers` or
-  `role_group`, an optional team leader, and an optional link to an event type
-  or work role), team members (with an `is_manager` toggle granting management
-  of that specific team), sites (physical locations), rooms (within sites),
+  organizations, teams (with an optional team leader; one or more work roles
+  are assigned via the `team_work_roles` join table and one or more event series
+  via `event_series_teams`), team members (with an `is_manager` toggle granting
+  management of that specific team), sites (physical locations), rooms (within sites),
   calendars, event types, work roles (the role catalog), certifications,
   user work roles (availability/qualification), user certifications,
   certification work roles (mandatory certifications per role),
@@ -403,6 +403,18 @@ frontend/src/
   `event_work_roles` slots with `event_occurrence_id` NULL are the parent
   template; materialization copies them to occurrence-level slots tracked by
   `inherited_from_work_role_id` (re-import never duplicates, never deletes).
+- **Event participation and management**: a user is a *participant* of an event
+  (series or occurrence) if they are assigned to one of its work role slots
+  (a series-wide slot covers every occurrence; an occurrence-level slot only
+  that occurrence). A user is a *manager* of an event series if they are the
+  team leader or a manager member (`team_members.is_manager`) of a team that
+  is connected to the series (`event_series_teams`). If the teams they manage
+  have work roles assigned (`team_work_roles`), the user is considered a
+  manager of those specific work roles for the connected event series. The
+  occurrences list endpoint reports these as `isParticipant` / `isManager` per
+  occurrence and flags critical, unfilled slots of managed work roles in
+  `managedUnfilledCriticalSlots`; the Home page "Upcoming events" card uses
+  `scope=involved` to show only occurrences the user participates in or manages.
 - **Auth tables**: `permissions` holds the system-defined permission codes;
   `auth_accounts` links users to provider accounts (discord, google, microsoft);
   `roles` belong to an organization and are granted permissions via
@@ -562,7 +574,7 @@ See `.env.sample` for all variables. Key ones:
 - Always run `npm run check:fix` and `npm run test` before finishing work.
 - When you add a feature that persists data, update `backend/scripts/seed-data.ts` (run with
   `npm run seed:data -w backend`) so the generated test data covers the new feature. The script
-  generates semi-realistic test data for both organizations, mock users, roles, teams (with types, leaders and links), calendars,
+  generates semi-realistic test data for both organizations, mock users, roles, teams (with leaders, work role and event series assignments), calendars,
   event types, event series (previous/current/next month), materialized occurrences (with
   cancel/reschedule flags), work role slots with assignments and comments.
   It must keep refusing to run unless the database has exactly one user and one

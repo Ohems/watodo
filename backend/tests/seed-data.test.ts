@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { seedTestData } from '../scripts/seed-data.js';
 import { db } from '../src/database.js';
+import { getOccurrences } from '../src/services/event-service.js';
 import { resetDatabase } from './helpers/fixtures.js';
 
 // Verifies that the data seed script creates the expected number of rows in
@@ -58,11 +59,11 @@ describe('seed-data script', () => {
       calendars: 4,
       event_types: 8,
       event_type_roles: 4,
-      event_series: 16,
-      event_series_teams: 7,
+      event_series: 17,
+      event_series_teams: 8,
       event_occurrences: 6,
-      event_work_roles: 37,
-      event_work_role_assignments: 32,
+      event_work_roles: 40,
+      event_work_role_assignments: 34,
       event_comments: 10,
     };
 
@@ -97,32 +98,22 @@ describe('seed-data script', () => {
     expect(flagged.length).toBeGreaterThan(0);
   });
 
-  it('seeds teams of every type with leaders and links', async () => {
+  it('seeds teams with leaders, work role and event series assignments', async () => {
     await db.transaction().execute(seedTestData);
 
     const teams = await db.selectFrom('teams').selectAll().execute();
-    const byType = new Map<string, number>();
-    for (const team of teams) {
-      byType.set(team.team_type, (byType.get(team.team_type) ?? 0) + 1);
-    }
-    expect(byType.get('general')).toBeGreaterThan(0);
-    expect(byType.get('event_organizers')).toBeGreaterThan(0);
-    expect(byType.get('role_group')).toBeGreaterThan(0);
 
-    // Every team has a leader, and the links match the team type.
+    // Every team has a leader.
     for (const team of teams) {
       expect(team.team_leader_id).not.toBeNull();
-      if (team.team_type === 'event_organizers') {
-        expect(team.event_type_id).not.toBeNull();
-        expect(team.work_role_id).toBeNull();
-      } else if (team.team_type === 'role_group') {
-        expect(team.work_role_id).not.toBeNull();
-        expect(team.event_type_id).toBeNull();
-      } else {
-        expect(team.event_type_id).toBeNull();
-        expect(team.work_role_id).toBeNull();
-      }
     }
+
+    // At least one team has work roles assigned, and at least one team is
+    // assigned to an event series.
+    const teamWorkRoles = await db.selectFrom('team_work_roles').selectAll().execute();
+    expect(teamWorkRoles.length).toBeGreaterThan(0);
+    const teamSeries = await db.selectFrom('event_series_teams').selectAll().execute();
+    expect(teamSeries.length).toBeGreaterThan(0);
 
     // Every team has at least one member with the manager toggle.
     const managers = await db
@@ -132,5 +123,34 @@ describe('seed-data script', () => {
       .groupBy('team_id')
       .execute();
     expect(managers.length).toBe(teams.length);
+  });
+
+  it('seeds upcoming occurrences the initial user is involved in', async () => {
+    await db.transaction().execute(seedTestData);
+
+    const realUser = await db.selectFrom('users').selectAll().executeTakeFirstOrThrow();
+    const now = new Date();
+    const in14Days = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+    const involved = await getOccurrences(
+      now,
+      in14Days,
+      undefined,
+      { scope: 'involved' },
+      realUser.id,
+    );
+
+    // The Home page "Upcoming events" list is not empty for the initial user.
+    expect(involved.length).toBeGreaterThan(0);
+
+    // At least one occurrence where the user is a participant (assigned to a
+    // slot), and at least one where they are a manager via a connected team.
+    expect(involved.some(o => o.isParticipant)).toBe(true);
+    expect(involved.some(o => o.isManager)).toBe(true);
+
+    // At least one managed occurrence flags an unfilled critical slot of a
+    // work role the user manages (the warning label on the Home page).
+    const warned = involved.find(o => o.managedUnfilledCriticalSlots.length > 0);
+    expect(warned).toBeDefined();
+    expect(warned?.workRoleSlots.some(s => s.isCritical && s.assigneeCount === 0)).toBe(true);
   });
 });

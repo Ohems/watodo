@@ -109,18 +109,15 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     'UNIQUE(user_id, organization_id)',
   );
 
-  // Teams. A team has a purpose (`team_type`): a plain group of people
-  // (`general`), an `event_organizers` team linked to an event type, or a
-  // `role_group` team linked to a work role. `event_type_id` / `work_role_id`
-  // get their foreign keys after the referenced tables are created below.
+  // Teams. A team is a plain group of people. One or more work roles and one
+  // or more event series can be assigned to a team via the `team_work_roles`
+  // and `event_series_teams` join tables (created below, once `work_roles`
+  // and `event_series` exist).
   pgm.createTable('teams', {
     id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
     name: { type: 'text', notNull: true },
     description: { type: 'text', notNull: true, default: '' },
-    team_type: { type: 'text', notNull: true, default: 'general' },
     team_leader_id: { type: 'uuid', references: 'users', onDelete: 'SET NULL' },
-    event_type_id: { type: 'integer' },
-    work_role_id: { type: 'integer' },
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     organization_id: {
@@ -130,11 +127,6 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
       onDelete: 'CASCADE',
     },
   });
-  pgm.addConstraint(
-    'teams',
-    'teams_team_type_check',
-    "CHECK (team_type IN ('general', 'event_organizers', 'role_group'))",
-  );
 
   // Team members: users belonging to a team. `is_manager` marks members who
   // can manage this specific team (edit it, manage its members) without
@@ -204,6 +196,25 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
   pgm.createIndex('work_roles', 'organization_id');
+
+  // Team to work roles (many-to-many: work roles assigned to a team)
+  pgm.createTable('team_work_roles', {
+    id: { type: 'serial', primaryKey: true },
+    team_id: { type: 'uuid', notNull: true, references: 'teams', onDelete: 'CASCADE' },
+    work_role_id: {
+      type: 'integer',
+      notNull: true,
+      references: 'work_roles',
+      onDelete: 'CASCADE',
+    },
+    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+  });
+  pgm.addConstraint(
+    'team_work_roles',
+    'team_work_roles_team_work_role_unique',
+    'UNIQUE(team_id, work_role_id)',
+  );
+  pgm.createIndex('team_work_roles', 'work_role_id');
 
   // Certifications (organization-scoped, e.g. "First Aid Certificate")
   pgm.createTable('certifications', {
@@ -331,18 +342,6 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     calendar_id: { type: 'uuid', notNull: true, references: 'calendars', onDelete: 'CASCADE' },
   });
-  // Team purpose links (the referenced tables exist from here on).
-  pgm.addConstraint(
-    'teams',
-    'teams_event_type_id_fkey',
-    'FOREIGN KEY (event_type_id) REFERENCES event_types(id) ON DELETE SET NULL',
-  );
-  pgm.addConstraint(
-    'teams',
-    'teams_work_role_id_fkey',
-    'FOREIGN KEY (work_role_id) REFERENCES work_roles(id) ON DELETE SET NULL',
-  );
-
   // Roles (organization-specific)
   pgm.createTable('roles', {
     id: { type: 'serial', primaryKey: true },
@@ -585,8 +584,6 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
   pgm.createIndex('users', 'state');
   pgm.createIndex('access_tokens', 'user_id');
   pgm.createIndex('teams', 'organization_id');
-  pgm.createIndex('teams', 'event_type_id');
-  pgm.createIndex('teams', 'work_role_id');
   pgm.createIndex('teams', 'team_leader_id');
   pgm.createIndex('event_series', 'title');
 }
@@ -598,6 +595,7 @@ export async function down(pgm: MigrationBuilder): Promise<void> {
   pgm.dropTable('event_occurrences');
   pgm.dropTable('event_series_teams');
   pgm.dropTable('event_series');
+  pgm.dropTable('team_work_roles');
   pgm.dropTable('event_type_roles');
   pgm.dropTable('user_roles');
   pgm.dropTable('role_permissions');

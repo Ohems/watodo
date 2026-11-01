@@ -9,6 +9,33 @@ import {
   regularUser,
 } from './helpers.js';
 
+/** Builds an occurrence mock with defaults for all fields the Home page reads. */
+function makeOccurrence(partial: Record<string, unknown>) {
+  return {
+    occurrenceId: null,
+    seriesId: 1,
+    title: 'Event',
+    description: null,
+    isAllDay: false,
+    siteId: null,
+    roomId: null,
+    reserveWholeSite: false,
+    organizationId: ORG_ID,
+    organizationName: 'Test Org',
+    occurrenceStart: new Date().toISOString(),
+    start: new Date().toISOString(),
+    end: new Date().toISOString(),
+    isRescheduled: false,
+    isCancelled: false,
+    exceptionId: null,
+    isParticipant: false,
+    isManager: false,
+    workRoleSlots: [],
+    managedUnfilledCriticalSlots: [],
+    ...partial,
+  };
+}
+
 test.describe('Home page', () => {
   test.describe('data display', () => {
     test('shows notifications with unread badge', async ({ page }) => {
@@ -52,40 +79,22 @@ test.describe('Home page', () => {
       const inTwoDays = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
       const inFiveDays = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000);
       const occurrences = [
-        {
+        makeOccurrence({
           seriesId: 1,
           title: 'Later Event',
-          description: null,
-          isAllDay: false,
-          siteId: null,
-          roomId: null,
-          reserveWholeSite: false,
-          organizationId: ORG_ID,
-          organizationName: 'Test Org',
           occurrenceStart: inFiveDays.toISOString(),
           start: inFiveDays.toISOString(),
           end: new Date(inFiveDays.getTime() + 60 * 60 * 1000).toISOString(),
-          isRescheduled: false,
-          isCancelled: false,
-          exceptionId: null,
-        },
-        {
+        }),
+        makeOccurrence({
           seriesId: 2,
           title: 'Sooner Event',
-          description: null,
           isAllDay: true,
-          siteId: null,
-          roomId: null,
-          reserveWholeSite: false,
-          organizationId: ORG_ID,
-          organizationName: 'Test Org',
           occurrenceStart: inTwoDays.toISOString(),
           start: inTwoDays.toISOString(),
           end: new Date(inTwoDays.getTime() + 24 * 60 * 60 * 1000).toISOString(),
           isRescheduled: true,
-          isCancelled: false,
-          exceptionId: null,
-        },
+        }),
       ];
       await mockCommonApis(page, adminUser());
       await mockOccurrences(page, occurrences);
@@ -128,40 +137,21 @@ test.describe('Home page', () => {
       const now = new Date();
       const inOneDay = new Date(now.getTime() + 24 * 60 * 60 * 1000);
       const occurrences = [
-        {
+        makeOccurrence({
           seriesId: 1,
           title: 'Visible Event',
-          description: null,
-          isAllDay: false,
-          siteId: null,
-          roomId: null,
-          reserveWholeSite: false,
-          organizationId: ORG_ID,
-          organizationName: 'Test Org',
           occurrenceStart: inOneDay.toISOString(),
           start: inOneDay.toISOString(),
           end: new Date(inOneDay.getTime() + 60 * 60 * 1000).toISOString(),
-          isRescheduled: false,
-          isCancelled: false,
-          exceptionId: null,
-        },
-        {
+        }),
+        makeOccurrence({
           seriesId: 2,
           title: 'Cancelled Event',
-          description: null,
-          isAllDay: false,
-          siteId: null,
-          roomId: null,
-          reserveWholeSite: false,
-          organizationId: ORG_ID,
-          organizationName: 'Test Org',
           occurrenceStart: inOneDay.toISOString(),
           start: inOneDay.toISOString(),
           end: new Date(inOneDay.getTime() + 60 * 60 * 1000).toISOString(),
-          isRescheduled: false,
           isCancelled: true,
-          exceptionId: null,
-        },
+        }),
       ];
       await mockCommonApis(page, adminUser());
       await mockOccurrences(page, occurrences);
@@ -169,6 +159,93 @@ test.describe('Home page', () => {
 
       await expect(page.getByText('Visible Event')).toBeVisible();
       await expect(page.getByText('Cancelled Event')).toHaveCount(0);
+    });
+
+    test('requests only occurrences the user is involved in (scope=involved)', async ({ page }) => {
+      await mockCommonApis(page, adminUser());
+      const captured: string[] = [];
+      await page.route('**/api/v1/event-series/occurrences?*', route => {
+        captured.push(route.request().url());
+        return route.fulfill({ json: [] });
+      });
+      await page.goto('/');
+
+      await expect(page.getByText('Upcoming events')).toBeVisible();
+      await expect
+        .poll(() => captured.length, { message: 'occurrences endpoint was called' })
+        .toBeGreaterThan(0);
+      const url = new URL(captured[0]);
+      expect(url.searchParams.get('scope')).toBe('involved');
+      // The Home page aggregates all organizations, so no organization filter.
+      expect(url.searchParams.has('organizationId')).toBe(false);
+    });
+
+    test('shows slot status indicators and a warning for unfilled managed critical slots', async ({
+      page,
+    }) => {
+      const now = new Date();
+      const inOneDay = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+      const occurrences = [
+        makeOccurrence({
+          seriesId: 1,
+          title: 'Managed Event',
+          occurrenceStart: inOneDay.toISOString(),
+          start: inOneDay.toISOString(),
+          end: new Date(inOneDay.getTime() + 60 * 60 * 1000).toISOString(),
+          isManager: true,
+          workRoleSlots: [
+            {
+              slotId: 11,
+              title: 'Cook',
+              workRoleId: 1,
+              workRoleName: 'Cook',
+              isCritical: true,
+              assigneeCount: 0,
+            },
+            {
+              slotId: 12,
+              title: 'Helper',
+              workRoleId: null,
+              workRoleName: null,
+              isCritical: false,
+              assigneeCount: 1,
+            },
+          ],
+          managedUnfilledCriticalSlots: ['Cook'],
+        }),
+        makeOccurrence({
+          seriesId: 2,
+          title: 'Participant Event',
+          occurrenceStart: inOneDay.toISOString(),
+          start: new Date(inOneDay.getTime() + 2 * 60 * 60 * 1000).toISOString(),
+          end: new Date(inOneDay.getTime() + 3 * 60 * 60 * 1000).toISOString(),
+          isParticipant: true,
+          workRoleSlots: [
+            {
+              slotId: 21,
+              title: 'Setup',
+              workRoleId: 2,
+              workRoleName: 'Setup',
+              isCritical: true,
+              assigneeCount: 1,
+            },
+          ],
+          managedUnfilledCriticalSlots: [],
+        }),
+      ];
+      await mockCommonApis(page, adminUser());
+      await mockOccurrences(page, occurrences);
+      await page.goto('/');
+
+      // Slot status indicators: 1/2 filled for the managed event (red, critical
+      // unfilled), 1/1 filled for the participant event (green).
+      await expect(page.getByText('Slots 1/2')).toBeVisible();
+      await expect(page.getByText('Slots 1/1')).toBeVisible();
+      // Special warning label for the unfilled critical slot the user manages.
+      await expect(page.getByText('Missing in your area: Cook')).toBeVisible();
+      // Participant/manager badges.
+      await expect(page.getByText('Manager', { exact: true })).toBeVisible();
+      await expect(page.getByText('Participant', { exact: true })).toBeVisible();
     });
   });
 
@@ -243,23 +320,14 @@ test.describe('Home page', () => {
       const now = new Date();
       const inOneDay = new Date(now.getTime() + 24 * 60 * 60 * 1000);
       const occurrences = [
-        {
+        makeOccurrence({
+          occurrenceId: 99,
           seriesId: 99,
           title: 'My Event',
-          description: null,
-          isAllDay: false,
-          siteId: null,
-          roomId: null,
-          reserveWholeSite: false,
-          organizationId: ORG_ID,
-          organizationName: 'Test Org',
           occurrenceStart: inOneDay.toISOString(),
           start: inOneDay.toISOString(),
           end: new Date(inOneDay.getTime() + 60 * 60 * 1000).toISOString(),
-          isRescheduled: false,
-          isCancelled: false,
-          exceptionId: null,
-        },
+        }),
       ];
       await mockCommonApis(page, adminUser());
       await mockOccurrences(page, occurrences);
@@ -267,7 +335,7 @@ test.describe('Home page', () => {
 
       await expect(page.getByText('My Event')).toBeVisible();
       await page.getByText('My Event').click();
-      await expect(page).toHaveURL('/events/99');
+      await expect(page).toHaveURL('/events/occurrences/99');
     });
   });
 

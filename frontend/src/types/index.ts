@@ -144,6 +144,25 @@ export interface EventOccurrence {
   isRescheduled: boolean;
   isCancelled: boolean;
   exceptionId: number | null;
+  /** True when the current user is assigned to a work role slot of this occurrence or its series. */
+  isParticipant: boolean;
+  /** True when the current user manages this series via a connected team (team leader or manager member). */
+  isManager: boolean;
+  /** Work role slot status indicators for this occurrence. */
+  workRoleSlots: OccurrenceSlotStatus[];
+  /** Titles of critical, unfilled slots whose work role the current user manages for this series. */
+  managedUnfilledCriticalSlots: string[];
+}
+
+/** Status indicator for a single work role slot of an occurrence. */
+export interface OccurrenceSlotStatus {
+  slotId: number;
+  title: string;
+  workRoleId: number | null;
+  workRoleName: string | null;
+  isCritical: boolean;
+  /** Number of users assigned to this slot. */
+  assigneeCount: number;
 }
 
 /**
@@ -248,20 +267,27 @@ export interface EventOccurrenceDetail {
 
 // --- Teams ---
 
-export type TeamType = 'general' | 'event_organizers' | 'role_group';
+export interface TeamWorkRoleLink {
+  id: number;
+  name: string;
+}
+
+export interface TeamEventSeriesLink {
+  id: number;
+  title: string;
+}
 
 export interface Team {
   id: string;
   name: string;
   description: string;
   organizationId: string;
-  teamType: TeamType;
   teamLeaderId: string | null;
   teamLeaderName: string | null;
-  eventTypeId: number | null;
-  eventTypeName: string | null;
-  workRoleId: number | null;
-  workRoleName: string | null;
+  /** Work roles assigned to the team. */
+  workRoles: TeamWorkRoleLink[];
+  /** Event series assigned to the team. */
+  eventSeries: TeamEventSeriesLink[];
   memberCount: number;
   createdAt: string;
   updatedAt: string;
@@ -271,19 +297,17 @@ export interface TeamPush {
   name: string;
   description?: string;
   organizationId: string;
-  teamType?: TeamType;
   teamLeaderId?: string | null;
-  eventTypeId?: number | null;
-  workRoleId?: number | null;
+  workRoleIds?: number[];
+  eventSeriesIds?: number[];
 }
 
 export interface TeamUpdate {
   name?: string;
   description?: string;
-  teamType?: TeamType;
   teamLeaderId?: string | null;
-  eventTypeId?: number | null;
-  workRoleId?: number | null;
+  workRoleIds?: number[];
+  eventSeriesIds?: number[];
 }
 
 export interface TeamMember {
@@ -537,7 +561,7 @@ export interface EventSeriesListQuery {
 }
 
 export interface OccurrenceFilter {
-  scope?: 'all' | 'team' | 'mine';
+  scope?: 'all' | 'team' | 'mine' | 'involved';
   siteId?: string;
   roomId?: string;
   teamId?: string;

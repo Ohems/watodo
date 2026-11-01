@@ -165,10 +165,12 @@ export async function getSeriesOccurrencesHandler(
   reply: FastifyReply,
 ): Promise<void> {
   const query = occurrenceRangeQuerySchema.parse(request.query);
+  const user = requireAuthUser(request);
   const occurrences = await getSeriesOccurrences(
     parseId(request.params.seriesId, 'seriesId'),
     new Date(query.start),
     new Date(query.end),
+    user.id,
   );
   return reply.status(200).send(occurrences);
 }

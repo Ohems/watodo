@@ -94,23 +94,23 @@ export interface UserOrganizations {
 }
 
 /** The purpose of a team: a plain group, an event-organizing team, or a role roster. */
-export type TeamType = 'general' | 'event_organizers' | 'role_group';
-
 export interface Teams {
   id: Generated<string>;
   name: string;
   description: Generated<string>;
-  /** The purpose of the team; see TeamType. */
-  team_type: Generated<TeamType>;
   /** Designated team leader (NULL = none). */
   team_leader_id: string | null;
-  /** For event_organizers teams: the event type they organize (NULL otherwise). */
-  event_type_id: number | null;
-  /** For role_group teams: the work role the team is the roster of (NULL otherwise). */
-  work_role_id: number | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
   organization_id: string;
+}
+
+/** Work roles assigned to a team (many-to-many). */
+export interface TeamWorkRoles {
+  id: Generated<number>;
+  team_id: string;
+  work_role_id: number;
+  created_at: Generated<Date>;
 }
 
 export interface TeamMembers {
@@ -318,6 +318,7 @@ export interface Database {
   user_organizations: UserOrganizations;
   teams: Teams;
   team_members: TeamMembers;
+  team_work_roles: TeamWorkRoles;
   sites: Sites;
   rooms: Rooms;
   work_roles: WorkRoles;
@@ -370,6 +371,9 @@ export type TeamUpdate = Updateable<Teams>;
 
 export type TeamMember = Selectable<TeamMembers>;
 export type NewTeamMember = Insertable<TeamMembers>;
+
+export type TeamWorkRole = Selectable<TeamWorkRoles>;
+export type NewTeamWorkRole = Insertable<TeamWorkRoles>;
 
 export type Site = Selectable<Sites>;
 export type NewSite = Insertable<Sites>;

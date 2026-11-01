@@ -4,6 +4,7 @@ import {
   createOrganization,
   interceptMutation,
   mockCommonApis,
+  mockEventSeriesManagement,
   mockOrgApis,
   mockUserList,
   ORG_ID,
@@ -19,13 +20,10 @@ const mockTeams = [
     name: 'Setup Team',
     description: 'Handles venue setup',
     organizationId: ORG_ID,
-    teamType: 'role_group',
     teamLeaderId: 'user-9',
     teamLeaderName: 'Dana Leader',
-    eventTypeId: null,
-    eventTypeName: null,
-    workRoleId: 1,
-    workRoleName: 'Setup',
+    workRoles: [{ id: 1, name: 'Setup' }],
+    eventSeries: [{ id: 7, title: 'Weekly Meeting' }],
     memberCount: 3,
     createdAt: '2025-01-01T00:00:00.000Z',
     updatedAt: '2025-01-01T00:00:00.000Z',
@@ -35,13 +33,10 @@ const mockTeams = [
     name: 'Security Team',
     description: '',
     organizationId: ORG_ID,
-    teamType: 'general',
     teamLeaderId: null,
     teamLeaderName: null,
-    eventTypeId: null,
-    eventTypeName: null,
-    workRoleId: null,
-    workRoleName: null,
+    workRoles: [],
+    eventSeries: [],
     memberCount: 5,
     createdAt: '2025-01-02T00:00:00.000Z',
     updatedAt: '2025-01-02T00:00:00.000Z',
@@ -49,9 +44,13 @@ const mockTeams = [
 ];
 
 const mockTeamDetail = mockTeams[0];
-const mockWorkRoles = [{ id: 1, name: 'Setup', description: '', organizationId: ORG_ID }];
-const mockEventTypes = [
-  { id: 7, name: 'Weekly Meeting', description: '', recurrence: null, calendarId: 'cal-1' },
+const mockWorkRoles = [
+  { id: 1, name: 'Setup', description: '', organizationId: ORG_ID },
+  { id: 2, name: 'Cleanup', description: '', organizationId: ORG_ID },
+];
+const mockEventSeries = [
+  { id: 7, title: 'Weekly Meeting' },
+  { id: 8, title: 'Community Lunch' },
 ];
 const mockOrgUsers = [
   { id: 'user-1', name: 'Alice Anderson', email: 'alice@example.com' },
@@ -91,7 +90,8 @@ async function setupTeamsPage(
   teams = mockTeams,
 ) {
   await mockCommonApis(page, user, [testOrg]);
-  await mockOrgApis(page, ORG_ID, { teams });
+  await mockOrgApis(page, ORG_ID, { teams, workRoles: mockWorkRoles });
+  await mockEventSeriesManagement(page, mockEventSeries);
 }
 
 async function setupTeamDetail(page: import('@playwright/test').Page, user = adminUser()) {
@@ -99,9 +99,9 @@ async function setupTeamDetail(page: import('@playwright/test').Page, user = adm
   await mockOrgApis(page, ORG_ID, {
     teams: mockTeams,
     workRoles: mockWorkRoles,
-    eventTypes: mockEventTypes,
     orgUsers: mockOrgUsers,
   });
+  await mockEventSeriesManagement(page, mockEventSeries);
   await mockUserList(page, mockAllUsers);
   await page.route(`**/api/v1/organizations/${ORG_ID}/teams/team-1`, route =>
     route.fulfill({ json: mockTeamDetail }),
@@ -113,7 +113,9 @@ async function setupTeamDetail(page: import('@playwright/test').Page, user = adm
 
 test.describe('Teams page', () => {
   test.describe('data display', () => {
-    test('shows teams in a table with member counts and type badges', async ({ page }) => {
+    test('shows teams in a table with member counts, work roles and event series', async ({
+      page,
+    }) => {
       await setupTeamsPage(page);
       await page.goto('/teams');
 
@@ -123,8 +125,9 @@ test.describe('Teams page', () => {
       await expect(page.getByText('3', { exact: true })).toBeVisible();
       await expect(page.getByText('Security Team')).toBeVisible();
       await expect(page.getByText('5', { exact: true })).toBeVisible();
-      await expect(page.getByText('Role group')).toBeVisible();
-      await expect(page.getByText('General')).toBeVisible();
+      // Work role and event series badges of the first team.
+      await expect(page.getByText('Setup', { exact: true })).toBeVisible();
+      await expect(page.getByText('Weekly Meeting')).toBeVisible();
     });
 
     test('shows empty state when no teams', async ({ page }) => {
@@ -168,6 +171,8 @@ test.describe('Teams page', () => {
         name: 'Catering Team',
         description: 'Food and drinks',
         organizationId: ORG_ID,
+        workRoles: [],
+        eventSeries: [],
         memberCount: 0,
         createdAt: '2025-01-01T00:00:00.000Z',
         updatedAt: '2025-01-01T00:00:00.000Z',
@@ -191,22 +196,22 @@ test.describe('Teams page', () => {
       expect(captured[0].body).toMatchObject({
         name: 'Catering Team',
         description: 'Food and drinks',
-        teamType: 'general',
+        workRoleIds: [],
+        eventSeriesIds: [],
       });
     });
 
-    test('admin can create a role group team and POST includes the work role link', async ({
-      page,
-    }) => {
+    test('admin can create a team with work roles and event series', async ({ page }) => {
       await mockCommonApis(page, adminUser(), [testOrg]);
       await mockOrgApis(page, ORG_ID, { teams: [], workRoles: mockWorkRoles });
+      await mockEventSeriesManagement(page, mockEventSeries);
 
       const newTeam = {
         ...mockTeams[1],
         id: 'team-new',
         name: 'Setup Crew',
-        teamType: 'role_group',
-        workRoleId: 1,
+        workRoles: [{ id: 1, name: 'Setup' }],
+        eventSeries: [{ id: 7, title: 'Weekly Meeting' }],
       };
       const captured = await interceptMutation(
         page,
@@ -219,20 +224,21 @@ test.describe('Teams page', () => {
       await page.getByRole('button', { name: 'Add' }).click();
       await page.getByRole('textbox', { name: 'Name' }).fill('Setup Crew');
 
-      await page.getByRole('combobox', { name: 'Type' }).click();
-      await page.getByRole('option', { name: 'Role group' }).click();
-
-      await page.getByRole('combobox', { name: 'Work role' }).click();
+      await page.getByRole('combobox', { name: 'Work roles' }).click();
       await page.getByRole('option', { name: 'Setup' }).click();
+      await page.keyboard.press('Escape');
+
+      await page.getByRole('combobox', { name: 'Event series' }).click();
+      await page.getByRole('option', { name: 'Weekly Meeting' }).click();
+      await page.keyboard.press('Escape');
 
       await page.getByRole('button', { name: 'Save' }).click();
 
       await expect.poll(() => captured.length, { message: 'POST /teams was called' }).toBe(1);
       expect(captured[0].body).toMatchObject({
         name: 'Setup Crew',
-        teamType: 'role_group',
-        workRoleId: 1,
-        eventTypeId: null,
+        workRoleIds: [1],
+        eventSeriesIds: [7],
       });
     });
   });
@@ -250,15 +256,15 @@ test.describe('Teams page', () => {
 
 test.describe('Team Management page', () => {
   test.describe('data display', () => {
-    test('shows team details, type, leader, work role link and members', async ({ page }) => {
+    test('shows team details, leader, work roles, event series and members', async ({ page }) => {
       await setupTeamDetail(page);
       await page.goto('/teams/team-1');
 
       await expect(page.getByRole('heading', { name: 'Setup Team' })).toBeVisible();
       await expect(page.getByText('Handles venue setup')).toBeVisible();
-      await expect(page.getByText('Role group')).toBeVisible();
       await expect(page.getByText('Dana Leader')).toBeVisible();
       await expect(page.getByText('Setup', { exact: true })).toBeVisible();
+      await expect(page.getByText('Weekly Meeting')).toBeVisible();
 
       // Members table
       await expect(page.getByRole('heading', { name: 'Members' })).toBeVisible();
@@ -316,9 +322,9 @@ test.describe('Team Management page', () => {
       await mockOrgApis(page, ORG_ID, {
         teams: mockTeams,
         workRoles: mockWorkRoles,
-        eventTypes: mockEventTypes,
         orgUsers: mockOrgUsers,
       });
+      await mockEventSeriesManagement(page, mockEventSeries);
       await mockUserList(page, mockAllUsers);
       await page.route(`**/api/v1/organizations/${ORG_ID}/teams/team-1/members`, route =>
         route.fulfill({ json: mockMembers }),
@@ -344,15 +350,15 @@ test.describe('Team Management page', () => {
       const nameInput = page.getByRole('textbox').first();
       await nameInput.fill('Setup Team Renamed');
 
-      // Change the team type to event organizers and link an event type.
-      await page.getByRole('combobox', { name: 'Type' }).click();
-      await page.getByRole('option', { name: 'Event organizers' }).click();
-      await page.getByRole('combobox', { name: 'Event type' }).click();
-      await page.getByRole('option', { name: 'Weekly Meeting' }).click();
+      // Add another work role to the team.
+      await page.getByRole('combobox', { name: 'Work roles' }).click();
+      await page.getByRole('option', { name: 'Cleanup' }).click();
+      await page.keyboard.press('Escape');
 
       // Set the team leader.
       await page.getByRole('combobox', { name: 'Team leader' }).click();
       await page.getByRole('option', { name: 'Alice Anderson' }).click();
+      await page.keyboard.press('Escape');
 
       await page.getByRole('button', { name: 'Save' }).click();
 
@@ -361,9 +367,8 @@ test.describe('Team Management page', () => {
         .toBe(1);
       expect(captured[0].body).toMatchObject({
         name: 'Setup Team Renamed',
-        teamType: 'event_organizers',
-        eventTypeId: 7,
-        workRoleId: null,
+        workRoleIds: [1, 2],
+        eventSeriesIds: [7],
         teamLeaderId: 'user-1',
       });
     });

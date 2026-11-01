@@ -109,6 +109,10 @@ function makeOccurrence(partial: Partial<EventOccurrence> & { seriesId: number }
     isRescheduled: false,
     isCancelled: false,
     exceptionId: null,
+    isParticipant: false,
+    isManager: false,
+    workRoleSlots: [],
+    managedUnfilledCriticalSlots: [],
     ...partial,
   } satisfies EventOccurrence;
 }
