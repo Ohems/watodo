@@ -1,5 +1,5 @@
 import { db } from '../database.js';
-import type { Organization } from '../db/types.js';
+import type { Organization, User } from '../db/types.js';
 import { forbidden, notFound } from '../http-error.js';
 import { createLogger } from '../logger.js';
 import { hasPermission, PERMISSIONS } from '../permissions.js';
@@ -141,6 +141,20 @@ export interface PaginatedOrgUsers {
   limit: number;
 }
 
+function serializeOrganizationUser(user: User): OrganizationUserResponse {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    description: user.description,
+    isEmployed: user.is_employed,
+    isSuspended: user.is_suspended,
+    isBlocked: user.is_blocked,
+    state: user.state,
+    createdAt: user.created_at.toISOString(),
+  };
+}
+
 /**
  * Lists the users of an organization with pagination and search.
  * @param organizationId - The organization ID.
@@ -182,19 +196,36 @@ export async function listOrganizationUsers(
   ]);
 
   return {
-    items: rows.map(user => ({
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      description: user.description,
-      isEmployed: user.is_employed,
-      isSuspended: user.is_suspended,
-      isBlocked: user.is_blocked,
-      state: user.state,
-      createdAt: user.created_at.toISOString(),
-    })),
+    items: rows.map(serializeOrganizationUser),
     total: Number(countRow.count),
     page,
     limit,
   };
+}
+
+/**
+ * Gets a single user of an organization. Returns 404 when the user is not a
+ * member of the organization, so the existence of users is not leaked.
+ * @param organizationId - The organization ID.
+ * @param userId - The user ID.
+ * @returns The organization user.
+ */
+export async function getOrganizationUser(
+  organizationId: string,
+  userId: string,
+): Promise<OrganizationUserResponse> {
+  logger.trace('organizationService.getOrganizationUser');
+  const user = await db
+    .selectFrom('user_organizations')
+    .innerJoin('users', 'users.id', 'user_organizations.user_id')
+    .selectAll('users')
+    .where('user_organizations.organization_id', '=', organizationId)
+    .where('users.id', '=', userId)
+    .executeTakeFirst();
+
+  if (!user) {
+    throw notFound(`User ${userId} not found in organization ${organizationId}!`);
+  }
+
+  return serializeOrganizationUser(user);
 }

@@ -12,11 +12,17 @@ import {
   Title,
 } from '@mantine/core';
 import { IconBell, IconCalendarEvent, IconCheck } from '@tabler/icons-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { eventsApi, notificationsApi } from '../../api/index.js';
+import {
+  useGetNotificationsQuery,
+  useGetOccurrencesQuery,
+  useMarkAllNotificationsReadMutation,
+  useMarkNotificationReadMutation,
+} from '../../api/index.js';
 import type { EventOccurrence, Notification } from '../../types/index.js';
+import { occurrenceRef } from '../../types/index.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const UPCOMING_DAYS = 14;
@@ -24,52 +30,39 @@ const UPCOMING_DAYS = 14;
 function Home() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [upcomingEvents, setUpcomingEvents] = useState<EventOccurrence[]>([]);
-  const [loadingNotifications, setLoadingNotifications] = useState(true);
-  const [loadingEvents, setLoadingEvents] = useState(true);
 
-  const loadNotifications = useCallback(async () => {
-    setLoadingNotifications(true);
-    try {
-      const data = await notificationsApi.listNotifications({ page: 0, limit: 10 });
-      setNotifications(data.items);
-      setUnreadCount(data.unreadCount);
-    } catch {
-      setNotifications([]);
-    } finally {
-      setLoadingNotifications(false);
-    }
-  }, []);
+  // The range is fixed for the lifetime of the page so the query cache key
+  // stays stable.
+  const [range] = useState(() => {
+    const now = new Date();
+    return {
+      start: now.toISOString(),
+      end: new Date(now.getTime() + UPCOMING_DAYS * DAY_MS).toISOString(),
+    };
+  });
 
-  const loadUpcomingEvents = useCallback(async () => {
-    setLoadingEvents(true);
-    try {
-      const now = new Date();
-      const end = new Date(now.getTime() + UPCOMING_DAYS * DAY_MS);
-      const data = await eventsApi.getOccurrences(now, end);
-      const upcoming = data
+  const { data: notificationsData, isLoading: loadingNotifications } = useGetNotificationsQuery({
+    page: 0,
+    limit: 10,
+  });
+  const { data: occurrencesData, isLoading: loadingEvents } = useGetOccurrencesQuery(range);
+  const [markAllRead] = useMarkAllNotificationsReadMutation();
+  const [markRead] = useMarkNotificationReadMutation();
+
+  const notifications = notificationsData?.items ?? [];
+  const unreadCount = notificationsData?.unreadCount ?? 0;
+  const upcomingEvents = useMemo(
+    () =>
+      (occurrencesData ?? [])
         .filter(occ => !occ.isCancelled)
         .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
-        .slice(0, 10);
-      setUpcomingEvents(upcoming);
-    } catch {
-      setUpcomingEvents([]);
-    } finally {
-      setLoadingEvents(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadNotifications();
-    loadUpcomingEvents();
-  }, [loadNotifications, loadUpcomingEvents]);
+        .slice(0, 10),
+    [occurrencesData],
+  );
 
   const handleMarkAllRead = async () => {
     try {
-      await notificationsApi.markAllRead();
-      await loadNotifications();
+      await markAllRead().unwrap();
     } catch {
       // Ignore errors
     }
@@ -78,15 +71,14 @@ function Home() {
   const handleMarkRead = async (notification: Notification) => {
     if (notification.isRead) return;
     try {
-      await notificationsApi.markRead(notification.id, true);
-      await loadNotifications();
+      await markRead({ notificationId: notification.id, isRead: true }).unwrap();
     } catch {
       // Ignore errors
     }
   };
 
   const handleEventClick = (occurrence: EventOccurrence) => {
-    navigate(`/events/${occurrence.seriesId}`);
+    navigate(`/events/occurrences/${encodeURIComponent(occurrenceRef(occurrence))}`);
   };
 
   return (
@@ -148,9 +140,16 @@ function Home() {
                         {notification.body}
                       </Text>
                     )}
-                    <Text size="xs" c="dimmed">
-                      {new Date(notification.createdAt).toLocaleString()}
-                    </Text>
+                    <Group gap="xs" wrap="nowrap">
+                      <Text size="xs" c="dimmed">
+                        {new Date(notification.createdAt).toLocaleString()}
+                      </Text>
+                      {notification.organizationName && (
+                        <Badge size="xs" variant="light" color="gray">
+                          {notification.organizationName}
+                        </Badge>
+                      )}
+                    </Group>
                   </Box>
                   {!notification.isRead && (
                     <ActionIcon
@@ -206,11 +205,16 @@ function Home() {
                         : new Date(occ.start).toLocaleString()}
                     </Text>
                   </Box>
-                  {occ.isRescheduled && (
-                    <Badge size="sm" variant="light" color="orange">
-                      {t('events.rescheduled')}
+                  <Group gap="xs" wrap="nowrap">
+                    {occ.isRescheduled && (
+                      <Badge size="sm" variant="light" color="orange">
+                        {t('events.rescheduled')}
+                      </Badge>
+                    )}
+                    <Badge size="sm" variant="light" color="blue">
+                      {occ.organizationName}
                     </Badge>
-                  )}
+                  </Group>
                 </Group>
               ))}
             </Stack>

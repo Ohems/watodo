@@ -48,35 +48,6 @@ export interface AuthProviderInfo {
   configured: boolean;
 }
 
-export interface OpAssignment {
-  id: number;
-  operationId: number;
-  name: string;
-  description: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface Operation {
-  id: number;
-  name: string;
-  description: string;
-  requirements: string;
-  location: string;
-  createdAt: string;
-  updatedAt: string;
-  assignments: OpAssignment[];
-}
-
-export interface OperationInput {
-  id?: number;
-  name: string;
-  description?: string;
-  requirements?: string;
-  location?: string;
-  assignments?: Array<{ id?: number; name: string; description?: string }>;
-}
-
 /** Maps field names to their validation error messages. */
 export type FieldErrors = Record<string, string>;
 
@@ -127,6 +98,9 @@ export interface EventSeries {
   title: string;
   description: string | null;
   calendarId: string;
+  siteId: string | null;
+  roomId: string | null;
+  reserveWholeSite: boolean;
   start: string;
   durationMinutes: number;
   isAllDay: boolean;
@@ -153,16 +127,35 @@ export interface EventSeriesPush {
 export type EventSeriesUpdate = Partial<EventSeriesPush>;
 
 export interface EventOccurrence {
+  /** Stable ID of the materialized occurrence instance, or null if not yet materialized. */
+  occurrenceId: number | null;
   seriesId: number;
   title: string;
   description: string | null;
   isAllDay: boolean;
+  siteId: string | null;
+  roomId: string | null;
+  reserveWholeSite: boolean;
+  organizationId: string;
+  organizationName: string;
   occurrenceStart: string;
   start: string;
   end: string;
   isRescheduled: boolean;
   isCancelled: boolean;
   exceptionId: number | null;
+}
+
+/**
+ * Builds the URL reference for an occurrence: the stable numeric ID when
+ * materialized, or a temporary `tmp:{seriesId}:{isoStart}` key otherwise.
+ */
+export function occurrenceRef(
+  occurrence: Pick<EventOccurrence, 'occurrenceId' | 'seriesId' | 'occurrenceStart'>,
+): string {
+  return occurrence.occurrenceId !== null
+    ? String(occurrence.occurrenceId)
+    : `tmp:${occurrence.seriesId}:${occurrence.occurrenceStart}`;
 }
 
 export interface EventException {
@@ -176,37 +169,61 @@ export interface EventException {
   updatedAt: string;
 }
 
-export interface EventJobAssignment {
+export interface EventWorkRoleAssignment {
   id: number;
-  jobId: number;
+  eventWorkRoleId: number;
   userId: string;
   userName: string;
   createdAt: string;
 }
 
-export interface EventJob {
+export interface EventWorkRole {
   id: number;
   seriesId: number;
-  occurrenceStart: string | null;
+  /** NULL = parent (series-level) slot; non-NULL = occurrence-level inherited slot. */
+  occurrenceId: number | null;
+  inheritedFromWorkRoleId: number | null;
   title: string;
   description: string;
-  assignments: EventJobAssignment[];
+  isCritical: boolean;
+  workRoleId: number | null;
+  workRoleName: string | null;
+  assignments: EventWorkRoleAssignment[];
   createdAt: string;
   updatedAt: string;
 }
 
-export interface EventJobPush {
+export interface EventWorkRolePush {
   title: string;
   description?: string;
   occurrenceStart?: string | null;
+  occurrenceId?: number | null;
+  isCritical?: boolean;
+  workRoleId?: number | null;
 }
 
-export type EventJobUpdate = Partial<EventJobPush>;
+export type EventWorkRoleUpdate = Partial<EventWorkRolePush>;
+
+// --- Event readiness ---
+
+export interface RoleReadiness {
+  workRoleId: number | null;
+  workRoleName: string;
+  required: number;
+  filled: number;
+  isCritical: boolean;
+  isUnfilled: boolean;
+}
+
+export interface EventReadiness {
+  roles: RoleReadiness[];
+  isReady: boolean;
+  unfilledCriticalCount: number;
+}
 
 export interface EventComment {
   id: number;
   seriesId: number;
-  occurrenceStart: string | null;
   userId: string;
   userName: string;
   body: string;
@@ -217,17 +234,34 @@ export interface EventComment {
 export interface EventOccurrenceDetail {
   series: EventSeries;
   occurrence: EventOccurrence;
-  jobs: EventJob[];
+  /** Slots visible for this occurrence: occurrence-level + parent-level. */
+  workRoles: EventWorkRole[];
+  /** Parent (series-level) slots only. */
+  parentWorkRoles: EventWorkRole[];
+  /** Occurrence-level (inherited) slots only. */
+  occurrenceWorkRoles: EventWorkRole[];
+  /** Parent slots not yet imported into this occurrence. */
+  missingParentWorkRoles: EventWorkRole[];
   comments: EventComment[];
+  readiness: EventReadiness;
 }
 
 // --- Teams ---
+
+export type TeamType = 'general' | 'event_organizers' | 'role_group';
 
 export interface Team {
   id: string;
   name: string;
   description: string;
   organizationId: string;
+  teamType: TeamType;
+  teamLeaderId: string | null;
+  teamLeaderName: string | null;
+  eventTypeId: number | null;
+  eventTypeName: string | null;
+  workRoleId: number | null;
+  workRoleName: string | null;
   memberCount: number;
   createdAt: string;
   updatedAt: string;
@@ -237,11 +271,19 @@ export interface TeamPush {
   name: string;
   description?: string;
   organizationId: string;
+  teamType?: TeamType;
+  teamLeaderId?: string | null;
+  eventTypeId?: number | null;
+  workRoleId?: number | null;
 }
 
 export interface TeamUpdate {
   name?: string;
   description?: string;
+  teamType?: TeamType;
+  teamLeaderId?: string | null;
+  eventTypeId?: number | null;
+  workRoleId?: number | null;
 }
 
 export interface TeamMember {
@@ -250,13 +292,68 @@ export interface TeamMember {
   userId: string;
   userName: string;
   userEmail: string;
+  /** When true, the member can manage this specific team. */
+  isManager: boolean;
   createdAt: string;
 }
 
-// --- Locations ---
+export interface TeamMemberUpdate {
+  isManager?: boolean;
+}
 
-export interface Location {
+// --- Sites ---
+
+export interface Site {
   id: string;
+  name: string;
+  description: string | null;
+  address: string | null;
+  organizationId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SitePush {
+  name: string;
+  description?: string | null;
+  address?: string | null;
+  organizationId: string;
+}
+
+export interface SiteUpdate {
+  name?: string;
+  description?: string | null;
+  address?: string | null;
+}
+
+// --- Rooms ---
+
+export interface Room {
+  id: string;
+  name: string;
+  description: string;
+  siteId: string;
+  organizationId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RoomPush {
+  name: string;
+  description?: string;
+  siteId: string;
+  organizationId: string;
+}
+
+export interface RoomUpdate {
+  name?: string;
+  description?: string;
+}
+
+// --- Work Roles ---
+
+export interface WorkRole {
+  id: number;
   name: string;
   description: string;
   organizationId: string;
@@ -264,34 +361,93 @@ export interface Location {
   updatedAt: string;
 }
 
-export interface LocationPush {
+export interface WorkRolePush {
   name: string;
   description?: string;
   organizationId: string;
 }
 
-export interface LocationUpdate {
+export interface WorkRoleUpdate {
   name?: string;
   description?: string;
 }
 
-// --- Jobs ---
+export interface WorkRoleDetail extends WorkRole {
+  requiredCertifications: Certification[];
+  users: UserWorkRole[];
+}
 
-export interface Job {
+// --- Certifications ---
+
+export interface Certification {
   id: number;
   name: string;
+  description: string;
   organizationId: string;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface JobPush {
+export interface CertificationPush {
   name: string;
+  description?: string;
   organizationId: string;
 }
 
-export interface JobUpdate {
+export interface CertificationUpdate {
   name?: string;
+  description?: string;
+}
+
+// --- User Work Roles ---
+
+export interface UserWorkRole {
+  id: number;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  workRoleId: number;
+  workRoleName: string;
+  workRoleDescription: string;
+  isQualified: boolean;
+  notes: string;
+  createdAt: string;
+}
+
+export interface UserWorkRolePush {
+  workRoleId: number;
+  isQualified?: boolean;
+  notes?: string;
+}
+
+export interface UserWorkRoleUpdate {
+  isQualified?: boolean;
+  notes?: string;
+}
+
+// --- User Certifications ---
+
+export interface UserCertification {
+  id: number;
+  userId: string;
+  userName: string;
+  certificationId: number;
+  certificationName: string;
+  certificationDescription: string;
+  certificationDate: string | null;
+  validUntilDate: string | null;
+  createdAt: string;
+}
+
+export interface UserCertificationPush {
+  certificationId: number;
+  certificationDate?: string | null;
+  validUntilDate?: string | null;
+}
+
+export interface UserCertificationUpdate {
+  certificationDate?: string | null;
+  validUntilDate?: string | null;
 }
 
 // --- Notifications ---
@@ -299,6 +455,9 @@ export interface JobUpdate {
 export interface Notification {
   id: number;
   userId: string;
+  /** The organization this notification belongs to, if any. */
+  organizationId: string | null;
+  organizationName: string | null;
   title: string;
   body: string;
   isRead: boolean;
@@ -334,19 +493,33 @@ export interface OrganizationUser {
 
 // --- Event series management ---
 
+export interface EventType {
+  id: number;
+  name: string;
+  description: string;
+  recurrence: string | null;
+  calendarId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface EventSeriesTeam {
   id: string;
   name: string;
 }
 
 export interface EventSeriesManagement extends EventSeries {
-  locationId: string | null;
-  locationName: string | null;
+  organizationId: string;
+  organizationName: string;
+  siteName: string | null;
+  roomName: string | null;
   teams: EventSeriesTeam[];
 }
 
 export interface EventSeriesConfigUpdate {
-  locationId?: string | null;
+  siteId?: string | null;
+  roomId?: string | null;
+  reserveWholeSite?: boolean;
   teamIds?: string[];
 }
 
@@ -356,14 +529,17 @@ export interface EventSeriesListQuery {
   search?: string;
   startFrom?: string;
   startTo?: string;
-  locationId?: string;
+  siteId?: string;
+  roomId?: string;
   teamId?: string;
   hasTeam?: boolean;
+  organizationId: string;
 }
 
 export interface OccurrenceFilter {
   scope?: 'all' | 'team' | 'mine';
-  locationId?: string;
+  siteId?: string;
+  roomId?: string;
   teamId?: string;
 }
 

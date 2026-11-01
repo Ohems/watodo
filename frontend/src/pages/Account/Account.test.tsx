@@ -1,37 +1,10 @@
-import { MantineProvider } from '@mantine/core';
-import { configureStore } from '@reduxjs/toolkit';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { Provider } from 'react-redux';
-import { MemoryRouter } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { authApi, usersApi } from '../../api/index.js';
-import userReducer, { fetchAuthAccounts, fetchCurrentUser } from '../../store/user-slice.js';
-import type { AuthAccount, AuthProviderInfo, User } from '../../types/index.js';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { getToken, setToken } from '../../api/index.js';
+import { type MockApi, mockApi } from '../../test/api-mock.js';
+import { renderWithProviders } from '../../test/test-utils.js';
+import type { AuthAccount, AuthProviderInfo, User, UserSelfUpdate } from '../../types/index.js';
 import AccountPage from './Account.js';
-
-vi.mock('../../api/index.js', () => ({
-  getToken: () => null,
-  setToken: vi.fn(),
-  clearToken: vi.fn(),
-  authApi: {
-    getProviders: vi.fn(),
-    loginUrl: vi.fn(),
-    logout: vi.fn(),
-    startLink: vi.fn(),
-  },
-  usersApi: {
-    getUsers: vi.fn(),
-    getUser: vi.fn(),
-    getCurrentUser: vi.fn(),
-    getUserList: vi.fn(),
-    updateUser: vi.fn(),
-    deleteUser: vi.fn(),
-    updateCurrentUser: vi.fn(),
-    deleteCurrentUser: vi.fn(),
-    getAuthAccounts: vi.fn(),
-    unlinkAuthAccount: vi.fn(),
-  },
-}));
 
 const mockUser: User = {
   id: 'u1',
@@ -58,30 +31,56 @@ const mockAuthAccounts: AuthAccount[] = [
   { provider: 'discord', providerAccountId: 'discord-1', createdAt: '2026-01-01T00:00:00.000Z' },
 ];
 
-function renderPage(authAccounts: AuthAccount[] = mockAuthAccounts, initialEntry = '/account') {
-  const store = configureStore({
-    reducer: { user: userReducer },
-  });
-  store.dispatch(fetchCurrentUser.fulfilled(mockUser, '', undefined));
-  store.dispatch(fetchAuthAccounts.fulfilled(authAccounts, ''));
-  render(
-    <Provider store={store}>
-      <MantineProvider>
-        <MemoryRouter initialEntries={[initialEntry]}>
-          <AccountPage />
-        </MemoryRouter>
-      </MantineProvider>
-    </Provider>,
+interface AccountRoutes {
+  currentUser: User;
+  authAccounts: AuthAccount[];
+  accountDeleted: boolean;
+}
+
+/** Registers stateful routes: mutations update the served data. */
+function mockAccountRoutes(mock: MockApi, state: AccountRoutes) {
+  mock.on(
+    'GET',
+    '/api/v1/users/@me',
+    () => (state.accountDeleted ? { error: 'Unauthorized' } : state.currentUser),
+    () => (state.accountDeleted ? 401 : 200),
   );
-  return store;
+  mock.on('GET', '/api/v1/auth/providers', { providers: mockProviders });
+  mock.on('GET', '/api/v1/users/@me/auth-accounts', () => state.authAccounts);
+  mock.on('PATCH', '/api/v1/users/@me', () => {
+    const body = mock.lastBody('PATCH', '/api/v1/users/@me') as UserSelfUpdate;
+    state.currentUser = {
+      ...state.currentUser,
+      name: body.name ?? state.currentUser.name,
+      email: body.email ?? state.currentUser.email,
+      description: body.description ?? state.currentUser.description,
+      phoneNumber:
+        body.phoneNumber === undefined ? state.currentUser.phoneNumber : body.phoneNumber,
+    };
+    return state.currentUser;
+  });
+  mock.on('DELETE', '/api/v1/users/@me', () => {
+    state.accountDeleted = true;
+  });
+}
+
+function renderPage(initialEntry = '/account') {
+  return renderWithProviders(<AccountPage />, { route: initialEntry });
 }
 
 describe('AccountPage', () => {
+  let mock: MockApi;
+  let state: AccountRoutes;
+
   beforeEach(() => {
-    vi.clearAllMocks();
+    mock = mockApi();
     localStorage.clear();
-    vi.mocked(authApi.getProviders).mockResolvedValue({ providers: mockProviders });
-    vi.mocked(usersApi.getAuthAccounts).mockResolvedValue(mockAuthAccounts);
+    state = {
+      currentUser: mockUser,
+      authAccounts: [...mockAuthAccounts],
+      accountDeleted: false,
+    };
+    mockAccountRoutes(mock, state);
   });
 
   it('shows the personal information of the current user', async () => {
@@ -95,7 +94,6 @@ describe('AccountPage', () => {
   });
 
   it('saves edited personal information', async () => {
-    vi.mocked(usersApi.updateCurrentUser).mockResolvedValue({ ...mockUser, name: 'Alice Cooper' });
     renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
@@ -106,7 +104,7 @@ describe('AccountPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
-      expect(usersApi.updateCurrentUser).toHaveBeenCalledWith({
+      expect(mock.lastBody('PATCH', '/api/v1/users/@me')).toEqual({
         name: 'Alice Cooper',
         email: 'alice@example.com',
         description: 'About Alice',
@@ -117,7 +115,6 @@ describe('AccountPage', () => {
   });
 
   it('clears the phone number when the field is emptied', async () => {
-    vi.mocked(usersApi.updateCurrentUser).mockResolvedValue({ ...mockUser, phoneNumber: null });
     renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
@@ -125,7 +122,7 @@ describe('AccountPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
-      expect(usersApi.updateCurrentUser).toHaveBeenCalledWith({
+      expect(mock.lastBody('PATCH', '/api/v1/users/@me')).toEqual({
         name: 'Alice',
         email: 'alice@example.com',
         description: 'About Alice',
@@ -135,8 +132,11 @@ describe('AccountPage', () => {
   });
 
   it('shows an error when saving fails', async () => {
-    vi.mocked(usersApi.updateCurrentUser).mockRejectedValue(
-      new Error('A user with this email address already exists!'),
+    mock.on(
+      'PATCH',
+      '/api/v1/users/@me',
+      { error: 'A user with this email address already exists!' },
+      400,
     );
     renderPage();
 
@@ -160,7 +160,7 @@ describe('AccountPage', () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText('Phone number')).toHaveAttribute('aria-invalid', 'true');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    expect(usersApi.updateCurrentUser).not.toHaveBeenCalled();
+    expect(mock.callCount('PATCH', '/api/v1/users/@me')).toBe(0);
     // The form stays in editing mode so the field can be corrected.
     expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
   });
@@ -175,7 +175,7 @@ describe('AccountPage', () => {
 
     expect(await screen.findByText('Name is required')).toBeInTheDocument();
     expect(await screen.findByText('Enter a valid email address')).toBeInTheDocument();
-    expect(usersApi.updateCurrentUser).not.toHaveBeenCalled();
+    expect(mock.callCount('PATCH', '/api/v1/users/@me')).toBe(0);
   });
 
   it('clears the field error when the field is corrected', async () => {
@@ -195,7 +195,7 @@ describe('AccountPage', () => {
   });
 
   it('shows the backend error message when a failure slips past the frontend validation', async () => {
-    vi.mocked(usersApi.updateCurrentUser).mockRejectedValue(new Error('Validation error'));
+    mock.on('PATCH', '/api/v1/users/@me', { error: 'Validation error' }, 400);
     renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
@@ -216,7 +216,7 @@ describe('AccountPage', () => {
   });
 
   it('starts the OAuth link flow when connecting a provider', async () => {
-    vi.mocked(authApi.startLink).mockResolvedValue({
+    mock.on('POST', '/api/v1/auth/google/link', {
       authorizationUrl: 'https://provider.example/authorize?state=abc',
     });
     renderPage();
@@ -224,25 +224,28 @@ describe('AccountPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Connect Google' }));
 
     await waitFor(() => {
-      expect(authApi.startLink).toHaveBeenCalledWith('google', '/account');
+      expect(mock.lastBody('POST', '/api/v1/auth/google/link')).toEqual({
+        returnUrl: '/account',
+      });
     });
   });
 
   it('disconnects a login method', async () => {
-    const twoAccounts: AuthAccount[] = [
+    state.authAccounts = [
       ...mockAuthAccounts,
       { provider: 'google', providerAccountId: 'google-1', createdAt: '2026-01-02T00:00:00.000Z' },
     ];
-    vi.mocked(usersApi.getAuthAccounts).mockResolvedValue(twoAccounts);
-    vi.mocked(usersApi.unlinkAuthAccount).mockResolvedValue(undefined);
-    renderPage(twoAccounts);
+    mock.on('DELETE', '/api/v1/users/@me/auth-accounts/google', () => {
+      state.authAccounts = state.authAccounts.filter(account => account.provider !== 'google');
+    });
+    renderPage();
 
     const disconnectButtons = await screen.findAllByRole('button', { name: 'Disconnect' });
     expect(disconnectButtons).toHaveLength(2);
     fireEvent.click(disconnectButtons[1]);
 
     await waitFor(() => {
-      expect(usersApi.unlinkAuthAccount).toHaveBeenCalledWith('google');
+      expect(mock.callCount('DELETE', '/api/v1/users/@me/auth-accounts/google')).toBe(1);
     });
     expect(await screen.findByRole('button', { name: 'Connect Google' })).toBeInTheDocument();
   });
@@ -256,17 +259,14 @@ describe('AccountPage', () => {
   });
 
   it('shows the link error after a failed connect attempt', async () => {
-    renderPage(
-      mockAuthAccounts,
-      '/account?linkError=Already%20connected%20to%20a%20different%20user',
-    );
+    renderPage('/account?linkError=Already%20connected%20to%20a%20different%20user');
 
     expect(await screen.findByText('Already connected to a different user')).toBeInTheDocument();
   });
 
   it('deletes the account after confirmation', async () => {
-    vi.mocked(usersApi.deleteCurrentUser).mockResolvedValue(undefined);
-    const store = renderPage();
+    setToken('test-token');
+    renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Delete account' }));
     expect(await screen.findByRole('heading', { name: 'Delete account?' })).toBeInTheDocument();
@@ -274,20 +274,21 @@ describe('AccountPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete my account' }));
 
     await waitFor(() => {
-      expect(usersApi.deleteCurrentUser).toHaveBeenCalled();
+      expect(mock.callCount('DELETE', '/api/v1/users/@me')).toBe(1);
     });
     await waitFor(() => {
-      expect(store.getState().user.authStatus).toBe('unauthenticated');
+      expect(getToken()).toBeNull();
     });
   });
 
   it('keeps the account when the deletion is cancelled', async () => {
-    const store = renderPage();
+    setToken('test-token');
+    renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Delete account' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
 
-    expect(usersApi.deleteCurrentUser).not.toHaveBeenCalled();
-    expect(store.getState().user.authStatus).toBe('authenticated');
+    expect(mock.callCount('DELETE', '/api/v1/users/@me')).toBe(0);
+    expect(getToken()).toBe('test-token');
   });
 });

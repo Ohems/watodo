@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import {
   getOrganizationHandler,
+  getOrganizationUserHandler,
   listMyOrganizationsHandler,
   listOrganizationUsersHandler,
   updateOrganizationHandler,
@@ -35,5 +36,11 @@ export async function organizationRoutes(app: FastifyInstance): Promise<void> {
     '/api/v1/organizations/:organizationId/users',
     { preHandler: requirePermissions(PERMISSIONS.ORGANIZATION_READ) },
     listOrganizationUsersHandler,
+  );
+
+  app.get<{ Params: { organizationId: string; userId: string } }>(
+    '/api/v1/organizations/:organizationId/users/:userId',
+    { preHandler: requirePermissions(PERMISSIONS.ORGANIZATION_READ) },
+    getOrganizationUserHandler,
   );
 }

@@ -1,13 +1,21 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
-import { db } from '../src/database.js';
+import {
+  addUserToOrganization,
+  assignRole,
+  createOrganization,
+  createRole,
+  createUser,
+  resetDatabase,
+} from './helpers/fixtures.js';
 
-// Integration test for the organization endpoints: seeds an organization with
-// an admin, a member holding organization:write, a plain member and an
-// outsider, then verifies listing, reading and editing rules. Skipped when
-// the database is not available.
+// Integration test for the organization endpoints: an organization with an
+// admin, a member holding organization:write, a plain member and an outsider.
+// Every test resets the database (beforeEach) and rebuilds the fixture, so
+// tests are independent and a broken seed fails the test instead of being
+// masked.
 
 interface Seed {
   organizationId: string;
@@ -19,60 +27,11 @@ interface Seed {
   userIds: string[];
 }
 
-async function createUser(name: string): Promise<{ id: string; token: string }> {
-  const id = randomUUID();
-  const token = randomUUID();
-  const suffix = randomUUID();
-  await db
-    .insertInto('users')
-    .values({ id, name, email: `${name.toLowerCase().replaceAll(' ', '-')}-${suffix}@example.com` })
-    .execute();
-  await db.insertInto('access_tokens').values({ user_id: id, token }).execute();
-  return { id, token };
-}
-
-async function createRoleWithPermissions(
-  organizationId: string,
-  name: string,
-  permissionCodes: string[],
-): Promise<number> {
-  const role = await db
-    .insertInto('roles')
-    .values({ organization_id: organizationId, name })
-    .returningAll()
-    .executeTakeFirstOrThrow();
-
-  if (permissionCodes.length > 0) {
-    const rows = await db
-      .selectFrom('permissions')
-      .select(['id', 'code'])
-      .where('code', 'in', permissionCodes)
-      .execute();
-    const found = new Set(rows.map(row => row.code));
-    const missing = permissionCodes.filter(code => !found.has(code));
-    if (missing.length > 0) {
-      throw new Error(`Permissions not seeded: ${missing.join(', ')}`);
-    }
-    await db
-      .insertInto('role_permissions')
-      .values(rows.map(row => ({ role_id: role.id, permission_id: row.id })))
-      .execute();
-  }
-
-  return role.id;
-}
-
 async function seed(): Promise<Seed> {
   const organizationId = randomUUID();
   const otherOrganizationId = randomUUID();
-
-  await db
-    .insertInto('organizations')
-    .values([
-      { id: organizationId, name: `Org API Test ${organizationId}` },
-      { id: otherOrganizationId, name: `Other Org ${otherOrganizationId}` },
-    ])
-    .execute();
+  await createOrganization(`Org API Test ${organizationId}`, { id: organizationId });
+  await createOrganization(`Other Org ${otherOrganizationId}`, { id: otherOrganizationId });
 
   const admin = await createUser('Org Admin');
   const writer = await createUser('Org Writer');
@@ -80,35 +39,23 @@ async function seed(): Promise<Seed> {
   const outsider = await createUser('Org Outsider');
 
   for (const user of [admin, writer, member]) {
-    await db
-      .insertInto('user_organizations')
-      .values({ user_id: user.id, organization_id: organizationId })
-      .execute();
+    await addUserToOrganization(user.id, organizationId);
   }
-  await db
-    .insertInto('user_organizations')
-    .values({ user_id: outsider.id, organization_id: otherOrganizationId })
-    .execute();
+  await addUserToOrganization(outsider.id, otherOrganizationId);
 
-  const adminRoleId = await createRoleWithPermissions(organizationId, 'Admin', ['admin']);
-  const writerRoleId = await createRoleWithPermissions(organizationId, 'Writer', [
-    'organization:write',
+  const adminRoleId = await createRole(organizationId, 'Admin', ['admin']);
+  const writerRoleId = await createRole(organizationId, 'Writer', ['organization:write']);
+  const memberRoleId = await createRole(organizationId, 'Member', [
+    'events:read',
+    'organization:read',
   ]);
-  const memberRoleId = await createRoleWithPermissions(organizationId, 'Member', ['events:read']);
   // The outsider may edit the other organization, but not this one.
-  const otherWriterRoleId = await createRoleWithPermissions(otherOrganizationId, 'Writer', [
-    'organization:write',
-  ]);
+  const otherWriterRoleId = await createRole(otherOrganizationId, 'Writer', ['organization:write']);
 
-  await db
-    .insertInto('user_roles')
-    .values([
-      { user_id: admin.id, role_id: adminRoleId },
-      { user_id: writer.id, role_id: writerRoleId },
-      { user_id: member.id, role_id: memberRoleId },
-      { user_id: outsider.id, role_id: otherWriterRoleId },
-    ])
-    .execute();
+  await assignRole(admin.id, adminRoleId);
+  await assignRole(writer.id, writerRoleId);
+  await assignRole(member.id, memberRoleId);
+  await assignRole(outsider.id, otherWriterRoleId);
 
   return {
     organizationId,
@@ -121,186 +68,241 @@ async function seed(): Promise<Seed> {
   };
 }
 
-async function cleanup(seed: Seed): Promise<void> {
-  await db.deleteFrom('users').where('id', 'in', seed.userIds).execute();
-  await db
-    .deleteFrom('organizations')
-    .where('id', 'in', [seed.organizationId, seed.otherOrganizationId])
-    .execute();
-}
-
 describe('Organizations API', () => {
   let app: FastifyInstance;
-  let seedData: Seed | null = null;
+  let seedData: Seed;
 
   beforeAll(async () => {
     app = await buildApp();
     await app.ready();
-    try {
-      seedData = await seed();
-    } catch {
-      seedData = null;
-    }
+  });
+
+  beforeEach(async () => {
+    await resetDatabase();
+    seedData = await seed();
   });
 
   afterAll(async () => {
-    if (seedData) await cleanup(seedData).catch(() => {});
     await app.close();
   });
 
-  it('lists only the organizations the user belongs to', async () => {
-    if (!seedData) return;
+  describe('GET /api/v1/organizations', () => {
+    it('lists only the organizations the user belongs to', async () => {
+      const memberResponse = await app.inject({
+        method: 'GET',
+        url: '/api/v1/organizations',
+        headers: { 'x-token': seedData.memberToken },
+      });
+      expect(memberResponse.statusCode).toBe(200);
+      const memberOrgs = memberResponse.json();
+      expect(memberOrgs.map((org: { id: string }) => org.id)).toEqual([seedData.organizationId]);
 
-    const memberResponse = await app.inject({
-      method: 'GET',
-      url: '/api/v1/organizations',
-      headers: { 'x-token': seedData.memberToken },
+      const outsiderResponse = await app.inject({
+        method: 'GET',
+        url: '/api/v1/organizations',
+        headers: { 'x-token': seedData.outsiderToken },
+      });
+      expect(outsiderResponse.statusCode).toBe(200);
+      expect(outsiderResponse.json().map((org: { id: string }) => org.id)).toEqual([
+        seedData.otherOrganizationId,
+      ]);
     });
-    expect(memberResponse.statusCode).toBe(200);
-    const memberOrgs = memberResponse.json();
-    expect(memberOrgs.map((org: { id: string }) => org.id)).toEqual([seedData.organizationId]);
-
-    const outsiderResponse = await app.inject({
-      method: 'GET',
-      url: '/api/v1/organizations',
-      headers: { 'x-token': seedData.outsiderToken },
-    });
-    expect(outsiderResponse.statusCode).toBe(200);
-    expect(outsiderResponse.json().map((org: { id: string }) => org.id)).toEqual([
-      seedData.otherOrganizationId,
-    ]);
   });
 
-  it('returns the organization details to a member', async () => {
-    if (!seedData) return;
+  describe('GET /api/v1/organizations/:organizationId', () => {
+    it('returns the organization details to a member', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/organizations/${seedData.organizationId}`,
+        headers: { 'x-token': seedData.memberToken },
+      });
 
-    const response = await app.inject({
-      method: 'GET',
-      url: `/api/v1/organizations/${seedData.organizationId}`,
-      headers: { 'x-token': seedData.memberToken },
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.id).toBe(seedData.organizationId);
+      expect(body.name).toBe(`Org API Test ${seedData.organizationId}`);
+      expect(body.description).toBe('');
+      expect(body.defaultTimezone).toBe('UTC');
+      expect(body.createdAt).toBeTruthy();
+      expect(body.updatedAt).toBeTruthy();
     });
 
-    expect(response.statusCode).toBe(200);
-    const body = response.json();
-    expect(body.id).toBe(seedData.organizationId);
-    expect(body.name).toBe(`Org API Test ${seedData.organizationId}`);
-    expect(body.description).toBe('');
-    expect(body.defaultTimezone).toBe('UTC');
-    expect(body.createdAt).toBeTruthy();
-    expect(body.updatedAt).toBeTruthy();
+    it('returns 404 for an organization the user does not belong to', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/organizations/${seedData.organizationId}`,
+        headers: { 'x-token': seedData.outsiderToken },
+      });
+      expect(response.statusCode).toBe(404);
+
+      const otherResponse = await app.inject({
+        method: 'GET',
+        url: `/api/v1/organizations/${seedData.otherOrganizationId}`,
+        headers: { 'x-token': seedData.memberToken },
+      });
+      expect(otherResponse.statusCode).toBe(404);
+    });
+
+    it('requires authentication', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/organizations/${seedData.organizationId}`,
+      });
+      expect(response.statusCode).toBe(401);
+    });
   });
 
-  it('returns 404 for an organization the user does not belong to', async () => {
-    if (!seedData) return;
-
-    const response = await app.inject({
-      method: 'GET',
-      url: `/api/v1/organizations/${seedData.organizationId}`,
-      headers: { 'x-token': seedData.outsiderToken },
+  describe('PATCH /api/v1/organizations/:organizationId', () => {
+    it('requires authentication', async () => {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/organizations/${seedData.organizationId}`,
+        payload: { name: 'Nope' },
+      });
+      expect(response.statusCode).toBe(401);
     });
-    expect(response.statusCode).toBe(404);
 
-    const otherResponse = await app.inject({
-      method: 'GET',
-      url: `/api/v1/organizations/${seedData.otherOrganizationId}`,
-      headers: { 'x-token': seedData.memberToken },
+    it('lets an admin edit the organization', async () => {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/organizations/${seedData.organizationId}`,
+        headers: { 'x-token': seedData.adminToken },
+        payload: { name: 'Renamed Organization', defaultTimezone: 'Europe/Helsinki' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.name).toBe('Renamed Organization');
+      expect(body.defaultTimezone).toBe('Europe/Helsinki');
+
+      const check = await app.inject({
+        method: 'GET',
+        url: `/api/v1/organizations/${seedData.organizationId}`,
+        headers: { 'x-token': seedData.memberToken },
+      });
+      expect(check.json().name).toBe('Renamed Organization');
     });
-    expect(otherResponse.statusCode).toBe(404);
+
+    it('lets a member with organization:write edit the organization', async () => {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/organizations/${seedData.organizationId}`,
+        headers: { 'x-token': seedData.writerToken },
+        payload: { description: 'Editable by the writer role.' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().description).toBe('Editable by the writer role.');
+    });
+
+    it('denies editing to a plain member', async () => {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/organizations/${seedData.organizationId}`,
+        headers: { 'x-token': seedData.memberToken },
+        payload: { name: 'Should Not Happen' },
+      });
+
+      expect(response.statusCode).toBe(403);
+    });
+
+    it('denies editing to a user with organization:write in another organization', async () => {
+      // The outsider passes the route-level permission check (organization:write
+      // in the other organization counts towards the global union) but is not a
+      // member of this organization, so the service rejects with 404.
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/organizations/${seedData.organizationId}`,
+        headers: { 'x-token': seedData.outsiderToken },
+        payload: { name: 'Should Not Happen' },
+      });
+
+      expect(response.statusCode).toBe(404);
+    });
+
+    it('rejects invalid payloads', async () => {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/organizations/${seedData.organizationId}`,
+        headers: { 'x-token': seedData.adminToken },
+        payload: { name: '' },
+      });
+
+      expect(response.statusCode).toBe(400);
+    });
   });
 
-  it('requires authentication', async () => {
-    if (!seedData) return;
+  describe('GET /api/v1/organizations/:organizationId/users/:userId', () => {
+    it('returns a single organization user to a member with organization:read', async () => {
+      const targetUserId = seedData.userIds[1];
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/organizations/${seedData.organizationId}/users/${targetUserId}`,
+        headers: { 'x-token': seedData.memberToken },
+      });
 
-    const getResponse = await app.inject({
-      method: 'GET',
-      url: `/api/v1/organizations/${seedData.organizationId}`,
-    });
-    expect(getResponse.statusCode).toBe(401);
-
-    const patchResponse = await app.inject({
-      method: 'PATCH',
-      url: `/api/v1/organizations/${seedData.organizationId}`,
-      payload: { name: 'Nope' },
-    });
-    expect(patchResponse.statusCode).toBe(401);
-  });
-
-  it('lets an admin edit the organization', async () => {
-    if (!seedData) return;
-
-    const response = await app.inject({
-      method: 'PATCH',
-      url: `/api/v1/organizations/${seedData.organizationId}`,
-      headers: { 'x-token': seedData.adminToken },
-      payload: { name: 'Renamed Organization', defaultTimezone: 'Europe/Helsinki' },
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.id).toBe(targetUserId);
+      expect(body.name).toBe('Org Writer');
+      expect(body.email).toBeTruthy();
+      expect(body.description).toBe('');
+      expect(body.isEmployed).toBe(false);
+      expect(body.isSuspended).toBe(false);
+      expect(body.isBlocked).toBe(false);
+      expect(body.state).toBe('active');
+      expect(body.createdAt).toBeTruthy();
     });
 
-    expect(response.statusCode).toBe(200);
-    const body = response.json();
-    expect(body.name).toBe('Renamed Organization');
-    expect(body.defaultTimezone).toBe('Europe/Helsinki');
+    it('lets an admin read any organization user', async () => {
+      const targetUserId = seedData.userIds[2];
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/organizations/${seedData.organizationId}/users/${targetUserId}`,
+        headers: { 'x-token': seedData.adminToken },
+      });
 
-    const check = await app.inject({
-      method: 'GET',
-      url: `/api/v1/organizations/${seedData.organizationId}`,
-      headers: { 'x-token': seedData.memberToken },
-    });
-    expect(check.json().name).toBe('Renamed Organization');
-  });
-
-  it('lets a member with organization:write edit the organization', async () => {
-    if (!seedData) return;
-
-    const response = await app.inject({
-      method: 'PATCH',
-      url: `/api/v1/organizations/${seedData.organizationId}`,
-      headers: { 'x-token': seedData.writerToken },
-      payload: { description: 'Editable by the writer role.' },
+      expect(response.statusCode).toBe(200);
+      expect(response.json().id).toBe(targetUserId);
     });
 
-    expect(response.statusCode).toBe(200);
-    expect(response.json().description).toBe('Editable by the writer role.');
-  });
+    it('returns 404 for a user who is not in the organization', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/organizations/${seedData.organizationId}/users/${seedData.userIds[3]}`,
+        headers: { 'x-token': seedData.memberToken },
+      });
 
-  it('denies editing to a plain member', async () => {
-    if (!seedData) return;
-
-    const response = await app.inject({
-      method: 'PATCH',
-      url: `/api/v1/organizations/${seedData.organizationId}`,
-      headers: { 'x-token': seedData.memberToken },
-      payload: { name: 'Should Not Happen' },
+      expect(response.statusCode).toBe(404);
     });
 
-    expect(response.statusCode).toBe(403);
-  });
+    it('returns 404 for a non-existent user', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/organizations/${seedData.organizationId}/users/${randomUUID()}`,
+        headers: { 'x-token': seedData.memberToken },
+      });
 
-  it('denies editing to a user with organization:write in another organization', async () => {
-    if (!seedData) return;
-
-    // The outsider passes the route-level permission check (organization:write
-    // in the other organization counts towards the global union) but is not a
-    // member of this organization, so the service rejects with 404.
-    const response = await app.inject({
-      method: 'PATCH',
-      url: `/api/v1/organizations/${seedData.organizationId}`,
-      headers: { 'x-token': seedData.outsiderToken },
-      payload: { name: 'Should Not Happen' },
+      expect(response.statusCode).toBe(404);
     });
 
-    expect(response.statusCode).toBe(404);
-  });
+    it('requires authentication', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/organizations/${seedData.organizationId}/users/${seedData.userIds[0]}`,
+      });
 
-  it('rejects invalid payloads', async () => {
-    if (!seedData) return;
-
-    const response = await app.inject({
-      method: 'PATCH',
-      url: `/api/v1/organizations/${seedData.organizationId}`,
-      headers: { 'x-token': seedData.adminToken },
-      payload: { name: '' },
+      expect(response.statusCode).toBe(401);
     });
 
-    expect(response.statusCode).toBe(400);
+    it('denies access to a user without organization:read', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/organizations/${seedData.otherOrganizationId}/users/${seedData.userIds[3]}`,
+        headers: { 'x-token': seedData.outsiderToken },
+      });
+
+      expect(response.statusCode).toBe(403);
+    });
   });
 });

@@ -39,7 +39,8 @@
     "clean": "rm -rf backend/node_modules backend/dist frontend/node_modules frontend/dist node_modules",
     "playwright:install": "npm run playwright:install -w frontend",
     "docker:up": "docker compose up -d",
-    "docker:down": "docker compose down"
+    "docker:down": "docker compose down",
+    "db:reset": "npm run db:reset -w backend"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.2",

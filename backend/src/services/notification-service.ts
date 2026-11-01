@@ -9,6 +9,8 @@ const logger = createLogger('notification-service');
 export interface NotificationResponse {
   id: number;
   userId: string;
+  organizationId: string | null;
+  organizationName: string | null;
   title: string;
   body: string;
   isRead: boolean;
@@ -23,15 +25,48 @@ export interface PaginatedNotifications {
   unreadCount: number;
 }
 
-function serializeNotification(notification: Notification): NotificationResponse {
+type NotificationRow = Notification & { organization_name: string | null };
+
+function serializeNotification(notification: NotificationRow): NotificationResponse {
   return {
     id: notification.id,
     userId: notification.user_id,
+    organizationId: notification.organization_id,
+    organizationName: notification.organization_name,
     title: notification.title,
     body: notification.body,
     isRead: notification.is_read,
     createdAt: notification.created_at.toISOString(),
   };
+}
+
+const notificationSelect = [
+  'notifications.id',
+  'notifications.user_id',
+  'notifications.organization_id',
+  'organizations.name as organization_name',
+  'notifications.title',
+  'notifications.body',
+  'notifications.is_read',
+  'notifications.created_at',
+] as const;
+
+/** Fetches one notification (with its organization name) owned by the user. */
+async function getNotificationRowOrThrow(
+  notificationId: number,
+  userId: string,
+): Promise<NotificationRow> {
+  const notification = await db
+    .selectFrom('notifications')
+    .leftJoin('organizations', 'organizations.id', 'notifications.organization_id')
+    .select(notificationSelect)
+    .where('notifications.id', '=', notificationId)
+    .where('notifications.user_id', '=', userId)
+    .executeTakeFirst();
+  if (!notification) {
+    throw notFound(`Notification ${notificationId} not found!`);
+  }
+  return notification;
 }
 
 /**
@@ -51,9 +86,10 @@ export async function listNotifications(
   const [rows, countRow, unreadRow] = await Promise.all([
     db
       .selectFrom('notifications')
-      .selectAll()
-      .where('user_id', '=', userId)
-      .orderBy('created_at', 'desc')
+      .leftJoin('organizations', 'organizations.id', 'notifications.organization_id')
+      .select(notificationSelect)
+      .where('notifications.user_id', '=', userId)
+      .orderBy('notifications.created_at', 'desc')
       .limit(limit)
       .offset(page * limit)
       .execute(),
@@ -104,7 +140,7 @@ export async function updateNotification(
   if (!updated) {
     throw notFound(`Notification ${notificationId} not found!`);
   }
-  return serializeNotification(updated);
+  return serializeNotification(await getNotificationRowOrThrow(notificationId, userId));
 }
 
 /**
@@ -128,18 +164,20 @@ export async function markAllRead(userId: string): Promise<number> {
  * @param userId - The user ID.
  * @param title - The notification title.
  * @param body - The notification body.
+ * @param organizationId - The organization the notification belongs to, if any.
  * @returns The created notification.
  */
 export async function createNotification(
   userId: string,
   title: string,
   body = '',
+  organizationId?: string,
 ): Promise<NotificationResponse> {
   logger.trace('notificationService.createNotification');
   const notification = await db
     .insertInto('notifications')
-    .values({ user_id: userId, title, body })
+    .values({ user_id: userId, organization_id: organizationId ?? null, title, body })
     .returningAll()
     .executeTakeFirstOrThrow();
-  return serializeNotification(notification);
+  return serializeNotification(await getNotificationRowOrThrow(notification.id, userId));
 }

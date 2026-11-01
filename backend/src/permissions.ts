@@ -14,16 +14,18 @@ export const PERMISSIONS = {
   ROLE_MANAGEMENT_WRITE: 'role-management:write',
   ORGANIZATION_WRITE: 'organization:write',
   ORGANIZATION_READ: 'organization:read',
-  OPERATIONS_READ: 'operations:read',
-  OPERATIONS_WRITE: 'operations:write',
   EVENTS_READ: 'events:read',
   EVENTS_WRITE: 'events:write',
   TEAM_MANAGEMENT_READ: 'team-management:read',
   TEAM_MANAGEMENT_WRITE: 'team-management:write',
-  LOCATION_MANAGEMENT_READ: 'location-management:read',
-  LOCATION_MANAGEMENT_WRITE: 'location-management:write',
-  JOB_MANAGEMENT_READ: 'job-management:read',
-  JOB_MANAGEMENT_WRITE: 'job-management:write',
+  SITE_MANAGEMENT_READ: 'site-management:read',
+  SITE_MANAGEMENT_WRITE: 'site-management:write',
+  ROOM_MANAGEMENT_READ: 'room-management:read',
+  ROOM_MANAGEMENT_WRITE: 'room-management:write',
+  WORK_ROLE_MANAGEMENT_READ: 'work-role-management:read',
+  WORK_ROLE_MANAGEMENT_WRITE: 'work-role-management:write',
+  CERTIFICATION_MANAGEMENT_READ: 'certification-management:read',
+  CERTIFICATION_MANAGEMENT_WRITE: 'certification-management:write',
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -58,18 +60,13 @@ export const PERMISSION_DEFINITIONS: { code: Permission; description: string }[]
   },
   {
     code: PERMISSIONS.ORGANIZATION_READ,
-    description: 'View organization members, teams, locations and jobs.',
-  },
-  { code: PERMISSIONS.OPERATIONS_READ, description: 'View operations.' },
-  {
-    code: PERMISSIONS.OPERATIONS_WRITE,
-    description: 'Create, update and delete operations.',
+    description: 'View organization members, teams, sites, rooms and work roles.',
   },
   { code: PERMISSIONS.EVENTS_READ, description: 'View event series and their occurrences.' },
   {
     code: PERMISSIONS.EVENTS_WRITE,
     description:
-      'Create, update and delete event series, and manage occurrences, job slots and comments.',
+      'Create, update and delete event series, and manage occurrences, work role slots and comments.',
   },
   {
     code: PERMISSIONS.TEAM_MANAGEMENT_READ,
@@ -80,20 +77,36 @@ export const PERMISSION_DEFINITIONS: { code: Permission; description: string }[]
     description: 'Create, update and delete teams, and manage team members.',
   },
   {
-    code: PERMISSIONS.LOCATION_MANAGEMENT_READ,
-    description: 'View locations.',
+    code: PERMISSIONS.SITE_MANAGEMENT_READ,
+    description: 'View sites (physical locations).',
   },
   {
-    code: PERMISSIONS.LOCATION_MANAGEMENT_WRITE,
-    description: 'Create, update and delete locations.',
+    code: PERMISSIONS.SITE_MANAGEMENT_WRITE,
+    description: 'Create, update and delete sites (physical locations).',
   },
   {
-    code: PERMISSIONS.JOB_MANAGEMENT_READ,
-    description: 'View jobs.',
+    code: PERMISSIONS.ROOM_MANAGEMENT_READ,
+    description: 'View rooms.',
   },
   {
-    code: PERMISSIONS.JOB_MANAGEMENT_WRITE,
-    description: 'Create, update and delete jobs.',
+    code: PERMISSIONS.ROOM_MANAGEMENT_WRITE,
+    description: 'Create, update and delete rooms.',
+  },
+  {
+    code: PERMISSIONS.WORK_ROLE_MANAGEMENT_READ,
+    description: 'View work roles and their qualifications.',
+  },
+  {
+    code: PERMISSIONS.WORK_ROLE_MANAGEMENT_WRITE,
+    description: 'Create, update and delete work roles.',
+  },
+  {
+    code: PERMISSIONS.CERTIFICATION_MANAGEMENT_READ,
+    description: 'View certifications.',
+  },
+  {
+    code: PERMISSIONS.CERTIFICATION_MANAGEMENT_WRITE,
+    description: 'Create, update and delete certifications.',
   },
 ];
 

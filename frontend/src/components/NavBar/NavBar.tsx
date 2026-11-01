@@ -12,8 +12,9 @@ import {
 import { IconChevronDown, IconMenu2 } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom';
-import { useAppDispatch, useAppSelector } from '../../hooks/redux.js';
-import { logout } from '../../store/user-slice.js';
+import { useGetCurrentUserQuery } from '../../api/index.js';
+import { useAppDispatch } from '../../hooks/redux.js';
+import { logout } from '../../store/session.js';
 import OrganizationSelector from '../OrganizationSelector/OrganizationSelector.js';
 
 interface NavItem {
@@ -27,7 +28,7 @@ function NavBar() {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const location = useLocation();
-  const currentUser = useAppSelector(state => state.user.currentUser);
+  const { data: currentUser } = useGetCurrentUserQuery();
 
   const navItems: NavItem[] = [
     { label: t('nav.home'), path: '/' },
@@ -43,8 +44,8 @@ function NavBar() {
       label: t('nav.organization'),
       children: [
         { label: t('nav.orgGeneral'), path: '/organization/general' },
-        { label: t('nav.orgLocations'), path: '/organization/locations' },
-        { label: t('nav.orgJobs'), path: '/organization/jobs' },
+        { label: t('nav.orgSites'), path: '/organization/sites' },
+        { label: t('nav.orgWorkRoles'), path: '/organization/work-roles' },
         { label: t('nav.orgUsers'), path: '/organization/users' },
       ],
     },
@@ -66,6 +67,8 @@ function NavBar() {
       dispatch(logout());
     } else if (setting === 'account') {
       navigate('/account');
+    } else if (setting === 'profile') {
+      navigate('/profile');
     }
   };
 

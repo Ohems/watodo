@@ -1,43 +1,59 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { db } from '../database.js';
 import { getAuth } from '../middleware/auth.js';
 import {
   eventCommentPushSchema,
   eventCommentsQuerySchema,
   eventCommentUpdateSchema,
-  eventJobAssignmentSchema,
-  eventJobPushSchema,
-  eventJobsQuerySchema,
-  eventJobUpdateSchema,
   eventSeriesPushSchema,
+  eventSeriesQuerySchema,
   eventSeriesUpdateSchema,
+  eventWorkRoleAssignmentSchema,
+  eventWorkRolePushSchema,
+  eventWorkRolesQuerySchema,
+  eventWorkRoleUpdateSchema,
   occurrenceRangeQuerySchema,
   occurrenceStartSchema,
   rescheduleOccurrenceSchema,
 } from '../schemas/index.js';
 import {
-  assignUserToJob,
+  assignUserToOccurrenceWorkRole,
+  assignUserToWorkRole,
   cancelOccurrence,
   createEventComment,
-  createEventJob,
   createEventSeries,
+  createEventWorkRole,
+  createOccurrenceComment,
+  createOccurrenceWorkRole,
   deleteEventComment,
-  deleteEventJob,
   deleteEventSeries,
+  deleteEventWorkRole,
   deleteException,
+  deleteOccurrenceComment,
+  deleteOccurrenceWorkRole,
   getEventSeries,
   getOccurrenceDetail,
+  getOccurrenceDetailByRef,
   getOccurrences,
   getSeriesOccurrences,
+  importParentSlots,
   listEventComments,
-  listEventJobs,
   listEventSeries,
+  listEventWorkRoles,
   listExceptions,
+  listOccurrenceComments,
+  listOccurrenceWorkRoles,
+  materializeOccurrenceByRef,
   rescheduleOccurrence,
+  resolveOccurrenceRef,
   splitEventSeries,
-  unassignUserFromJob,
+  unassignUserFromOccurrenceWorkRole,
+  unassignUserFromWorkRole,
   updateEventComment,
-  updateEventJob,
   updateEventSeries,
+  updateEventWorkRole,
+  updateOccurrenceComment,
+  updateOccurrenceWorkRole,
 } from '../services/event-service.js';
 
 interface SeriesParams {
@@ -48,16 +64,20 @@ interface OccurrenceParams {
   Params: { seriesId: string; occurrenceStart: string };
 }
 
-interface JobParams {
-  Params: { seriesId: string; jobId: string };
+interface WorkRoleParams {
+  Params: { seriesId: string; workRoleId: string };
 }
 
-interface JobAssignmentParams {
-  Params: { seriesId: string; jobId: string; assignmentId: string };
+interface WorkRoleAssignmentParams {
+  Params: { seriesId: string; workRoleId: string; assignmentId: string };
 }
 
 interface CommentParams {
   Params: { seriesId: string; commentId: string };
+}
+
+interface OccurrenceRefParams {
+  Params: { occurrenceRef: string };
 }
 
 function parseId(value: string, name: string): number {
@@ -81,11 +101,11 @@ function requireAuthUser(request: FastifyRequest): { id: string } {
 }
 
 export async function listEventSeriesHandler(
-  request: FastifyRequest<{ Querystring: { calendarId?: string } }>,
+  request: FastifyRequest<{ Querystring: unknown }>,
   reply: FastifyReply,
 ): Promise<void> {
-  const calendarId = request.query.calendarId;
-  const series = await listEventSeries(calendarId);
+  const query = eventSeriesQuerySchema.parse(request.query);
+  const series = await listEventSeries(query.organizationId, query.calendarId);
   return reply.status(200).send(series);
 }
 
@@ -135,6 +155,7 @@ export async function getOccurrencesHandler(
     query.calendarId,
     query,
     user.id,
+    query.organizationId,
   );
   return reply.status(200).send(occurrences);
 }
@@ -160,6 +181,15 @@ export async function getOccurrenceDetailHandler(
     parseId(request.params.seriesId, 'seriesId'),
     parseOccurrenceStart(request.params.occurrenceStart),
   );
+  return reply.status(200).send(detail);
+}
+
+/** Gets a single occurrence detail by its reference (stable ID or tmp key). */
+export async function getOccurrenceDetailByRefHandler(
+  request: FastifyRequest<OccurrenceRefParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const detail = await getOccurrenceDetailByRef(request.params.occurrenceRef);
   return reply.status(200).send(detail);
 }
 
@@ -224,71 +254,71 @@ export async function listExceptionsHandler(
   return reply.status(200).send(exceptions);
 }
 
-export async function listEventJobsHandler(
+export async function listEventWorkRolesHandler(
   request: FastifyRequest<SeriesParams>,
   reply: FastifyReply,
 ): Promise<void> {
-  const query = eventJobsQuerySchema.parse(request.query);
-  const jobs = await listEventJobs(
-    parseId(request.params.seriesId, 'seriesId'),
-    query.occurrenceStart ? new Date(query.occurrenceStart) : undefined,
-  );
-  return reply.status(200).send(jobs);
+  const query = eventWorkRolesQuerySchema.parse(request.query);
+  const slots = await listEventWorkRoles(parseId(request.params.seriesId, 'seriesId'), {
+    occurrenceStart: query.occurrenceStart ? new Date(query.occurrenceStart) : undefined,
+  });
+  return reply.status(200).send(slots);
 }
 
-export async function createEventJobHandler(
+export async function createEventWorkRoleHandler(
   request: FastifyRequest<SeriesParams>,
   reply: FastifyReply,
 ): Promise<void> {
-  const data = eventJobPushSchema.parse(request.body);
-  const job = await createEventJob(parseId(request.params.seriesId, 'seriesId'), data);
-  return reply.status(200).send(job);
+  const data = eventWorkRolePushSchema.parse(request.body);
+  const slot = await createEventWorkRole(parseId(request.params.seriesId, 'seriesId'), data);
+  return reply.status(200).send(slot);
 }
 
-export async function updateEventJobHandler(
-  request: FastifyRequest<JobParams>,
+export async function updateEventWorkRoleHandler(
+  request: FastifyRequest<WorkRoleParams>,
   reply: FastifyReply,
 ): Promise<void> {
-  const data = eventJobUpdateSchema.parse(request.body);
-  const job = await updateEventJob(
+  const data = eventWorkRoleUpdateSchema.parse(request.body);
+  const slot = await updateEventWorkRole(
     parseId(request.params.seriesId, 'seriesId'),
-    parseId(request.params.jobId, 'jobId'),
+    parseId(request.params.workRoleId, 'workRoleId'),
     data,
   );
-  return reply.status(200).send(job);
+  return reply.status(200).send(slot);
 }
 
-export async function deleteEventJobHandler(
-  request: FastifyRequest<JobParams>,
+export async function deleteEventWorkRoleHandler(
+  request: FastifyRequest<WorkRoleParams & { Querystring: { occurrenceRef?: string } }>,
   reply: FastifyReply,
 ): Promise<void> {
-  await deleteEventJob(
+  await deleteEventWorkRole(
     parseId(request.params.seriesId, 'seriesId'),
-    parseId(request.params.jobId, 'jobId'),
+    parseId(request.params.workRoleId, 'workRoleId'),
+    request.query.occurrenceRef,
   );
   return reply.status(200).send({ success: true });
 }
 
-export async function assignUserToJobHandler(
-  request: FastifyRequest<JobParams>,
+export async function assignUserToWorkRoleHandler(
+  request: FastifyRequest<WorkRoleParams>,
   reply: FastifyReply,
 ): Promise<void> {
-  const data = eventJobAssignmentSchema.parse(request.body);
-  const assignment = await assignUserToJob(
+  const data = eventWorkRoleAssignmentSchema.parse(request.body);
+  const assignment = await assignUserToWorkRole(
     parseId(request.params.seriesId, 'seriesId'),
-    parseId(request.params.jobId, 'jobId'),
+    parseId(request.params.workRoleId, 'workRoleId'),
     data.userId,
   );
   return reply.status(200).send(assignment);
 }
 
-export async function unassignUserFromJobHandler(
-  request: FastifyRequest<JobAssignmentParams>,
+export async function unassignUserFromWorkRoleHandler(
+  request: FastifyRequest<WorkRoleAssignmentParams>,
   reply: FastifyReply,
 ): Promise<void> {
-  await unassignUserFromJob(
+  await unassignUserFromWorkRole(
     parseId(request.params.seriesId, 'seriesId'),
-    parseId(request.params.jobId, 'jobId'),
+    parseId(request.params.workRoleId, 'workRoleId'),
     parseId(request.params.assignmentId, 'assignmentId'),
   );
   return reply.status(200).send({ success: true });
@@ -383,4 +413,202 @@ export async function updateEventSeriesConfigHandler(
   const data = eventSeriesConfigSchema.parse(request.body);
   const series = await updateEventSeriesConfig(seriesId, data);
   return reply.status(200).send(series);
+}
+
+// --- Role requirements ---
+
+// --- Occurrence-level work role slots ---
+
+/**
+ * Resolves an occurrence ref to (seriesId, occurrenceId, occurrenceStart) for
+ * write operations. The occurrence must already be materialized (numeric ID).
+ */
+async function resolveOccurrenceForWrite(
+  ref: string,
+): Promise<{ seriesId: number; occurrenceId: number; occurrenceStart: Date }> {
+  const resolved = await resolveOccurrenceRef(ref);
+  if (!/^\d+$/.test(ref)) {
+    throw new Error('Occurrence must be materialized (numeric ID) for this operation!');
+  }
+  const row = await db
+    .selectFrom('event_occurrences')
+    .select(['id', 'occurrence_start'])
+    .where('event_series_id', '=', resolved.seriesId)
+    .where('occurrence_start', '=', resolved.occurrenceStart)
+    .executeTakeFirstOrThrow();
+  return {
+    seriesId: resolved.seriesId,
+    occurrenceId: row.id,
+    occurrenceStart: row.occurrence_start,
+  };
+}
+
+export async function importParentSlotsHandler(
+  request: FastifyRequest<OccurrenceRefParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const { seriesId, occurrenceId, occurrenceStart } = await resolveOccurrenceForWrite(
+    request.params.occurrenceRef,
+  );
+  const imported = await importParentSlots(seriesId, occurrenceId, occurrenceStart);
+  return reply.status(200).send(imported);
+}
+
+// --- Occurrence-scoped endpoints (occurrence page) ---
+// These require a numeric eventOccurrenceId (the occurrence must be
+// materialized first via POST /materialize). Only occurrence-level rows are
+// modified, never the parent series slots/comments.
+
+interface OccurrenceIdParams {
+  Params: { eventOccurrenceId: string };
+}
+
+interface OccurrenceWorkRoleParams {
+  Params: { eventOccurrenceId: string; workRoleId: string };
+}
+
+interface OccurrenceAssignmentParams {
+  Params: { eventOccurrenceId: string; workRoleId: string; assignmentId: string };
+}
+
+interface OccurrenceCommentParams {
+  Params: { eventOccurrenceId: string; commentId: string };
+}
+
+/** Parses a numeric occurrence ID; rejects tmp refs. */
+function parseOccurrenceId(value: string): number {
+  if (!/^\d+$/.test(value)) {
+    throw new Error('A numeric eventOccurrenceId is required; materialize the occurrence first.');
+  }
+  return Number.parseInt(value, 10);
+}
+
+/** Materializes a tmp occurrence ref and returns its stable numeric ID. */
+export async function materializeOccurrenceHandler(
+  request: FastifyRequest<OccurrenceRefParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const occurrenceId = await materializeOccurrenceByRef(request.params.occurrenceRef);
+  return reply.status(200).send({ occurrenceId });
+}
+
+export async function listOccurrenceWorkRolesHandler(
+  request: FastifyRequest<OccurrenceIdParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const slots = await listOccurrenceWorkRoles(parseOccurrenceId(request.params.eventOccurrenceId));
+  return reply.status(200).send(slots);
+}
+
+export async function createOccurrenceWorkRoleHandler(
+  request: FastifyRequest<OccurrenceIdParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const data = eventWorkRolePushSchema.parse(request.body);
+  const slot = await createOccurrenceWorkRole(
+    parseOccurrenceId(request.params.eventOccurrenceId),
+    data,
+  );
+  return reply.status(200).send(slot);
+}
+
+export async function updateOccurrenceWorkRoleHandler(
+  request: FastifyRequest<OccurrenceWorkRoleParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const data = eventWorkRoleUpdateSchema.parse(request.body);
+  const slot = await updateOccurrenceWorkRole(
+    parseOccurrenceId(request.params.eventOccurrenceId),
+    parseId(request.params.workRoleId, 'workRoleId'),
+    data,
+  );
+  return reply.status(200).send(slot);
+}
+
+export async function deleteOccurrenceWorkRoleHandler(
+  request: FastifyRequest<OccurrenceWorkRoleParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  await deleteOccurrenceWorkRole(
+    parseOccurrenceId(request.params.eventOccurrenceId),
+    parseId(request.params.workRoleId, 'workRoleId'),
+  );
+  return reply.status(200).send({ success: true });
+}
+
+export async function assignUserToOccurrenceWorkRoleHandler(
+  request: FastifyRequest<OccurrenceWorkRoleParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const data = eventWorkRoleAssignmentSchema.parse(request.body);
+  const assignment = await assignUserToOccurrenceWorkRole(
+    parseOccurrenceId(request.params.eventOccurrenceId),
+    parseId(request.params.workRoleId, 'workRoleId'),
+    data.userId,
+  );
+  return reply.status(200).send(assignment);
+}
+
+export async function unassignUserFromOccurrenceWorkRoleHandler(
+  request: FastifyRequest<OccurrenceAssignmentParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  await unassignUserFromOccurrenceWorkRole(
+    parseOccurrenceId(request.params.eventOccurrenceId),
+    parseId(request.params.workRoleId, 'workRoleId'),
+    parseId(request.params.assignmentId, 'assignmentId'),
+  );
+  return reply.status(200).send({ success: true });
+}
+
+export async function listOccurrenceCommentsHandler(
+  request: FastifyRequest<OccurrenceIdParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const comments = await listOccurrenceComments(
+    parseOccurrenceId(request.params.eventOccurrenceId),
+  );
+  return reply.status(200).send(comments);
+}
+
+export async function createOccurrenceCommentHandler(
+  request: FastifyRequest<OccurrenceIdParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const data = eventCommentPushSchema.parse(request.body);
+  const user = requireAuthUser(request);
+  const comment = await createOccurrenceComment(
+    parseOccurrenceId(request.params.eventOccurrenceId),
+    user.id,
+    data,
+  );
+  return reply.status(200).send(comment);
+}
+
+export async function updateOccurrenceCommentHandler(
+  request: FastifyRequest<OccurrenceCommentParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const data = eventCommentUpdateSchema.parse(request.body);
+  const user = requireAuthUser(request);
+  const comment = await updateOccurrenceComment(
+    parseOccurrenceId(request.params.eventOccurrenceId),
+    parseId(request.params.commentId, 'commentId'),
+    user.id,
+    data,
+  );
+  return reply.status(200).send(comment);
+}
+
+export async function deleteOccurrenceCommentHandler(
+  request: FastifyRequest<OccurrenceCommentParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const user = requireAuthUser(request);
+  await deleteOccurrenceComment(
+    parseOccurrenceId(request.params.eventOccurrenceId),
+    parseId(request.params.commentId, 'commentId'),
+    user.id,
+  );
+  return reply.status(200).send({ success: true });
 }

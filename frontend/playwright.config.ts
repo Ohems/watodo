@@ -6,6 +6,12 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
+  // Every E2E test must complete within 20 seconds. This keeps the suite fast
+  // and catches tests that hang on missing elements or slow API mocks.
+  timeout: 20_000,
+  expect: {
+    timeout: 5_000,
+  },
   reporter: 'html',
   use: {
     baseURL: 'http://localhost:5173',

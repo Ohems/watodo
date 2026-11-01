@@ -50,7 +50,7 @@ npm run dev
 
 ## Documentation
 
-- [Events](docs/Events.md) - Recurring event series (rrule), occurrences, exceptions, job slots, and comments
+- [Events](docs/Events.md) - Recurring event series (rrule), occurrences, exceptions, work role slots, and comments
 
 ## Project Structure
 

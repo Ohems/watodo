@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 test.describe('Watodo App', () => {
   test('greets an unauthorized user with the login screen', async ({ page }) => {
     await page.goto('/');
-    await expect(page.getByText('WATODO').first()).toBeVisible();
+    await expect(page.getByAltText('Watodo')).toBeVisible();
     await expect(page.getByText('Sign in to continue')).toBeVisible();
   });
 

@@ -1,12 +1,15 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '../src/database.js';
 import { getAuthContext, handleNewLogin } from '../src/services/auth-service.js';
 import { getEffectivePermissions } from '../src/services/permission-service.js';
+import { resetDatabase } from './helpers/fixtures.js';
 
 // Integration test for the login flow: mocks the external services (Redis
 // login-state storage and the OAuth provider), then verifies against a real
 // database that the first user gets an organization and admin rights, and
-// that later users do not. Skipped when the database is not available.
+// that later users do not. Every test resets the database (beforeEach) and
+// performs the logins it needs itself, so tests are independent and a broken
+// seed fails the test instead of being masked.
 
 const fakes = vi.hoisted(() => {
   const redisStore = new Map<string, string>();
@@ -62,9 +65,13 @@ function stageLogin(stateId: string, returnUrl: string): void {
   );
 }
 
-async function clearDatabase(): Promise<void> {
-  await db.deleteFrom('users').execute();
-  await db.deleteFrom('organizations').execute();
+function stageFirstUser(stateId: string): void {
+  fakes.profile = {
+    id: 'provider-account-1',
+    email: 'first.user@example.com',
+    name: 'First User',
+  };
+  stageLogin(stateId, '/');
 }
 
 async function countRows(table: 'users' | 'organizations'): Promise<number> {
@@ -76,31 +83,16 @@ async function countRows(table: 'users' | 'organizations'): Promise<number> {
 }
 
 describe('First login flow', () => {
-  let dbAvailable = false;
-  let firstUserId = '';
-
-  beforeAll(async () => {
-    try {
-      await db.selectFrom('users').select('id').limit(1).execute();
-      dbAvailable = true;
-      await clearDatabase();
-    } catch {
-      dbAvailable = false;
-    }
+  beforeEach(async () => {
+    await resetDatabase();
   });
 
   afterAll(async () => {
-    if (dbAvailable) await clearDatabase().catch(() => {});
+    await resetDatabase();
   });
 
   it('creates a user, an organization and admin rights for the first user', async () => {
-    if (!dbAvailable) return;
-    fakes.profile = {
-      id: 'provider-account-1',
-      email: 'first.user@example.com',
-      name: 'First User',
-    };
-    stageLogin('state-1', '/');
+    stageFirstUser('state-1');
 
     const result = await handleNewLogin('discord', 'login-code-1', 'state-1');
     expect(result.token).toBeTruthy();
@@ -114,7 +106,6 @@ describe('First login flow', () => {
       .selectAll()
       .where('email', '=', 'first.user@example.com')
       .executeTakeFirstOrThrow();
-    firstUserId = user.id;
     expect(user.name).toBe('First User');
     expect(user.state).toBe('active');
 
@@ -161,7 +152,10 @@ describe('First login flow', () => {
   });
 
   it('creates a plain user without an organization for the second user', async () => {
-    if (!dbAvailable) return;
+    // Log the first user in so the second one is not the first anymore.
+    stageFirstUser('state-1');
+    await handleNewLogin('discord', 'login-code-1', 'state-1');
+
     fakes.profile = {
       id: 'provider-account-2',
       email: 'second.user@example.com',
@@ -195,27 +189,29 @@ describe('First login flow', () => {
   });
 
   it('logs a returning user in without creating a duplicate user', async () => {
-    if (!dbAvailable) return;
-    fakes.profile = {
-      id: 'provider-account-1',
-      email: 'first.user@example.com',
-      name: 'First User',
-    };
-    stageLogin('state-3', '/');
+    stageFirstUser('state-1');
+    const firstLogin = await handleNewLogin('discord', 'login-code-1', 'state-1');
+    if (!firstLogin.token) throw new Error('Expected a login token');
+    const firstAuth = await getAuthContext(firstLogin.token);
 
+    stageFirstUser('state-3');
     const result = await handleNewLogin('discord', 'login-code-3', 'state-3');
 
-    expect(await countRows('users')).toBe(2);
+    expect(await countRows('users')).toBe(1);
     expect(await countRows('organizations')).toBe(1);
 
     if (!result.token) throw new Error('Expected a login token');
     const auth = await getAuthContext(result.token);
-    expect(auth.user.id).toBe(firstUserId);
+    expect(auth.user.id).toBe(firstAuth.user.id);
     expect(auth.permissions).toContain('admin');
   });
 
   it('links an account from another provider to the same user by email', async () => {
-    if (!dbAvailable) return;
+    stageFirstUser('state-1');
+    const firstLogin = await handleNewLogin('discord', 'login-code-1', 'state-1');
+    if (!firstLogin.token) throw new Error('Expected a login token');
+    const firstAuth = await getAuthContext(firstLogin.token);
+
     fakes.profile = {
       id: 'provider-account-3',
       email: 'first.user@example.com',
@@ -225,16 +221,16 @@ describe('First login flow', () => {
 
     const result = await handleNewLogin('microsoft', 'login-code-4', 'state-4');
 
-    expect(await countRows('users')).toBe(2);
+    expect(await countRows('users')).toBe(1);
 
     if (!result.token) throw new Error('Expected a login token');
     const auth = await getAuthContext(result.token);
-    expect(auth.user.id).toBe(firstUserId);
+    expect(auth.user.id).toBe(firstAuth.user.id);
 
     const accounts = await db
       .selectFrom('auth_accounts')
       .select('provider')
-      .where('user_id', '=', firstUserId)
+      .where('user_id', '=', firstAuth.user.id)
       .execute();
     expect(accounts.map(account => account.provider).sort()).toEqual(['discord', 'microsoft']);
   });

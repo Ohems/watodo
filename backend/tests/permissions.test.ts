@@ -18,32 +18,32 @@ describe('permissions registry', () => {
   it('lists the system-defined permissions', () => {
     expect(ALL_PERMISSIONS).toContain(PERMISSIONS.ADMIN);
     expect(ALL_PERMISSIONS).toContain(PERMISSIONS.USER_MANAGEMENT_WRITE);
-    expect(ALL_PERMISSIONS).toContain(PERMISSIONS.OPERATIONS_READ);
+    expect(ALL_PERMISSIONS).toContain(PERMISSIONS.EVENTS_READ);
   });
 
   it('recognizes known permissions', () => {
     expect(isKnownPermission('admin')).toBe(true);
-    expect(isKnownPermission('operations:read')).toBe(true);
+    expect(isKnownPermission('events:read')).toBe(true);
     expect(isKnownPermission('not-a-permission')).toBe(false);
   });
 });
 
 describe('hasPermission', () => {
   it('grants access when the permission is present', () => {
-    expect(hasPermission(['operations:read'], 'operations:read')).toBe(true);
+    expect(hasPermission(['events:read'], 'events:read')).toBe(true);
   });
 
   it('denies access when the permission is missing', () => {
-    expect(hasPermission(['operations:read'], 'user-management:write')).toBe(false);
+    expect(hasPermission(['events:read'], 'user-management:write')).toBe(false);
   });
 
   it('treats admin as a wildcard', () => {
     expect(hasPermission(['admin'], 'user-management:write')).toBe(true);
-    expect(hasPermission(['operations:read', 'admin'], 'role-management:write')).toBe(true);
+    expect(hasPermission(['events:read', 'admin'], 'role-management:write')).toBe(true);
   });
 
   it('denies access for empty permissions', () => {
-    expect(hasPermission([], 'operations:read')).toBe(false);
+    expect(hasPermission([], 'events:read')).toBe(false);
   });
 });
 

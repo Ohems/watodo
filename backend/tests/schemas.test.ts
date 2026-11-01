@@ -1,21 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import {
+  calendarListQuerySchema,
   eventCommentPushSchema,
   eventCommentUpdateSchema,
-  eventJobPushSchema,
-  eventJobUpdateSchema,
+  eventSeriesListQuerySchema,
   eventSeriesPushSchema,
+  eventSeriesQuerySchema,
   eventSeriesUpdateSchema,
+  eventWorkRolePushSchema,
+  eventWorkRoleUpdateSchema,
   incrementalSchema,
   occurrenceRangeQuerySchema,
-  opAssignmentSchema,
-  operationSchema,
   providerSchema,
   recurrenceSchema,
   rescheduleOccurrenceSchema,
   roleAssignmentSchema,
   rolePushSchema,
   roleUpdateSchema,
+  teamMemberUpdateSchema,
+  teamPushSchema,
+  teamTypeSchema,
+  teamUpdateSchema,
   userPushSchema,
   userQuerySchema,
 } from '../src/schemas/index.js';
@@ -57,8 +62,8 @@ describe('Schemas', () => {
     it('should accept a role with permissions', () => {
       const result = rolePushSchema.safeParse({
         name: 'Moderator',
-        description: 'Can manage operations',
-        permissions: ['operations:read', 'operations:write'],
+        description: 'Can manage events',
+        permissions: ['events:read', 'events:write'],
       });
       expect(result.success).toBe(true);
     });
@@ -97,6 +102,80 @@ describe('Schemas', () => {
     });
   });
 
+  describe('teamTypeSchema', () => {
+    it('should accept all team types', () => {
+      for (const type of ['general', 'event_organizers', 'role_group']) {
+        expect(teamTypeSchema.safeParse(type).success).toBe(true);
+      }
+    });
+
+    it('should reject unknown team types', () => {
+      expect(teamTypeSchema.safeParse('unknown').success).toBe(false);
+    });
+  });
+
+  describe('teamPushSchema', () => {
+    it('should accept a plain team', () => {
+      const result = teamPushSchema.safeParse({
+        name: 'Setup Crew',
+        organizationId: '123e4567-e89b-42d3-a456-426614174000',
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('should accept a team with type, leader and links', () => {
+      const result = teamPushSchema.safeParse({
+        name: 'Events Team',
+        organizationId: '123e4567-e89b-42d3-a456-426614174000',
+        teamType: 'event_organizers',
+        teamLeaderId: '123e4567-e89b-42d3-a456-426614174001',
+        eventTypeId: 3,
+        workRoleId: null,
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('should reject an invalid team type', () => {
+      expect(
+        teamPushSchema.safeParse({
+          name: 'Team',
+          organizationId: '123e4567-e89b-42d3-a456-426614174000',
+          teamType: 'admins',
+        }).success,
+      ).toBe(false);
+    });
+
+    it('should require a name', () => {
+      expect(
+        teamPushSchema.safeParse({
+          organizationId: '123e4567-e89b-42d3-a456-426614174000',
+        }).success,
+      ).toBe(false);
+    });
+  });
+
+  describe('teamUpdateSchema', () => {
+    it('should accept partial updates including clearing the leader', () => {
+      expect(teamUpdateSchema.safeParse({ teamLeaderId: null }).success).toBe(true);
+      expect(teamUpdateSchema.safeParse({ teamType: 'role_group', workRoleId: 2 }).success).toBe(
+        true,
+      );
+      expect(teamUpdateSchema.safeParse({}).success).toBe(true);
+    });
+  });
+
+  describe('teamMemberUpdateSchema', () => {
+    it('should accept the manager toggle', () => {
+      expect(teamMemberUpdateSchema.safeParse({ isManager: true }).success).toBe(true);
+      expect(teamMemberUpdateSchema.safeParse({ isManager: false }).success).toBe(true);
+      expect(teamMemberUpdateSchema.safeParse({}).success).toBe(true);
+    });
+
+    it('should reject non-boolean values', () => {
+      expect(teamMemberUpdateSchema.safeParse({ isManager: 'yes' }).success).toBe(false);
+    });
+  });
+
   describe('userQuerySchema', () => {
     it('should accept empty query', () => {
       expect(userQuerySchema.safeParse({}).success).toBe(true);
@@ -113,35 +192,6 @@ describe('Schemas', () => {
 
     it('should reject limit over 100', () => {
       expect(userQuerySchema.safeParse({ limit: '101' }).success).toBe(false);
-    });
-  });
-
-  describe('operationSchema', () => {
-    it('should accept valid operation with assignments', () => {
-      const result = operationSchema.safeParse({
-        name: 'Test Operation',
-        description: 'A test',
-        requirements: 'None',
-        location: 'Helsinki',
-        assignments: [{ name: 'Assignment 1', description: 'First' }],
-      });
-      expect(result.success).toBe(true);
-    });
-
-    it('should require name', () => {
-      expect(operationSchema.safeParse({ description: 'No name' }).success).toBe(false);
-    });
-  });
-
-  describe('opAssignmentSchema', () => {
-    it('should accept valid assignment', () => {
-      expect(
-        opAssignmentSchema.safeParse({ name: 'Task 1', description: 'Do something' }).success,
-      ).toBe(true);
-    });
-
-    it('should require name', () => {
-      expect(opAssignmentSchema.safeParse({ description: 'No name' }).success).toBe(false);
     });
   });
 
@@ -267,6 +317,42 @@ describe('Schemas', () => {
         occurrenceRangeQuerySchema.safeParse({ start: '2026-10-21T00:00:00.000Z' }).success,
       ).toBe(false);
     });
+
+    it('should allow omitting organizationId (the Home page lists all organizations)', () => {
+      expect(
+        occurrenceRangeQuerySchema.safeParse({
+          start: '2026-10-21T00:00:00.000Z',
+          end: '2026-11-21T00:00:00.000Z',
+        }).success,
+      ).toBe(true);
+    });
+  });
+
+  describe('calendarListQuerySchema', () => {
+    it('should require an organizationId', () => {
+      const organizationId = '123e4567-e89b-42d3-a456-426614174000';
+      expect(calendarListQuerySchema.safeParse({ organizationId }).success).toBe(true);
+      expect(calendarListQuerySchema.safeParse({}).success).toBe(false);
+    });
+  });
+
+  describe('eventSeriesQuerySchema', () => {
+    it('should require an organizationId and allow an optional calendarId', () => {
+      const organizationId = '123e4567-e89b-42d3-a456-426614174000';
+      const calendarId = '123e4567-e89b-42d3-a456-426614174001';
+      expect(eventSeriesQuerySchema.safeParse({ organizationId }).success).toBe(true);
+      expect(eventSeriesQuerySchema.safeParse({ organizationId, calendarId }).success).toBe(true);
+      expect(eventSeriesQuerySchema.safeParse({ calendarId }).success).toBe(false);
+      expect(eventSeriesQuerySchema.safeParse({}).success).toBe(false);
+    });
+  });
+
+  describe('eventSeriesListQuerySchema', () => {
+    it('should require an organizationId', () => {
+      const organizationId = '123e4567-e89b-42d3-a456-426614174000';
+      expect(eventSeriesListQuerySchema.safeParse({ organizationId }).success).toBe(true);
+      expect(eventSeriesListQuerySchema.safeParse({}).success).toBe(false);
+    });
   });
 
   describe('rescheduleOccurrenceSchema', () => {
@@ -284,26 +370,26 @@ describe('Schemas', () => {
     });
   });
 
-  describe('eventJobPushSchema and eventJobUpdateSchema', () => {
+  describe('eventWorkRolePushSchema and eventWorkRoleUpdateSchema', () => {
     it('should accept a slot with and without an occurrence', () => {
-      expect(eventJobPushSchema.safeParse({ title: 'Setup' }).success).toBe(true);
+      expect(eventWorkRolePushSchema.safeParse({ title: 'Setup' }).success).toBe(true);
       expect(
-        eventJobPushSchema.safeParse({
+        eventWorkRolePushSchema.safeParse({
           title: 'Setup',
           description: 'Early',
           occurrenceStart: '2026-10-21T16:00:00.000Z',
         }).success,
       ).toBe(true);
-      expect(eventJobPushSchema.safeParse({ title: 'Setup', occurrenceStart: null }).success).toBe(
-        true,
-      );
-      expect(eventJobPushSchema.safeParse({ description: 'No title' }).success).toBe(false);
+      expect(
+        eventWorkRolePushSchema.safeParse({ title: 'Setup', occurrenceStart: null }).success,
+      ).toBe(true);
+      expect(eventWorkRolePushSchema.safeParse({ description: 'No title' }).success).toBe(false);
     });
 
     it('should accept partial updates', () => {
-      expect(eventJobUpdateSchema.safeParse({}).success).toBe(true);
-      expect(eventJobUpdateSchema.safeParse({ title: 'New' }).success).toBe(true);
-      expect(eventJobUpdateSchema.safeParse({ occurrenceStart: null }).success).toBe(true);
+      expect(eventWorkRoleUpdateSchema.safeParse({}).success).toBe(true);
+      expect(eventWorkRoleUpdateSchema.safeParse({ title: 'New' }).success).toBe(true);
+      expect(eventWorkRoleUpdateSchema.safeParse({ occurrenceStart: null }).success).toBe(true);
     });
   });
 

@@ -1,82 +1,78 @@
 import { Badge, Select, TextInput } from '@mantine/core';
-import { useCallback, useEffect, useState } from 'react';
+import { skipToken } from '@reduxjs/toolkit/query/react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { eventManagementApi, locationsApi, teamsApi } from '../../api/index.js';
+import {
+  useGetAllRoomsQuery,
+  useGetAllSitesQuery,
+  useGetCurrentUserQuery,
+  useGetEventSeriesManagementListQuery,
+  useGetTeamsQuery,
+} from '../../api/index.js';
 import DataTable, { type DataTableColumn } from '../../components/DataTable/DataTable.js';
 import { useAppSelector } from '../../hooks/redux.js';
-import type {
-  EventSeriesListQuery,
-  EventSeriesManagement,
-  Location,
-  Team,
-} from '../../types/index.js';
+import { selectActiveOrganizationId } from '../../store/organization-slice.js';
+import type { EventSeriesManagement } from '../../types/index.js';
 
 function EventManagementPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const activeOrganizationId = useAppSelector(state => state.organization.activeOrganizationId);
-  const currentUser = useAppSelector(state => state.user.currentUser);
+  const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
+  const { data: currentUser } = useGetCurrentUserQuery();
   const canWrite =
     currentUser?.permissions?.includes('admin') === true ||
     currentUser?.permissions?.includes('events:write') === true;
 
-  const [data, setData] = useState<EventSeriesManagement[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [limit, setLimit] = useState(50);
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
 
   // Filters
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const [locationId, setLocationId] = useState<string | null>(null);
+  const [siteId, setSiteId] = useState<string | null>(null);
+  const [roomId, setRoomId] = useState<string | null>(null);
   const [teamId, setTeamId] = useState<string | null>(null);
   const [hasTeam, setHasTeam] = useState<boolean | undefined>(undefined);
 
-  const [locations, setLocations] = useState<Location[]>([]);
-  const [teams, setTeams] = useState<Team[]>([]);
+  const { data: sites = [] } = useGetAllSitesQuery(activeOrganizationId ?? skipToken);
+  const { data: rooms = [] } = useGetAllRoomsQuery(activeOrganizationId ?? skipToken);
+  const { data: teamsData } = useGetTeamsQuery(
+    activeOrganizationId
+      ? { organizationId: activeOrganizationId, query: { limit: 200 } }
+      : skipToken,
+  );
+  const teams = teamsData?.items ?? [];
 
-  useEffect(() => {
-    if (!activeOrganizationId) return;
-    locationsApi
-      .listAllLocations(activeOrganizationId)
-      .then(setLocations)
-      .catch(() => setLocations([]));
-    teamsApi
-      .listTeams(activeOrganizationId, { limit: 200 })
-      .then(d => setTeams(d.items))
-      .catch(() => setTeams([]));
-  }, [activeOrganizationId]);
+  // The management list only shows the active organization's series (the
+  // Home page aggregates all organizations).
+  const { data, isLoading: loading } = useGetEventSeriesManagementListQuery(
+    activeOrganizationId
+      ? {
+          page,
+          limit,
+          search: search || undefined,
+          startFrom: dateFrom ? new Date(dateFrom).toISOString() : undefined,
+          startTo: dateTo ? new Date(dateTo).toISOString() : undefined,
+          siteId: siteId ?? undefined,
+          roomId: roomId ?? undefined,
+          teamId: teamId ?? undefined,
+          hasTeam,
+          organizationId: activeOrganizationId,
+        }
+      : skipToken,
+  );
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const query: EventSeriesListQuery = {
-        page,
-        limit,
-        search: search || undefined,
-        startFrom: dateFrom ? new Date(dateFrom).toISOString() : undefined,
-        startTo: dateTo ? new Date(dateTo).toISOString() : undefined,
-        locationId: locationId ?? undefined,
-        teamId: teamId ?? undefined,
-        hasTeam,
-      };
-      const result = await eventManagementApi.listEventSeries(query);
-      setData(result.items);
-      setTotal(result.total);
-    } catch {
-      setData([]);
-      setTotal(0);
-    } finally {
-      setLoading(false);
+  const locationLabel = (item: EventSeriesManagement): string => {
+    if (item.roomName && item.siteName) return `${item.siteName} - ${item.roomName}`;
+    if (item.siteName) {
+      return item.reserveWholeSite
+        ? `${item.siteName} (${t('events.wholeSiteReserved')})`
+        : item.siteName;
     }
-  }, [page, limit, search, dateFrom, dateTo, locationId, teamId, hasTeam]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+    return '';
+  };
 
   const columns: DataTableColumn<EventSeriesManagement>[] = [
     {
@@ -92,12 +88,14 @@ function EventManagementPage() {
     {
       key: 'location',
       label: t('events.location'),
-      render: item =>
-        item.locationName ? (
-          item.locationName
+      render: item => {
+        const label = locationLabel(item);
+        return label ? (
+          label
         ) : (
           <span style={{ color: 'var(--mantine-color-gray-5)' }}>{t('events.noLocation')}</span>
-        ),
+        );
+      },
     },
     {
       key: 'teams',
@@ -121,8 +119,8 @@ function EventManagementPage() {
     <DataTable
       title={t('nav.eventsManagement')}
       columns={columns}
-      data={data}
-      total={total}
+      data={data?.items ?? []}
+      total={data?.total ?? 0}
       page={page}
       limit={limit}
       loading={loading}
@@ -152,10 +150,24 @@ function EventManagementPage() {
           />
           <Select
             size="sm"
-            placeholder={t('events.filterByLocation')}
-            value={locationId}
-            onChange={setLocationId}
-            data={locations.map(loc => ({ value: loc.id, label: loc.name }))}
+            placeholder={t('events.filterBySite')}
+            value={siteId}
+            onChange={value => {
+              setSiteId(value);
+              setRoomId(null);
+            }}
+            data={sites.map(s => ({ value: s.id, label: s.name }))}
+            clearable
+            style={{ minWidth: 160 }}
+          />
+          <Select
+            size="sm"
+            placeholder={t('events.filterByRoom')}
+            value={roomId}
+            onChange={setRoomId}
+            data={rooms
+              .filter(r => !siteId || r.siteId === siteId)
+              .map(r => ({ value: r.id, label: r.name }))}
             clearable
             style={{ minWidth: 160 }}
           />

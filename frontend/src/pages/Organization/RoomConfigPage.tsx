@@ -11,67 +11,63 @@ import {
   TextInput,
   Title,
 } from '@mantine/core';
-import { useCallback, useEffect, useState } from 'react';
+import { skipToken } from '@reduxjs/toolkit/query/react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
-import { locationsApi } from '../../api/index.js';
+import {
+  getApiErrorMessage,
+  useGetCurrentUserQuery,
+  useGetRoomQuery,
+  useUpdateRoomMutation,
+} from '../../api/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
-import type { Location } from '../../types/index.js';
+import { selectActiveOrganizationId } from '../../store/organization-slice.js';
 
-function LocationConfigPage() {
+function RoomConfigPage() {
   const { t } = useTranslation();
-  const { locationId } = useParams<{ locationId: string }>();
+  const { siteId, roomId } = useParams<{ siteId: string; roomId: string }>();
   const navigate = useNavigate();
-  const activeOrganizationId = useAppSelector(state => state.organization.activeOrganizationId);
-  const currentUser = useAppSelector(state => state.user.currentUser);
+  const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
+  const { data: currentUser } = useGetCurrentUserQuery();
   const canWrite =
     currentUser?.permissions?.includes('admin') === true ||
-    currentUser?.permissions?.includes('location-management:write') === true;
+    currentUser?.permissions?.includes('room-management:write') === true;
 
-  const [location, setLocation] = useState<Location | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const roomArg =
+    activeOrganizationId && siteId && roomId
+      ? { organizationId: activeOrganizationId, siteId, roomId }
+      : skipToken;
+  const { data: room, isLoading: loading, error: roomError } = useGetRoomQuery(roomArg);
+  const [updateRoom, { isLoading: saving }] = useUpdateRoomMutation();
+
+  const [actionError, setActionError] = useState<string | null>(null);
+  const error = actionError ?? (roomError ? getApiErrorMessage(roomError) : null);
 
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
 
-  const load = useCallback(async () => {
-    if (!activeOrganizationId || !locationId) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await locationsApi.getLocation(activeOrganizationId, locationId);
-      setLocation(data);
-      setEditName(data.name);
-      setEditDescription(data.description);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [activeOrganizationId, locationId]);
-
   useEffect(() => {
-    load();
-  }, [load]);
+    if (room) {
+      setEditName(room.name);
+      setEditDescription(room.description);
+    }
+  }, [room]);
 
   const handleSave = async () => {
-    if (!activeOrganizationId || !locationId) return;
-    setSaving(true);
-    setError(null);
+    if (!activeOrganizationId || !siteId || !roomId) return;
+    setActionError(null);
     try {
-      await locationsApi.updateLocation(activeOrganizationId, locationId, {
-        name: editName,
-        description: editDescription,
-      });
+      await updateRoom({
+        organizationId: activeOrganizationId,
+        siteId,
+        roomId,
+        data: { name: editName, description: editDescription },
+      }).unwrap();
       setEditing(false);
-      await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
+      setActionError(getApiErrorMessage(err));
     }
   };
 
@@ -83,10 +79,10 @@ function LocationConfigPage() {
     );
   }
 
-  if (!location) {
+  if (!room) {
     return (
       <Box p="md">
-        <Alert color="red">{error ?? 'Location not found'}</Alert>
+        <Alert color="red">{error ?? 'Room not found'}</Alert>
       </Box>
     );
   }
@@ -95,7 +91,7 @@ function LocationConfigPage() {
     <Box p="md" maw={600} mx="auto">
       <Paper shadow="sm" p="lg">
         <Group justify="space-between" mb="md">
-          <Title order={3}>{editing ? t('locations.editLocation') : location.name}</Title>
+          <Title order={3}>{editing ? t('rooms.editRoom') : room.name}</Title>
           {canWrite && (
             <Group>
               {!editing ? (
@@ -108,8 +104,8 @@ function LocationConfigPage() {
                     variant="default"
                     onClick={() => {
                       setEditing(false);
-                      setEditName(location.name);
-                      setEditDescription(location.description);
+                      setEditName(room.name);
+                      setEditDescription(room.description);
                     }}
                   >
                     {t('common.cancel')}
@@ -137,7 +133,7 @@ function LocationConfigPage() {
             {editing ? (
               <TextInput value={editName} onChange={e => setEditName(e.target.value)} />
             ) : (
-              <Text>{location.name}</Text>
+              <Text>{room.name}</Text>
             )}
           </Box>
           <Box>
@@ -151,15 +147,15 @@ function LocationConfigPage() {
               />
             ) : (
               <Text>
-                {location.description || <em style={{ color: '#999' }}>{t('common.notSet')}</em>}
+                {room.description || <em style={{ color: '#999' }}>{t('common.notSet')}</em>}
               </Text>
             )}
           </Box>
         </Stack>
 
         <Box mt="lg">
-          <Button variant="subtle" onClick={() => navigate('/organization/locations')}>
-            {t('locations.backToList')}
+          <Button variant="subtle" onClick={() => navigate(`/organization/sites/${siteId}`)}>
+            {t('rooms.backToSite')}
           </Button>
         </Box>
       </Paper>
@@ -167,4 +163,4 @@ function LocationConfigPage() {
   );
 }
 
-export default LocationConfigPage;
+export default RoomConfigPage;

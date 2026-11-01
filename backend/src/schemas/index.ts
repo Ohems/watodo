@@ -66,6 +66,11 @@ export const organizationParamsSchema = z.object({
   organizationId: z.uuid(),
 });
 
+export const organizationUserParamsSchema = z.object({
+  organizationId: z.uuid(),
+  userId: z.uuid(),
+});
+
 export const roleParamsSchema = z.object({
   organizationId: z.uuid(),
   roleId: z.coerce.number().int(),
@@ -95,28 +100,6 @@ export const organizationUpdateSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
   defaultTimezone: z.string().min(1).max(64).optional(),
-});
-
-export const operationSchema = z.object({
-  id: z.number().int().optional(),
-  name: z.string(),
-  description: z.string().optional(),
-  requirements: z.string().optional(),
-  location: z.string().optional(),
-  assignments: z
-    .array(
-      z.object({
-        id: z.number().int().optional(),
-        name: z.string(),
-        description: z.string().optional(),
-      }),
-    )
-    .optional(),
-});
-
-export const opAssignmentSchema = z.object({
-  name: z.string(),
-  description: z.string().optional(),
 });
 
 export const calendarPushSchema = z.object({
@@ -181,17 +164,21 @@ export const eventSeriesUpdateSchema = eventSeriesPushSchema.partial();
 
 export const occurrenceFilterSchema = z.object({
   scope: z.enum(['all', 'team', 'mine']).optional(),
-  locationId: z.uuid().optional(),
+  siteId: z.uuid().optional(),
+  roomId: z.uuid().optional(),
   teamId: z.uuid().optional(),
 });
 
 export type OccurrenceFilter = z.infer<typeof occurrenceFilterSchema>;
 
+// The organization filter is optional here because the Home page lists
+// occurrences across all organizations (every other view passes it).
 export const occurrenceRangeQuerySchema = z
   .object({
     start: z.iso.datetime(),
     end: z.iso.datetime(),
     calendarId: z.uuid().optional(),
+    organizationId: z.uuid().optional(),
   })
   .extend(occurrenceFilterSchema.shape);
 
@@ -202,15 +189,19 @@ export const rescheduleOccurrenceSchema = z.object({
   end: z.iso.datetime().optional(),
 });
 
-export const eventJobPushSchema = z.object({
+export const eventWorkRolePushSchema = z.object({
   title: z.string().min(1),
   description: z.string().optional(),
   occurrenceStart: z.iso.datetime().nullable().optional(),
+  /** Scope the slot to a materialized occurrence (inherited copy). */
+  occurrenceId: z.number().int().nullable().optional(),
+  isCritical: z.boolean().optional(),
+  workRoleId: z.number().int().nullable().optional(),
 });
 
-export const eventJobUpdateSchema = eventJobPushSchema.partial();
+export const eventWorkRoleUpdateSchema = eventWorkRolePushSchema.partial();
 
-export const eventJobAssignmentSchema = z.object({
+export const eventWorkRoleAssignmentSchema = z.object({
   userId: z.uuid(),
 });
 
@@ -227,7 +218,7 @@ export const eventCommentsQuerySchema = z.object({
   occurrenceStart: z.iso.datetime().optional(),
 });
 
-export const eventJobsQuerySchema = z.object({
+export const eventWorkRolesQuerySchema = z.object({
   occurrenceStart: z.iso.datetime().optional(),
 });
 
@@ -240,61 +231,179 @@ export type RolePush = z.infer<typeof rolePushSchema>;
 export type RoleUpdate = z.infer<typeof roleUpdateSchema>;
 export type RoleAssignmentInput = z.infer<typeof roleAssignmentSchema>;
 export type OrganizationUpdate = z.infer<typeof organizationUpdateSchema>;
-export type OperationInput = z.infer<typeof operationSchema>;
-export type OpAssignmentInput = z.infer<typeof opAssignmentSchema>;
 export type CalendarPush = z.infer<typeof calendarPushSchema>;
 export type RecurrenceInput = z.infer<typeof recurrenceSchema>;
 export type EventSeriesPush = z.infer<typeof eventSeriesPushSchema>;
 export type EventSeriesUpdate = z.infer<typeof eventSeriesUpdateSchema>;
 export type OccurrenceRangeQuery = z.infer<typeof occurrenceRangeQuerySchema>;
 export type RescheduleOccurrenceInput = z.infer<typeof rescheduleOccurrenceSchema>;
-export type EventJobPush = z.infer<typeof eventJobPushSchema>;
-export type EventJobUpdate = z.infer<typeof eventJobUpdateSchema>;
-export type EventJobAssignmentInput = z.infer<typeof eventJobAssignmentSchema>;
+export type EventWorkRolePush = z.infer<typeof eventWorkRolePushSchema>;
+export type EventWorkRoleUpdate = z.infer<typeof eventWorkRoleUpdateSchema>;
+export type EventWorkRoleAssignmentInput = z.infer<typeof eventWorkRoleAssignmentSchema>;
 export type EventCommentPush = z.infer<typeof eventCommentPushSchema>;
 export type EventCommentUpdate = z.infer<typeof eventCommentUpdateSchema>;
 export type EventCommentsQuery = z.infer<typeof eventCommentsQuerySchema>;
-export type EventJobsQuery = z.infer<typeof eventJobsQuerySchema>;
+export type EventWorkRolesQuery = z.infer<typeof eventWorkRolesQuerySchema>;
 
 // --- Teams ---
+
+export const teamTypeSchema = z.enum(['general', 'event_organizers', 'role_group']);
 
 export const teamPushSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   organizationId: z.uuid(),
+  teamType: teamTypeSchema.optional(),
+  teamLeaderId: z.uuid().nullable().optional(),
+  /** Required when teamType is 'event_organizers'; must be null otherwise. */
+  eventTypeId: z.number().int().nullable().optional(),
+  /** Required when teamType is 'role_group'; must be null otherwise. */
+  workRoleId: z.number().int().nullable().optional(),
 });
 
 export const teamUpdateSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
+  teamType: teamTypeSchema.optional(),
+  teamLeaderId: z.uuid().nullable().optional(),
+  eventTypeId: z.number().int().nullable().optional(),
+  workRoleId: z.number().int().nullable().optional(),
 });
 
 export const teamMemberSchema = z.object({
   userId: z.uuid(),
+  /** When true, the new member can manage this specific team. */
+  isManager: z.boolean().optional(),
 });
 
-// --- Locations ---
+export const teamMemberUpdateSchema = z.object({
+  isManager: z.boolean().optional(),
+});
 
-export const locationPushSchema = z.object({
+// --- Sites ---
+
+export const sitePushSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().nullable().optional(),
+  address: z.string().nullable().optional(),
+  organizationId: z.uuid(),
+});
+
+export const siteUpdateSchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().nullable().optional(),
+  address: z.string().nullable().optional(),
+});
+
+export const siteParamsSchema = z.object({
+  organizationId: z.uuid(),
+  siteId: z.uuid(),
+});
+
+// --- Rooms ---
+
+export const roomPushSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  siteId: z.uuid(),
+  organizationId: z.uuid(),
+});
+
+export const roomUpdateSchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().optional(),
+});
+
+export const roomParamsSchema = z.object({
+  organizationId: z.uuid(),
+  siteId: z.uuid(),
+  roomId: z.uuid(),
+});
+
+// --- Work Roles ---
+
+export const workRolePushSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   organizationId: z.uuid(),
 });
 
-export const locationUpdateSchema = z.object({
+export const workRoleUpdateSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
 });
 
-// --- Jobs ---
+export const workRoleParamsSchema = z.object({
+  organizationId: z.uuid(),
+  workRoleId: z.coerce.number().int(),
+});
 
-export const jobPushSchema = z.object({
+// --- Certifications ---
+
+export const certificationPushSchema = z.object({
   name: z.string().min(1),
+  description: z.string().optional(),
   organizationId: z.uuid(),
 });
 
-export const jobUpdateSchema = z.object({
+export const certificationUpdateSchema = z.object({
   name: z.string().min(1).optional(),
+  description: z.string().optional(),
+});
+
+export const certificationParamsSchema = z.object({
+  organizationId: z.uuid(),
+  certificationId: z.coerce.number().int(),
+});
+
+// --- User Work Roles ---
+
+export const userWorkRolePushSchema = z.object({
+  workRoleId: z.number().int(),
+  isQualified: z.boolean().optional(),
+  notes: z.string().optional(),
+});
+
+export const userWorkRoleUpdateSchema = z.object({
+  isQualified: z.boolean().optional(),
+  notes: z.string().optional(),
+});
+
+export const userWorkRoleParamsSchema = z.object({
+  organizationId: z.uuid(),
+  userId: z.uuid(),
+  workRoleId: z.coerce.number().int(),
+});
+
+// --- User Certifications ---
+
+export const userCertificationPushSchema = z.object({
+  certificationId: z.number().int(),
+  certificationDate: z.iso.date().nullable().optional(),
+  validUntilDate: z.iso.date().nullable().optional(),
+});
+
+export const userCertificationUpdateSchema = z.object({
+  certificationDate: z.iso.date().nullable().optional(),
+  validUntilDate: z.iso.date().nullable().optional(),
+});
+
+export const userCertificationParamsSchema = z.object({
+  organizationId: z.uuid(),
+  userId: z.uuid(),
+  certificationId: z.coerce.number().int(),
+});
+
+// --- Certification Work Roles (link certifications to work roles) ---
+
+export const certificationWorkRolePushSchema = z.object({
+  certificationId: z.number().int(),
+});
+
+export const certificationWorkRoleParamsSchema = z.object({
+  organizationId: z.uuid(),
+  workRoleId: z.coerce.number().int(),
+  certificationId: z.coerce.number().int(),
 });
 
 // --- Notifications ---
@@ -313,32 +422,64 @@ export const tableQuerySchema = z.object({
 
 // --- Event series management query ---
 
+// The management view only ever shows the active organization, so the
+// organization filter is required.
 export const eventSeriesListQuerySchema = z.object({
   page: z.coerce.number().int().min(0).optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
   search: z.string().optional(),
   startFrom: z.iso.datetime().optional(),
   startTo: z.iso.datetime().optional(),
-  locationId: z.uuid().optional(),
+  siteId: z.uuid().optional(),
+  roomId: z.uuid().optional(),
   teamId: z.uuid().optional(),
   hasTeam: z.coerce.boolean().optional(),
+  organizationId: z.uuid(),
 });
 
-// --- Event series location/team update ---
+// --- Event series list query ---
+
+export const eventSeriesQuerySchema = z.object({
+  calendarId: z.uuid().optional(),
+  organizationId: z.uuid(),
+});
+
+// --- Calendar list query ---
+
+export const calendarListQuerySchema = z.object({
+  organizationId: z.uuid(),
+});
+
+// --- Event series site/room/team update ---
 
 export const eventSeriesConfigSchema = z.object({
-  locationId: z.uuid().nullable().optional(),
+  siteId: z.uuid().nullable().optional(),
+  roomId: z.uuid().nullable().optional(),
+  reserveWholeSite: z.boolean().optional(),
   teamIds: z.array(z.uuid()).optional(),
 });
 
+export type TeamType = z.infer<typeof teamTypeSchema>;
 export type TeamPush = z.infer<typeof teamPushSchema>;
 export type TeamUpdate = z.infer<typeof teamUpdateSchema>;
 export type TeamMemberInput = z.infer<typeof teamMemberSchema>;
-export type LocationPush = z.infer<typeof locationPushSchema>;
-export type LocationUpdate = z.infer<typeof locationUpdateSchema>;
-export type JobPush = z.infer<typeof jobPushSchema>;
-export type JobUpdate = z.infer<typeof jobUpdateSchema>;
+export type TeamMemberUpdate = z.infer<typeof teamMemberUpdateSchema>;
+export type SitePush = z.infer<typeof sitePushSchema>;
+export type SiteUpdate = z.infer<typeof siteUpdateSchema>;
+export type RoomPush = z.infer<typeof roomPushSchema>;
+export type RoomUpdate = z.infer<typeof roomUpdateSchema>;
+export type WorkRolePush = z.infer<typeof workRolePushSchema>;
+export type WorkRoleUpdate = z.infer<typeof workRoleUpdateSchema>;
+export type CertificationPush = z.infer<typeof certificationPushSchema>;
+export type CertificationUpdate = z.infer<typeof certificationUpdateSchema>;
+export type UserWorkRolePush = z.infer<typeof userWorkRolePushSchema>;
+export type UserWorkRoleUpdate = z.infer<typeof userWorkRoleUpdateSchema>;
+export type UserCertificationPush = z.infer<typeof userCertificationPushSchema>;
+export type UserCertificationUpdate = z.infer<typeof userCertificationUpdateSchema>;
+export type CertificationWorkRolePush = z.infer<typeof certificationWorkRolePushSchema>;
 export type NotificationUpdate = z.infer<typeof notificationUpdateSchema>;
 export type TableQuery = z.infer<typeof tableQuerySchema>;
 export type EventSeriesListQuery = z.infer<typeof eventSeriesListQuerySchema>;
+export type EventSeriesQuery = z.infer<typeof eventSeriesQuerySchema>;
+export type CalendarListQuery = z.infer<typeof calendarListQuerySchema>;
 export type EventSeriesConfig = z.infer<typeof eventSeriesConfigSchema>;

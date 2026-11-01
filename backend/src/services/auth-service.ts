@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { sql, type Transaction } from 'kysely';
-import { db } from '../database.js';
+import { db, pglite } from '../database.js';
 import type { AuthAccount, AuthProvider, Database, User } from '../db/types.js';
 import { badRequest, notFound } from '../http-error.js';
 import { createLogger } from '../logger.js';
@@ -210,8 +210,12 @@ export async function handleNewLogin(
 
   return db.transaction().execute(async tx => {
     // Serialize concurrent first logins so that only one of them
-    // bootstraps the default organization.
-    await sql`SELECT pg_advisory_xact_lock(hashtext('watodo:first-user-bootstrap'))`.execute(tx);
+    // bootstraps the default organization. The advisory lock is only needed
+    // on a multi-connection database; PGlite (tests) is single-connection and
+    // does not support advisory locks.
+    if (!pglite) {
+      await sql`SELECT pg_advisory_xact_lock(hashtext('watodo:first-user-bootstrap'))`.execute(tx);
+    }
 
     // Find the user through an existing linked account, or link by email,
     // or create a new user.

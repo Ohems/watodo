@@ -93,10 +93,21 @@ export interface UserOrganizations {
   created_at: Generated<Date>;
 }
 
+/** The purpose of a team: a plain group, an event-organizing team, or a role roster. */
+export type TeamType = 'general' | 'event_organizers' | 'role_group';
+
 export interface Teams {
   id: Generated<string>;
   name: string;
   description: Generated<string>;
+  /** The purpose of the team; see TeamType. */
+  team_type: Generated<TeamType>;
+  /** Designated team leader (NULL = none). */
+  team_leader_id: string | null;
+  /** For event_organizers teams: the event type they organize (NULL otherwise). */
+  event_type_id: number | null;
+  /** For role_group teams: the work role the team is the roster of (NULL otherwise). */
+  work_role_id: number | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
   organization_id: string;
@@ -106,11 +117,36 @@ export interface TeamMembers {
   id: Generated<number>;
   team_id: string;
   user_id: string;
+  /** When true, the member can manage this specific team without org-wide team-management permissions. */
+  is_manager: Generated<boolean>;
   created_at: Generated<Date>;
 }
 
-export interface Locations {
+export interface Sites {
   id: Generated<string>;
+  name: string;
+  /** Optional description of the site (a building, park, or other place). */
+  description: string | null;
+  /** Optional postal address of the site. */
+  address: string | null;
+  organization_id: string;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface Rooms {
+  id: Generated<string>;
+  name: string;
+  description: Generated<string>;
+  /** The site this room belongs to. */
+  site_id: string;
+  organization_id: string;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface WorkRoles {
+  id: Generated<number>;
   name: string;
   description: Generated<string>;
   organization_id: string;
@@ -118,17 +154,45 @@ export interface Locations {
   updated_at: Generated<Date>;
 }
 
-export interface Jobs {
+export interface Certifications {
   id: Generated<number>;
   name: string;
+  description: Generated<string>;
   organization_id: string;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }
 
+export interface UserWorkRoles {
+  id: Generated<number>;
+  user_id: string;
+  work_role_id: number;
+  is_qualified: Generated<boolean>;
+  notes: Generated<string>;
+  created_at: Generated<Date>;
+}
+
+export interface UserCertifications {
+  id: Generated<number>;
+  user_id: string;
+  certification_id: number;
+  certification_date: Date | null;
+  valid_until_date: Date | null;
+  created_at: Generated<Date>;
+}
+
+export interface CertificationWorkRoles {
+  id: Generated<number>;
+  work_role_id: number;
+  certification_id: number;
+  created_at: Generated<Date>;
+}
+
 export interface Notifications {
   id: Generated<number>;
   user_id: string;
+  /** The organization this notification belongs to, if any. */
+  organization_id: string | null;
   title: string;
   body: Generated<string>;
   is_read: Generated<boolean>;
@@ -168,7 +232,12 @@ export interface EventSeriesTable {
   title: string;
   description: string | null;
   calendar_id: string;
-  location_id: string | null;
+  /** The site the event is assigned to (nullable). */
+  site_id: string | null;
+  /** The specific room within the site (nullable). */
+  room_id: string | null;
+  /** When true and a site is assigned without a room, the whole site is reserved. */
+  reserve_whole_site: Generated<boolean>;
   start: Date;
   duration_minutes: number;
   is_all_day: Generated<boolean>;
@@ -186,30 +255,41 @@ export interface EventSeriesTeams {
   created_at: Generated<Date>;
 }
 
-export interface EventExceptions {
+export interface EventOccurrences {
   id: Generated<number>;
   event_series_id: number;
+  /** The original occurrence start in the series (stable identity). */
   occurrence_start: Date;
+  /** Whether this occurrence is cancelled. */
   is_cancelled: Generated<boolean>;
+  /** Rescheduled start, if any. */
   override_start: Date | null;
+  /** Rescheduled end, if any. */
   override_end: Date | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }
 
-export interface EventJobs {
+export interface EventWorkRoles {
   id: Generated<number>;
   event_series_id: number;
-  occurrence_start: Date | null;
+  /** NULL = parent (series-level) slot; non-NULL = inherited occurrence slot. */
+  event_occurrence_id: number | null;
+  /** Which parent slot this occurrence slot was inherited from. */
+  inherited_from_work_role_id: number | null;
   title: string;
   description: Generated<string>;
+  /** Whether this slot must be filled for the event to proceed. */
+  is_critical: Generated<boolean>;
+  /** The work role this slot is for, if linked to the work role catalog. */
+  work_role_id: number | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }
 
-export interface EventJobAssignments {
+export interface EventWorkRoleAssignments {
   id: Generated<number>;
-  event_job_id: number;
+  event_work_role_id: number;
   user_id: string;
   created_at: Generated<Date>;
 }
@@ -217,28 +297,10 @@ export interface EventJobAssignments {
 export interface EventComments {
   id: Generated<number>;
   event_series_id: number;
-  occurrence_start: Date | null;
+  /** NULL = series-wide comment; non-NULL = scoped to one occurrence. */
+  event_occurrence_id: number | null;
   user_id: string;
   body: string;
-  created_at: Generated<Date>;
-  updated_at: Generated<Date>;
-}
-
-export interface Operations {
-  id: Generated<number>;
-  name: string;
-  description: Generated<string>;
-  requirements: Generated<string>;
-  location: Generated<string>;
-  created_at: Generated<Date>;
-  updated_at: Generated<Date>;
-}
-
-export interface OpAssignments {
-  id: Generated<number>;
-  operation_id: number;
-  name: string;
-  description: Generated<string>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }
@@ -256,20 +318,23 @@ export interface Database {
   user_organizations: UserOrganizations;
   teams: Teams;
   team_members: TeamMembers;
-  locations: Locations;
-  jobs: Jobs;
+  sites: Sites;
+  rooms: Rooms;
+  work_roles: WorkRoles;
+  certifications: Certifications;
+  user_work_roles: UserWorkRoles;
+  user_certifications: UserCertifications;
+  certification_work_roles: CertificationWorkRoles;
   notifications: Notifications;
   calendars: Calendars;
   event_types: EventTypes;
   event_type_roles: EventTypeRoles;
   event_series: EventSeriesTable;
   event_series_teams: EventSeriesTeams;
-  event_exceptions: EventExceptions;
-  event_jobs: EventJobs;
-  event_job_assignments: EventJobAssignments;
+  event_occurrences: EventOccurrences;
+  event_work_roles: EventWorkRoles;
+  event_work_role_assignments: EventWorkRoleAssignments;
   event_comments: EventComments;
-  operations: Operations;
-  op_assignments: OpAssignments;
 }
 
 export type User = Selectable<Users>;
@@ -306,13 +371,32 @@ export type TeamUpdate = Updateable<Teams>;
 export type TeamMember = Selectable<TeamMembers>;
 export type NewTeamMember = Insertable<TeamMembers>;
 
-export type Location = Selectable<Locations>;
-export type NewLocation = Insertable<Locations>;
-export type LocationUpdate = Updateable<Locations>;
+export type Site = Selectable<Sites>;
+export type NewSite = Insertable<Sites>;
+export type SiteUpdate = Updateable<Sites>;
 
-export type Job = Selectable<Jobs>;
-export type NewJob = Insertable<Jobs>;
-export type JobUpdate = Updateable<Jobs>;
+export type Room = Selectable<Rooms>;
+export type NewRoom = Insertable<Rooms>;
+export type RoomUpdate = Updateable<Rooms>;
+
+export type WorkRole = Selectable<WorkRoles>;
+export type NewWorkRole = Insertable<WorkRoles>;
+export type WorkRoleUpdate = Updateable<WorkRoles>;
+
+export type Certification = Selectable<Certifications>;
+export type NewCertification = Insertable<Certifications>;
+export type CertificationUpdate = Updateable<Certifications>;
+
+export type UserWorkRole = Selectable<UserWorkRoles>;
+export type NewUserWorkRole = Insertable<UserWorkRoles>;
+export type UserWorkRoleUpdate = Updateable<UserWorkRoles>;
+
+export type UserCertification = Selectable<UserCertifications>;
+export type NewUserCertification = Insertable<UserCertifications>;
+export type UserCertificationUpdate = Updateable<UserCertifications>;
+
+export type CertificationWorkRole = Selectable<CertificationWorkRoles>;
+export type NewCertificationWorkRole = Insertable<CertificationWorkRoles>;
 
 export type Notification = Selectable<Notifications>;
 export type NewNotification = Insertable<Notifications>;
@@ -328,25 +412,16 @@ export type EventSeriesUpdate = Updateable<EventSeriesTable>;
 export type EventSeriesTeam = Selectable<EventSeriesTeams>;
 export type NewEventSeriesTeam = Insertable<EventSeriesTeams>;
 
-export type EventException = Selectable<EventExceptions>;
-export type NewEventException = Insertable<EventExceptions>;
-export type EventExceptionUpdate = Updateable<EventExceptions>;
+export type EventOccurrenceRow = Selectable<EventOccurrences>;
+export type NewEventOccurrenceRow = Insertable<EventOccurrences>;
 
-export type EventJob = Selectable<EventJobs>;
-export type NewEventJob = Insertable<EventJobs>;
-export type EventJobUpdate = Updateable<EventJobs>;
+export type EventWorkRole = Selectable<EventWorkRoles>;
+export type NewEventWorkRole = Insertable<EventWorkRoles>;
+export type EventWorkRoleUpdate = Updateable<EventWorkRoles>;
 
-export type EventJobAssignment = Selectable<EventJobAssignments>;
-export type NewEventJobAssignment = Insertable<EventJobAssignments>;
+export type EventWorkRoleAssignment = Selectable<EventWorkRoleAssignments>;
+export type NewEventWorkRoleAssignment = Insertable<EventWorkRoleAssignments>;
 
 export type EventComment = Selectable<EventComments>;
 export type NewEventComment = Insertable<EventComments>;
 export type EventCommentUpdate = Updateable<EventComments>;
-
-export type Operation = Selectable<Operations>;
-export type NewOperation = Insertable<Operations>;
-export type OperationUpdate = Updateable<Operations>;
-
-export type OpAssignment = Selectable<OpAssignments>;
-export type NewOpAssignment = Insertable<OpAssignments>;
-export type OpAssignmentUpdate = Updateable<OpAssignments>;

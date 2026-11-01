@@ -1,8 +1,11 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { getAuth } from '../middleware/auth.js';
+import { hasPermission, PERMISSIONS } from '../permissions.js';
 import {
   organizationParamsSchema,
   tableQuerySchema,
   teamMemberSchema,
+  teamMemberUpdateSchema,
   teamPushSchema,
   teamUpdateSchema,
 } from '../schemas/index.js';
@@ -10,11 +13,13 @@ import {
   addTeamMember,
   createTeam,
   deleteTeam,
+  getManagedTeamIds,
   getTeam,
   listTeamMembers,
   listTeams,
   removeTeamMember,
   updateTeam,
+  updateTeamMember,
 } from '../services/team-service.js';
 
 interface OrgParams {
@@ -35,7 +40,14 @@ export async function listTeamsHandler(
 ): Promise<void> {
   const { organizationId } = organizationParamsSchema.parse(request.params);
   const query = tableQuerySchema.parse(request.query);
-  const result = await listTeams(organizationId, query);
+  // Users without organization-wide team-management:read only see the teams
+  // they manage (enforced by the requireTeamAccess preHandler).
+  const auth = getAuth(request);
+  const onlyTeamIds =
+    auth && !hasPermission(auth.permissions, PERMISSIONS.TEAM_MANAGEMENT_READ)
+      ? await getManagedTeamIds(auth.user.id, organizationId)
+      : undefined;
+  const result = await listTeams(organizationId, query, onlyTeamIds);
   return reply.status(200).send(result);
 }
 
@@ -92,6 +104,16 @@ export async function addTeamMemberHandler(
   const { teamId } = request.params;
   const data = teamMemberSchema.parse(request.body);
   const member = await addTeamMember(teamId, data);
+  return reply.status(200).send(member);
+}
+
+export async function updateTeamMemberHandler(
+  request: FastifyRequest<MemberParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const { teamId, userId } = request.params;
+  const data = teamMemberUpdateSchema.parse(request.body);
+  const member = await updateTeamMember(teamId, userId, data);
   return reply.status(200).send(member);
 }
 

@@ -1,31 +1,24 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { db } from '../src/database.js';
 import { ALL_PERMISSIONS, PERMISSION_DEFINITIONS } from '../src/permissions.js';
 import { seedPermissions } from '../src/services/permission-service.js';
 
 // Integration test for the permissions seeding: verifies that the registry is
-// inserted when the table is empty and that seeding is idempotent. Skipped
-// when the database is not available.
+// inserted when the table is empty and that seeding is idempotent. The
+// permissions table is re-seeded before and after each test, because the
+// first test deletes it and other test files rely on the seeded rows.
 
 describe('seedPermissions', () => {
-  let dbAvailable = false;
-
-  beforeAll(async () => {
-    try {
-      await db.selectFrom('permissions').select('id').limit(1).execute();
-      dbAvailable = true;
-    } catch {
-      dbAvailable = false;
-    }
+  beforeEach(async () => {
+    await seedPermissions();
   });
 
-  afterAll(async () => {
+  afterEach(async () => {
     // Restore the seeded permissions in case the test removed them.
-    if (dbAvailable) await seedPermissions().catch(() => {});
+    await seedPermissions();
   });
 
   it('inserts every registry permission when the table is empty', async () => {
-    if (!dbAvailable) return;
     await db.deleteFrom('permissions').execute();
 
     const inserted = await seedPermissions();
@@ -41,7 +34,6 @@ describe('seedPermissions', () => {
   });
 
   it('is idempotent and leaves existing rows untouched', async () => {
-    if (!dbAvailable) return;
     const before = await db.selectFrom('permissions').selectAll().orderBy('id', 'asc').execute();
 
     const inserted = await seedPermissions();

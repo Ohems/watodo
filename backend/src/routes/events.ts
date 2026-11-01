@@ -1,31 +1,44 @@
 import type { FastifyInstance } from 'fastify';
 import {
-  assignUserToJobHandler,
+  assignUserToOccurrenceWorkRoleHandler,
+  assignUserToWorkRoleHandler,
   cancelOccurrenceHandler,
   createEventCommentHandler,
-  createEventJobHandler,
   createEventSeriesHandler,
+  createEventWorkRoleHandler,
+  createOccurrenceCommentHandler,
+  createOccurrenceWorkRoleHandler,
   deleteEventCommentHandler,
-  deleteEventJobHandler,
   deleteEventSeriesHandler,
+  deleteEventWorkRoleHandler,
   deleteExceptionHandler,
+  deleteOccurrenceCommentHandler,
+  deleteOccurrenceWorkRoleHandler,
   getEventSeriesHandler,
   getEventSeriesManagementHandler,
+  getOccurrenceDetailByRefHandler,
   getOccurrenceDetailHandler,
   getOccurrencesHandler,
   getSeriesOccurrencesHandler,
+  importParentSlotsHandler,
   listEventCommentsHandler,
-  listEventJobsHandler,
   listEventSeriesHandler,
   listEventSeriesPaginatedHandler,
+  listEventWorkRolesHandler,
   listExceptionsHandler,
+  listOccurrenceCommentsHandler,
+  listOccurrenceWorkRolesHandler,
+  materializeOccurrenceHandler,
   rescheduleOccurrenceHandler,
   splitEventSeriesHandler,
-  unassignUserFromJobHandler,
+  unassignUserFromOccurrenceWorkRoleHandler,
+  unassignUserFromWorkRoleHandler,
   updateEventCommentHandler,
-  updateEventJobHandler,
   updateEventSeriesConfigHandler,
   updateEventSeriesHandler,
+  updateEventWorkRoleHandler,
+  updateOccurrenceCommentHandler,
+  updateOccurrenceWorkRoleHandler,
 } from '../controllers/event-controller.js';
 import { requirePermissions } from '../middleware/auth.js';
 import { PERMISSIONS } from '../permissions.js';
@@ -38,16 +51,36 @@ interface OccurrenceParams {
   Params: { seriesId: string; occurrenceStart: string };
 }
 
-interface JobParams {
-  Params: { seriesId: string; jobId: string };
+interface WorkRoleParams {
+  Params: { seriesId: string; workRoleId: string };
 }
 
-interface JobAssignmentParams {
-  Params: { seriesId: string; jobId: string; assignmentId: string };
+interface WorkRoleAssignmentParams {
+  Params: { seriesId: string; workRoleId: string; assignmentId: string };
 }
 
 interface CommentParams {
   Params: { seriesId: string; commentId: string };
+}
+
+interface OccurrenceIdParams {
+  Params: { eventOccurrenceId: string };
+}
+
+interface OccurrenceWorkRoleParams {
+  Params: { eventOccurrenceId: string; workRoleId: string };
+}
+
+interface OccurrenceAssignmentParams {
+  Params: { eventOccurrenceId: string; workRoleId: string; assignmentId: string };
+}
+
+interface OccurrenceCommentParams {
+  Params: { eventOccurrenceId: string; commentId: string };
+}
+
+interface OccurrenceRefParams {
+  Params: { occurrenceRef: string };
 }
 
 export async function eventRoutes(app: FastifyInstance): Promise<void> {
@@ -55,7 +88,7 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
   const write = requirePermissions(PERMISSIONS.EVENTS_WRITE);
 
   // Event series
-  app.get<{ Querystring: { calendarId?: string } }>(
+  app.get<{ Querystring: unknown }>(
     '/api/v1/event-series',
     { preHandler: read },
     listEventSeriesHandler,
@@ -67,6 +100,84 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
 
   // Occurrences of all series within a time range (used by calendars)
   app.get('/api/v1/event-series/occurrences', { preHandler: read }, getOccurrencesHandler);
+
+  // A single occurrence by its reference (stable numeric ID, or a temporary
+  // `tmp:{seriesId}:{isoStart}` key for instances not yet materialized).
+  app.get<OccurrenceRefParams>(
+    '/api/v1/event-occurrences/:occurrenceRef',
+    { preHandler: read },
+    getOccurrenceDetailByRefHandler,
+  );
+
+  // Import parent (series-level) work role slots into a materialized occurrence
+  app.post<OccurrenceRefParams>(
+    '/api/v1/event-occurrences/:occurrenceRef/import-slots',
+    { preHandler: write },
+    importParentSlotsHandler,
+  );
+
+  // --- Occurrence-scoped endpoints (occurrence page) ---
+  // Materialize a tmp occurrence ref into a stable numeric ID. After this,
+  // the occurrence page uses the numeric eventOccurrenceId for all writes.
+  app.post<OccurrenceRefParams>(
+    '/api/v1/event-occurrences/:occurrenceRef/materialize',
+    { preHandler: write },
+    materializeOccurrenceHandler,
+  );
+
+  // Occurrence-scoped resources require a numeric eventOccurrenceId (the
+  // occurrence must be materialized first). Only occurrence-level rows are
+  // modified, never the parent series.
+  app.get<OccurrenceIdParams>(
+    '/api/v1/event-occurrences/:eventOccurrenceId/work-roles',
+    { preHandler: read },
+    listOccurrenceWorkRolesHandler,
+  );
+  app.post<OccurrenceIdParams>(
+    '/api/v1/event-occurrences/:eventOccurrenceId/work-roles',
+    { preHandler: write },
+    createOccurrenceWorkRoleHandler,
+  );
+  app.patch<OccurrenceWorkRoleParams>(
+    '/api/v1/event-occurrences/:eventOccurrenceId/work-roles/:workRoleId',
+    { preHandler: write },
+    updateOccurrenceWorkRoleHandler,
+  );
+  app.delete<OccurrenceWorkRoleParams>(
+    '/api/v1/event-occurrences/:eventOccurrenceId/work-roles/:workRoleId',
+    { preHandler: write },
+    deleteOccurrenceWorkRoleHandler,
+  );
+  app.post<OccurrenceWorkRoleParams>(
+    '/api/v1/event-occurrences/:eventOccurrenceId/work-roles/:workRoleId/assignments',
+    { preHandler: write },
+    assignUserToOccurrenceWorkRoleHandler,
+  );
+  app.delete<OccurrenceAssignmentParams>(
+    '/api/v1/event-occurrences/:eventOccurrenceId/work-roles/:workRoleId/assignments/:assignmentId',
+    { preHandler: write },
+    unassignUserFromOccurrenceWorkRoleHandler,
+  );
+  app.get<OccurrenceIdParams>(
+    '/api/v1/event-occurrences/:eventOccurrenceId/comments',
+    { preHandler: read },
+    listOccurrenceCommentsHandler,
+  );
+  app.post<OccurrenceIdParams>(
+    '/api/v1/event-occurrences/:eventOccurrenceId/comments',
+    { preHandler: write },
+    createOccurrenceCommentHandler,
+  );
+  app.patch<OccurrenceCommentParams>(
+    '/api/v1/event-occurrences/:eventOccurrenceId/comments/:commentId',
+    { preHandler: write },
+    updateOccurrenceCommentHandler,
+  );
+  app.delete<OccurrenceCommentParams>(
+    '/api/v1/event-occurrences/:eventOccurrenceId/comments/:commentId',
+    { preHandler: write },
+    deleteOccurrenceCommentHandler,
+  );
 
   app.get<SeriesParams>(
     '/api/v1/event-series/:seriesId',
@@ -142,38 +253,38 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
     listExceptionsHandler,
   );
 
-  // Job slots (series-wide or scoped to one occurrence)
+  // Work role slots (series-level template or scoped to one occurrence)
   app.get<SeriesParams>(
-    '/api/v1/event-series/:seriesId/jobs',
+    '/api/v1/event-series/:seriesId/work-roles',
     { preHandler: read },
-    listEventJobsHandler,
+    listEventWorkRolesHandler,
   );
   app.post<SeriesParams>(
-    '/api/v1/event-series/:seriesId/jobs',
+    '/api/v1/event-series/:seriesId/work-roles',
     { preHandler: write },
-    createEventJobHandler,
+    createEventWorkRoleHandler,
   );
-  app.patch<JobParams>(
-    '/api/v1/event-series/:seriesId/jobs/:jobId',
+  app.patch<WorkRoleParams>(
+    '/api/v1/event-series/:seriesId/work-roles/:workRoleId',
     { preHandler: write },
-    updateEventJobHandler,
+    updateEventWorkRoleHandler,
   );
-  app.delete<JobParams>(
-    '/api/v1/event-series/:seriesId/jobs/:jobId',
+  app.delete<WorkRoleParams & { Querystring: { occurrenceRef?: string } }>(
+    '/api/v1/event-series/:seriesId/work-roles/:workRoleId',
     { preHandler: write },
-    deleteEventJobHandler,
+    deleteEventWorkRoleHandler,
   );
 
-  // Users assigned to job slots
-  app.post<JobParams>(
-    '/api/v1/event-series/:seriesId/jobs/:jobId/assignments',
+  // Users assigned to work role slots
+  app.post<WorkRoleParams>(
+    '/api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments',
     { preHandler: write },
-    assignUserToJobHandler,
+    assignUserToWorkRoleHandler,
   );
-  app.delete<JobAssignmentParams>(
-    '/api/v1/event-series/:seriesId/jobs/:jobId/assignments/:assignmentId',
+  app.delete<WorkRoleAssignmentParams>(
+    '/api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments/:assignmentId',
     { preHandler: write },
-    unassignUserFromJobHandler,
+    unassignUserFromWorkRoleHandler,
   );
 
   // Comments (series-wide or scoped to one occurrence)

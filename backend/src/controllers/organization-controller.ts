@@ -3,10 +3,12 @@ import { getAuth } from '../middleware/auth.js';
 import {
   organizationParamsSchema,
   organizationUpdateSchema,
+  organizationUserParamsSchema,
   tableQuerySchema,
 } from '../schemas/index.js';
 import {
   getOrganizationForUser,
+  getOrganizationUser,
   listOrganizationsForUser,
   listOrganizationUsers,
   updateOrganization,
@@ -63,4 +65,17 @@ export async function listOrganizationUsersHandler(
   const query = tableQuerySchema.parse(request.query);
   const result = await listOrganizationUsers(organizationId, query);
   return reply.status(200).send(result);
+}
+
+export async function getOrganizationUserHandler(
+  request: FastifyRequest<{ Params: { organizationId: string; userId: string } }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const auth = getAuth(request);
+  if (!auth) {
+    return reply.status(401).send({ error: 'Not authenticated!' });
+  }
+  const { organizationId, userId } = organizationUserParamsSchema.parse(request.params);
+  const user = await getOrganizationUser(organizationId, userId);
+  return reply.status(200).send(user);
 }

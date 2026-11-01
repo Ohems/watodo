@@ -1,12 +1,13 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { calendarPushSchema } from '../schemas/index.js';
+import { calendarListQuerySchema, calendarPushSchema } from '../schemas/index.js';
 import { createCalendar, listCalendars } from '../services/calendar-service.js';
 
 export async function listCalendarsHandler(
-  _request: FastifyRequest,
+  request: FastifyRequest<{ Querystring: unknown }>,
   reply: FastifyReply,
 ): Promise<void> {
-  const calendars = await listCalendars();
+  const query = calendarListQuerySchema.parse(request.query);
+  const calendars = await listCalendars(query.organizationId);
   return reply.status(200).send(calendars);
 }
 

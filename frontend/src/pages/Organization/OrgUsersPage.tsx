@@ -1,43 +1,33 @@
 import { Avatar } from '@mantine/core';
-import { useCallback, useEffect, useState } from 'react';
+import { skipToken } from '@reduxjs/toolkit/query/react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { organizationUsersApi } from '../../api/index.js';
+import { useGetOrganizationUsersQuery } from '../../api/index.js';
 import DataTable, { type DataTableColumn } from '../../components/DataTable/DataTable.js';
 import { useAppSelector } from '../../hooks/redux.js';
-import type { OrganizationUser, TableQuery } from '../../types/index.js';
+import { selectActiveOrganizationId } from '../../store/organization-slice.js';
+import type { OrganizationUser } from '../../types/index.js';
 
 function OrgUsersPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const activeOrganizationId = useAppSelector(state => state.organization.activeOrganizationId);
+  const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
 
-  const [data, setData] = useState<OrganizationUser[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [limit, setLimit] = useState(50);
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async () => {
-    if (!activeOrganizationId) return;
-    setLoading(true);
-    try {
-      const query: TableQuery = { page, limit, search: search || undefined };
-      const result = await organizationUsersApi.listUsers(activeOrganizationId, query);
-      setData(result.items);
-      setTotal(result.total);
-    } catch {
-      setData([]);
-      setTotal(0);
-    } finally {
-      setLoading(false);
-    }
-  }, [activeOrganizationId, page, limit, search]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const { data, isLoading: loading } = useGetOrganizationUsersQuery(
+    activeOrganizationId
+      ? {
+          organizationId: activeOrganizationId,
+          query: { page, limit, search: search || undefined },
+        }
+      : skipToken,
+  );
+  const users = data?.items ?? [];
+  const total = data?.total ?? 0;
 
   const columns: DataTableColumn<OrganizationUser>[] = [
     {
@@ -60,7 +50,7 @@ function OrgUsersPage() {
     <DataTable
       title={t('nav.orgUsers')}
       columns={columns}
-      data={data}
+      data={users}
       total={total}
       page={page}
       limit={limit}

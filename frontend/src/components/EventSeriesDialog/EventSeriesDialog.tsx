@@ -11,7 +11,12 @@ import {
 } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { eventsApi } from '../../api/index.js';
+import {
+  getApiErrorMessage,
+  useCreateEventSeriesMutation,
+  useSplitEventSeriesMutation,
+  useUpdateEventSeriesMutation,
+} from '../../api/index.js';
 import type {
   Calendar,
   EventSeries,
@@ -52,7 +57,10 @@ function EventSeriesDialog({
 }: EventSeriesDialogProps) {
   const { t } = useTranslation();
   const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [splitEventSeries, { isLoading: savingSplit }] = useSplitEventSeriesMutation();
+  const [updateEventSeries, { isLoading: savingUpdate }] = useUpdateEventSeriesMutation();
+  const [createEventSeries, { isLoading: savingCreate }] = useCreateEventSeriesMutation();
+  const saving = savingSplit || savingUpdate || savingCreate;
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -165,21 +173,22 @@ function EventSeriesDialog({
     };
     if (timezone.trim()) payload.timezone = timezone.trim();
 
-    setSaving(true);
     try {
       if (splitOccurrenceStart && series) {
-        await eventsApi.splitEventSeries(series.id, splitOccurrenceStart, payload);
+        await splitEventSeries({
+          seriesId: series.id,
+          occurrenceStart: splitOccurrenceStart,
+          data: payload,
+        }).unwrap();
       } else if (series) {
-        await eventsApi.updateEventSeries(series.id, payload);
+        await updateEventSeries({ seriesId: series.id, data: payload }).unwrap();
       } else {
-        await eventsApi.createEventSeries(payload);
+        await createEventSeries(payload).unwrap();
       }
       onSaved();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
+      setError(getApiErrorMessage(err));
     }
   };
 

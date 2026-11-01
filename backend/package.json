@@ -27,6 +27,7 @@
     "migrate:create": "node-pg-migrate create",
     "migrate:redo": "node-pg-migrate redo",
     "migrate:status": "node-pg-migrate status",
+    "db:reset": "tsx scripts/reset-database.ts && npm run migrate",
     "seed:permissions": "tsx scripts/seed-permissions.ts",
     "seed:data": "tsx scripts/seed-data.ts"
   },
@@ -53,6 +54,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.2",
+    "@electric-sql/pglite": "^0.5.12",
     "@types/node": "^26.6.5",
     "@types/pg": "^8.23.1",
     "@vitest/coverage-v8": "^5.0.5",

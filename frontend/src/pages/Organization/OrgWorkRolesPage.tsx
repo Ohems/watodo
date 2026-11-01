@@ -1,70 +1,65 @@
-import { Button, Group, Modal, TextInput } from '@mantine/core';
-import { useCallback, useEffect, useState } from 'react';
+import { Button, Group, Modal, Textarea, TextInput } from '@mantine/core';
+import { skipToken } from '@reduxjs/toolkit/query/react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { locationsApi } from '../../api/index.js';
+import {
+  useCreateWorkRoleMutation,
+  useGetCurrentUserQuery,
+  useGetWorkRolesQuery,
+} from '../../api/index.js';
 import DataTable, { type DataTableColumn } from '../../components/DataTable/DataTable.js';
 import { useAppSelector } from '../../hooks/redux.js';
-import type { Location, TableQuery } from '../../types/index.js';
+import { selectActiveOrganizationId } from '../../store/organization-slice.js';
+import type { WorkRole } from '../../types/index.js';
 
-function OrgLocationsPage() {
+function OrgWorkRolesPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const activeOrganizationId = useAppSelector(state => state.organization.activeOrganizationId);
-  const currentUser = useAppSelector(state => state.user.currentUser);
+  const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
+  const { data: currentUser } = useGetCurrentUserQuery();
   const canWrite =
     currentUser?.permissions?.includes('admin') === true ||
-    currentUser?.permissions?.includes('location-management:write') === true;
+    currentUser?.permissions?.includes('work-role-management:write') === true;
 
-  const [data, setData] = useState<Location[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [limit, setLimit] = useState(50);
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
 
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newDescription, setNewDescription] = useState('');
 
-  const load = useCallback(async () => {
-    if (!activeOrganizationId) return;
-    setLoading(true);
-    try {
-      const query: TableQuery = { page, limit, search: search || undefined };
-      const result = await locationsApi.listLocations(activeOrganizationId, query);
-      setData(result.items);
-      setTotal(result.total);
-    } catch {
-      setData([]);
-      setTotal(0);
-    } finally {
-      setLoading(false);
-    }
-  }, [activeOrganizationId, page, limit, search]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const { data, isLoading: loading } = useGetWorkRolesQuery(
+    activeOrganizationId
+      ? {
+          organizationId: activeOrganizationId,
+          query: { page, limit, search: search || undefined },
+        }
+      : skipToken,
+  );
+  const [createWorkRole] = useCreateWorkRoleMutation();
 
   const handleAdd = async () => {
     if (!activeOrganizationId || !newName.trim()) return;
     try {
-      await locationsApi.createLocation(activeOrganizationId, {
-        name: newName.trim(),
-        description: newDescription.trim(),
+      await createWorkRole({
         organizationId: activeOrganizationId,
-      });
+        data: {
+          name: newName.trim(),
+          description: newDescription.trim(),
+          organizationId: activeOrganizationId,
+        },
+      }).unwrap();
       setAddModalOpen(false);
       setNewName('');
       setNewDescription('');
-      await load();
     } catch {
       // Ignore
     }
   };
 
-  const columns: DataTableColumn<Location>[] = [
+  const columns: DataTableColumn<WorkRole>[] = [
     {
       key: 'name',
       label: t('common.name'),
@@ -73,17 +68,17 @@ function OrgLocationsPage() {
     {
       key: 'description',
       label: t('common.description'),
-      render: item => item.description || <span style={{ color: '#999' }}>-</span>,
+      render: item => <span>{item.description || '-'}</span>,
     },
   ];
 
   return (
     <>
       <DataTable
-        title={t('nav.orgLocations')}
+        title={t('nav.orgWorkRoles')}
         columns={columns}
-        data={data}
-        total={total}
+        data={data?.items ?? []}
+        total={data?.total ?? 0}
         page={page}
         limit={limit}
         loading={loading}
@@ -92,24 +87,25 @@ function OrgLocationsPage() {
         onPageChange={setPage}
         onLimitChange={setLimit}
         onSearch={setSearch}
-        onRowClick={item => navigate(`/organization/locations/${item.id}`)}
+        onRowClick={item => navigate(`/organization/work-roles/${item.id}`)}
       />
       <Modal
         opened={addModalOpen}
         onClose={() => setAddModalOpen(false)}
-        title={t('locations.newLocation')}
+        title={t('workRoles.newWorkRole')}
       >
         <TextInput
           label={t('common.name')}
           value={newName}
           onChange={e => setNewName(e.target.value)}
-          mb="sm"
+          mb="md"
         />
-        <TextInput
+        <Textarea
           label={t('common.description')}
           value={newDescription}
           onChange={e => setNewDescription(e.target.value)}
           mb="md"
+          minRows={2}
         />
         <Group justify="flex-end">
           <Button variant="default" onClick={() => setAddModalOpen(false)}>
@@ -124,4 +120,4 @@ function OrgLocationsPage() {
   );
 }
 
-export default OrgLocationsPage;
+export default OrgWorkRolesPage;

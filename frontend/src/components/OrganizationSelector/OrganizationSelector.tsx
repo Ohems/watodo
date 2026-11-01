@@ -1,7 +1,11 @@
 import { Select } from '@mantine/core';
 import { useTranslation } from 'react-i18next';
+import { useGetMyOrganizationsQuery } from '../../api/index.js';
 import { useAppDispatch, useAppSelector } from '../../hooks/redux.js';
-import { setActiveOrganization } from '../../store/organization-slice.js';
+import {
+  selectActiveOrganizationId,
+  setActiveOrganization,
+} from '../../store/organization-slice.js';
 
 interface OrganizationSelectorProps {
   /** Style the select for the dark app bar instead of the light menu. */
@@ -11,8 +15,8 @@ interface OrganizationSelectorProps {
 function OrganizationSelector({ onDark = false }: OrganizationSelectorProps) {
   const { t } = useTranslation();
   const dispatch = useAppDispatch();
-  const organizations = useAppSelector(state => state.organization.organizations);
-  const activeOrganizationId = useAppSelector(state => state.organization.activeOrganizationId);
+  const { data: organizations = [] } = useGetMyOrganizationsQuery();
+  const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
 
   if (organizations.length === 0) {
     return null;
