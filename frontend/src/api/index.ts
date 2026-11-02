@@ -45,6 +45,7 @@ import type {
   UserCertification,
   UserCertificationPush,
   UserCertificationUpdate,
+  UserEventAssignment,
   UserListItem,
   UserPush,
   UserSelfUpdate,
@@ -171,6 +172,7 @@ export const api = createApi({
     'OrganizationUsers',
     'EventSeriesManagement',
     'EventTypes',
+    'UserEventAssignments',
   ],
   endpoints: build => ({
     // --- Auth ---
@@ -445,7 +447,10 @@ export const api = createApi({
         method: 'POST',
         body: data,
       }),
-      invalidatesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
+      invalidatesTags: (_result, _error, { seriesId }) => [
+        seriesDetailTag(seriesId),
+        'UserEventAssignments',
+      ],
     }),
     updateEventWorkRole: build.mutation<
       EventWorkRole,
@@ -456,7 +461,10 @@ export const api = createApi({
         method: 'PATCH',
         body: data,
       }),
-      invalidatesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
+      invalidatesTags: (_result, _error, { seriesId }) => [
+        seriesDetailTag(seriesId),
+        'UserEventAssignments',
+      ],
     }),
     deleteEventWorkRole: build.mutation<
       void,
@@ -468,7 +476,10 @@ export const api = createApi({
         }),
         method: 'DELETE',
       }),
-      invalidatesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
+      invalidatesTags: (_result, _error, { seriesId }) => [
+        seriesDetailTag(seriesId),
+        'UserEventAssignments',
+      ],
     }),
     assignUserToWorkRole: build.mutation<
       EventWorkRoleAssignment,
@@ -479,7 +490,10 @@ export const api = createApi({
         method: 'POST',
         body: { userId },
       }),
-      invalidatesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
+      invalidatesTags: (_result, _error, { seriesId }) => [
+        seriesDetailTag(seriesId),
+        'UserEventAssignments',
+      ],
     }),
     unassignUserFromWorkRole: build.mutation<
       void,
@@ -489,7 +503,10 @@ export const api = createApi({
         url: `/api/v1/event-series/${seriesId}/work-roles/${workRoleId}/assignments/${assignmentId}`,
         method: 'DELETE',
       }),
-      invalidatesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
+      invalidatesTags: (_result, _error, { seriesId }) => [
+        seriesDetailTag(seriesId),
+        'UserEventAssignments',
+      ],
     }),
 
     // --- Event comments ---
@@ -508,7 +525,10 @@ export const api = createApi({
         method: 'POST',
         body: data,
       }),
-      invalidatesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
+      invalidatesTags: (_result, _error, { seriesId }) => [
+        seriesDetailTag(seriesId),
+        'UserEventAssignments',
+      ],
     }),
     updateEventComment: build.mutation<
       EventComment,
@@ -519,14 +539,20 @@ export const api = createApi({
         method: 'PATCH',
         body: { body },
       }),
-      invalidatesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
+      invalidatesTags: (_result, _error, { seriesId }) => [
+        seriesDetailTag(seriesId),
+        'UserEventAssignments',
+      ],
     }),
     deleteEventComment: build.mutation<void, { seriesId: number; commentId: number }>({
       query: ({ seriesId, commentId }) => ({
         url: `/api/v1/event-series/${seriesId}/comments/${commentId}`,
         method: 'DELETE',
       }),
-      invalidatesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
+      invalidatesTags: (_result, _error, { seriesId }) => [
+        seriesDetailTag(seriesId),
+        'UserEventAssignments',
+      ],
     }),
 
     // --- Occurrence-level work role slot import ---
@@ -1074,6 +1100,22 @@ export const api = createApi({
         `/api/v1/organizations/${organizationId}/users/${userId}`,
       providesTags: (_result, _error, { userId }) => [{ type: 'OrganizationUsers', id: userId }],
     }),
+    getUserEventAssignments: build.query<
+      Paginated<UserEventAssignment>,
+      {
+        organizationId: string;
+        userId: string;
+        query?: { start?: string; end?: string; page?: number; limit?: number };
+      }
+    >({
+      query: ({ organizationId, userId, query }) =>
+        withQuery(`/api/v1/organizations/${organizationId}/users/${userId}/event-assignments`, {
+          ...query,
+        }),
+      providesTags: (_result, _error, { userId }) => [
+        { type: 'UserEventAssignments' as const, id: userId },
+      ],
+    }),
 
     // --- Event series management ---
 
@@ -1212,6 +1254,7 @@ export const {
   useMarkAllNotificationsReadMutation,
   useGetOrganizationUsersQuery,
   useGetOrganizationUserQuery,
+  useGetUserEventAssignmentsQuery,
   useGetEventSeriesManagementListQuery,
   useGetEventSeriesManagementQuery,
   useUpdateEventSeriesConfigMutation,

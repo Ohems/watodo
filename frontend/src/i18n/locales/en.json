@@ -20,7 +20,9 @@
     "perPage": "Per page",
     "page": "Page",
     "of": "of",
-    "all": "All"
+    "all": "All",
+    "previous": "Previous",
+    "next": "Next"
   },
   "nav": {
     "home": "Home",
@@ -174,7 +176,12 @@
     "certificationDate": "Certification date",
     "validUntilDate": "Valid until",
     "addCertificationButton": "Add certification",
-    "saveDates": "Save dates"
+    "saveDates": "Save dates",
+    "eventAssignments": "Event assignments",
+    "noEventAssignments": "No event assignments in this date range",
+    "fromDate": "From",
+    "toDate": "To",
+    "criticalRole": "Critical role"
   },
   "users": {
     "title": "Contacts",
@@ -236,6 +243,7 @@
     "weekdaySat": "Sat",
     "weekdaySun": "Sun",
     "rescheduled": "rescheduled",
+    "cancelled": "cancelled",
     "occurrence": "Occurrence",
     "occurrenceCancelled": "This occurrence is cancelled.",
     "occurrenceRescheduled": "Rescheduled from {{original}} to {{start}}.",

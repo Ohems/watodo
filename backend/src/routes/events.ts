@@ -20,6 +20,7 @@ import {
   getOccurrenceDetailHandler,
   getOccurrencesHandler,
   getSeriesOccurrencesHandler,
+  getUserEventAssignmentsHandler,
   importParentSlotsHandler,
   listEventCommentsHandler,
   listEventSeriesHandler,
@@ -83,6 +84,10 @@ interface OccurrenceRefParams {
   Params: { occurrenceRef: string };
 }
 
+interface OrgUserParams {
+  Params: { organizationId: string; userId: string };
+}
+
 export async function eventRoutes(app: FastifyInstance): Promise<void> {
   const read = requirePermissions(PERMISSIONS.EVENTS_READ);
   const write = requirePermissions(PERMISSIONS.EVENTS_WRITE);
@@ -100,6 +105,14 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
 
   // Occurrences of all series within a time range (used by calendars)
   app.get('/api/v1/event-series/occurrences', { preHandler: read }, getOccurrencesHandler);
+
+  // Event occurrences a specific organization user is assigned to (with the
+  // roles), used by the org user profile page
+  app.get<OrgUserParams>(
+    '/api/v1/organizations/:organizationId/users/:userId/event-assignments',
+    { preHandler: read },
+    getUserEventAssignmentsHandler,
+  );
 
   // A single occurrence by its reference (stable numeric ID, or a temporary
   // `tmp:{seriesId}:{isoStart}` key for instances not yet materialized).

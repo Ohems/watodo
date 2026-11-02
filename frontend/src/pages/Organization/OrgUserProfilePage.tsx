@@ -33,6 +33,7 @@ import {
   useUpdateUserCertificationMutation,
   useUpdateUserWorkRoleMutation,
 } from '../../api/index.js';
+import { EventAssignmentsCard } from '../../components/EventAssignmentsCard/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
 import {
   selectActiveOrganizationId,
@@ -79,6 +80,7 @@ function OrgUserProfilePage() {
   const [updateUserCert] = useUpdateUserCertificationMutation();
 
   const [actionError, setActionError] = useState<string | null>(null);
+
   const [newRoleId, setNewRoleId] = useState<string | null>(null);
   const [newCertId, setNewCertId] = useState<string | null>(null);
   const [newCertDate, setNewCertDate] = useState('');
@@ -355,7 +357,7 @@ function OrgUserProfilePage() {
       </Paper>
 
       {/* Certifications */}
-      <Paper shadow="sm" p="lg">
+      <Paper shadow="sm" p="lg" mb="lg">
         <Title order={4} mb="md">
           {t('orgUsers.certifications')}
         </Title>
@@ -477,6 +479,11 @@ function OrgUserProfilePage() {
           </Stack>
         )}
       </Paper>
+
+      {/* Event assignments */}
+      {activeOrganizationId && userId && (
+        <EventAssignmentsCard organizationId={activeOrganizationId} userId={userId} />
+      )}
     </Box>
   );
 }

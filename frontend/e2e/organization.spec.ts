@@ -837,6 +837,35 @@ const mockOrgUsers = [
   },
 ];
 
+const mockEventAssignments = {
+  items: [
+    {
+      occurrenceId: 101,
+      seriesId: 5,
+      title: 'Weekly Community Meeting',
+      organizationId: ORG_ID,
+      organizationName: 'Acme Events',
+      occurrenceStart: '2026-11-09T16:00:00.000Z',
+      start: '2026-11-09T16:00:00.000Z',
+      end: '2026-11-09T17:30:00.000Z',
+      isRescheduled: false,
+      isCancelled: false,
+      roles: [
+        {
+          slotId: 11,
+          title: 'Take minutes',
+          workRoleId: 1,
+          workRoleName: 'Setup Crew',
+          isCritical: true,
+        },
+      ],
+    },
+  ],
+  total: 1,
+  page: 0,
+  limit: 5,
+};
+
 test.describe('Organization Users page', () => {
   test.describe('data display', () => {
     test('shows organization users in a table', async ({ page }) => {
@@ -917,6 +946,13 @@ test.describe('Organization User Profile page', () => {
             },
           ],
         }),
+    );
+    // Mock the user's event assignments (paginated)
+    await page.route(
+      url =>
+        url.pathname === `/api/v1/organizations/${ORG_ID}/users/user-2/event-assignments` &&
+        url.searchParams.has('page'),
+      route => route.fulfill({ json: mockEventAssignments }),
     );
   }
 
@@ -1095,6 +1131,106 @@ test.describe('Organization User Profile page', () => {
 
       await page.getByRole('button', { name: 'Back to users' }).click();
       await expect(page).toHaveURL('/organization/users');
+    });
+  });
+
+  test.describe('event assignments card', () => {
+    const assignmentsUrl = `**/api/v1/organizations/${ORG_ID}/users/user-2/event-assignments?*`;
+
+    function expectedDateInput(offsetMonths: number): string {
+      const now = new Date();
+      const d = new Date(now.getFullYear(), now.getMonth() + offsetMonths, now.getDate());
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${d.getFullYear()}-${month}-${day}`;
+    }
+
+    test('shows the assigned occurrences with their roles and the default date span', async ({
+      page,
+    }) => {
+      await setupOrgUserProfile(page);
+      const requests: string[] = [];
+      await page.route(assignmentsUrl, route => {
+        requests.push(route.request().url());
+        return route.fulfill({ json: mockEventAssignments });
+      });
+      await page.goto('/organization/users/user-2');
+
+      await expect(page.getByRole('heading', { name: 'Event assignments' })).toBeVisible();
+      await expect(page.getByText('Weekly Community Meeting')).toBeVisible();
+      // The assigned role is shown as a badge (the work roles card also shows "Setup Crew").
+      await expect(
+        page.locator('span.mantine-Badge-label', { hasText: 'Setup Crew' }),
+      ).toBeVisible();
+
+      // Date inputs default to one month back and forward from today.
+      await expect(page.getByLabel('From')).toHaveValue(expectedDateInput(-1));
+      await expect(page.getByLabel('To')).toHaveValue(expectedDateInput(1));
+
+      // The request carries the default span and pagination.
+      await expect
+        .poll(() => requests.length, { message: 'event-assignments was called' })
+        .toBeGreaterThan(0);
+      const url = new URL(requests[0]);
+      expect(url.searchParams.get('page')).toBe('0');
+      expect(url.searchParams.get('limit')).toBe('5');
+      const start = new Date(url.searchParams.get('start') as string);
+      const end = new Date(url.searchParams.get('end') as string);
+      expect(start.getTime()).toBeLessThanOrEqual(Date.now());
+      expect(end.getTime()).toBeGreaterThan(Date.now());
+    });
+
+    test('changing the date span refetches with the new range', async ({ page }) => {
+      await setupOrgUserProfile(page);
+      const requests: string[] = [];
+      await page.route(assignmentsUrl, route => {
+        requests.push(route.request().url());
+        return route.fulfill({ json: mockEventAssignments });
+      });
+      await page.goto('/organization/users/user-2');
+
+      await expect(page.getByRole('heading', { name: 'Event assignments' })).toBeVisible();
+      await page.getByLabel('From').fill('2025-01-01');
+
+      // The app sends the local-midnight ISO of the picked date.
+      const expectedStart = new Date('2025-01-01T00:00:00').toISOString();
+      await expect
+        .poll(
+          () =>
+            requests.some(u =>
+              (new URL(u).searchParams.get('start') ?? '').startsWith(expectedStart),
+            ),
+          { message: 'event-assignments was called with the new start date' },
+        )
+        .toBe(true);
+    });
+
+    test('paginates the assignments list', async ({ page }) => {
+      await setupOrgUserProfile(page);
+      const requests: string[] = [];
+      await page.route(assignmentsUrl, route => {
+        requests.push(route.request().url());
+        return route.fulfill({ json: { ...mockEventAssignments, total: 12 } });
+      });
+      await page.goto('/organization/users/user-2');
+
+      await expect(page.getByText('Page 1 of 3')).toBeVisible();
+      await page.getByRole('button', { name: 'Next' }).click();
+
+      await expect
+        .poll(() => requests.some(u => new URL(u).searchParams.get('page') === '1'), {
+          message: 'event-assignments was called with page=1',
+        })
+        .toBe(true);
+      await expect(page.getByText('Page 2 of 3')).toBeVisible();
+    });
+
+    test('regular user without events:read does not see the card', async ({ page }) => {
+      await setupOrgUserProfile(page, regularUser());
+      await page.goto('/organization/users/user-2');
+
+      await expect(page.getByRole('heading', { name: 'Bob Brown' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Event assignments' })).toHaveCount(0);
     });
   });
 });

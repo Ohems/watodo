@@ -312,6 +312,7 @@ Team-scoped routes (get/update team, members) also accept users who have the man
 - `PATCH /api/v1/organizations/:organizationId/users/work-roles/:userWorkRoleId` - Update a user's work role (e.g. mark qualified, `work-role-management:write`)
 - `DELETE /api/v1/organizations/:organizationId/users/work-roles/:userWorkRoleId` - Remove a work role from a user (`work-role-management:write`)
 - `GET /api/v1/organizations/:organizationId/users/:userId/certifications` - List a user's certifications (`work-role-management:read`)
+- `GET /api/v1/organizations/:organizationId/users/:userId/event-assignments` - Paginated event occurrences the user is assigned to, with the assigned roles; optional `start`/`end` date span (defaults to one month back and forward from now), `page`, `limit` (`events:read`)
 - `POST /api/v1/organizations/:organizationId/users/:userId/certifications` - Add a certification to a user (`work-role-management:write`)
 - `DELETE /api/v1/organizations/:organizationId/users/certifications/:userCertificationId` - Remove a certification from a user (`work-role-management:write`)
 
@@ -337,6 +338,7 @@ frontend/src/
 │   ├── EditField/        # Inline edit field
 │   ├── EventSeriesDialog/ # Create/edit/split event series dialog
 │   ├── UserCard/         # User card component
+│   ├── EventAssignmentsCard/ # Event occurrences a user is assigned to (date-span filter + pagination; used on /profile and /organization/users/:userId)
 │   ├── ToolbarButton/    # Toolbar button
 │   └── NavigationButton/ # Navigation button
 └── pages/

@@ -953,6 +953,152 @@ describe('Events API', () => {
     });
   });
 
+  describe('GET /api/v1/organizations/:organizationId/users/:userId/event-assignments', () => {
+    it('lists the occurrences the target user is assigned to, with roles, paginated and date-filtered', async () => {
+      const seed = await createEventsFixture();
+      const suffix = randomUUID();
+
+      const workRoleId = (
+        await db
+          .insertInto('work_roles')
+          .values({ name: `Cook ${suffix}`, organization_id: seed.organizationId })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+
+      // Series A: single event in range, critical slot linked to a work role,
+      // assigned to the reader.
+      const seriesAId = (
+        await createSeries(seed, {
+          title: `Assignments A ${suffix}`,
+          start: '2027-10-21T16:00:00.000Z',
+          durationMinutes: 60,
+          timezone: 'UTC',
+        })
+      ).id;
+      const slotA = await createWorkRole(seed, seriesAId, {
+        title: 'Cook the meal',
+        isCritical: true,
+        workRoleId,
+      });
+      await assignToWorkRole(seed, seriesAId, slotA.id, seed.readerUserId);
+
+      // Series B: single event in range, assigned to the member only.
+      const seriesBId = (
+        await createSeries(seed, {
+          title: `Assignments B ${suffix}`,
+          start: '2026-10-22T16:00:00.000Z',
+          durationMinutes: 60,
+          timezone: 'UTC',
+        })
+      ).id;
+      const slotB = await createWorkRole(seed, seriesBId, { title: 'Member slot' });
+      await assignToWorkRole(seed, seriesBId, slotB.id, seed.memberUserId);
+
+      // Series C: weekly recurring in range, series-wide slot assigned to the
+      // reader (3 occurrences in the range).
+      const seriesCId = (
+        await createSeries(seed, {
+          title: `Assignments C ${suffix}`,
+          start: '2027-10-20T16:00:00.000Z', // Wednesday
+          durationMinutes: 60,
+          timezone: 'UTC',
+          recurrence: { freq: 'WEEKLY', byWeekdays: [3] },
+        })
+      ).id;
+      const slotC = await createWorkRole(seed, seriesCId, { title: 'Weekly helper' });
+      await assignToWorkRole(seed, seriesCId, slotC.id, seed.readerUserId);
+
+      // Series D: single event three months after the range, assigned to the
+      // reader (only visible when the date span is extended explicitly).
+      const seriesDId = (
+        await createSeries(seed, {
+          title: `Assignments D ${suffix}`,
+          start: '2028-01-15T16:00:00.000Z',
+          durationMinutes: 60,
+          timezone: 'UTC',
+        })
+      ).id;
+      const slotD = await createWorkRole(seed, seriesDId, { title: 'Far future slot' });
+      await assignToWorkRole(seed, seriesDId, slotD.id, seed.readerUserId);
+
+      const baseUrl = `/api/v1/organizations/${seed.organizationId}/users/${seed.readerUserId}/event-assignments`;
+      const getAssignments = async (token: string, query = '') => {
+        const response = await app.inject({
+          method: 'GET',
+          url: `${baseUrl}?${query}`,
+          headers: auth(token),
+        });
+        return response;
+      };
+
+      // In range: series A (1) + series C (3) = 4 assignments; series B and D excluded.
+      const range = 'start=2027-10-20T00:00:00.000Z&end=2027-11-05T00:00:00.000Z';
+      const page0 = await getAssignments(seed.adminToken, `${range}&page=0&limit=2`);
+      expect(page0.statusCode).toBe(200);
+      const body0 = page0.json() as {
+        items: {
+          seriesId: number;
+          title: string;
+          start: string;
+          roles: { title: string; workRoleName: string | null; isCritical: boolean }[];
+        }[];
+        total: number;
+        page: number;
+        limit: number;
+      };
+      expect(body0.total).toBe(4);
+      expect(body0.page).toBe(0);
+      expect(body0.limit).toBe(2);
+      expect(body0.items).toHaveLength(2);
+      // Sorted by start: series C (Oct 20) first, then series A (Oct 21).
+      expect(body0.items[0].seriesId).toBe(seriesCId);
+      expect(body0.items[0].roles[0].title).toBe('Weekly helper');
+      const firstA = body0.items.find(i => i.seriesId === seriesAId);
+      expect(firstA).toBeDefined();
+      expect(firstA?.roles).toHaveLength(1);
+      expect(firstA?.roles[0]).toMatchObject({
+        title: 'Cook the meal',
+        workRoleId,
+        workRoleName: `Cook ${suffix}`,
+        isCritical: true,
+      });
+
+      // Page 1 returns the remaining two occurrences of series C.
+      const page1 = await getAssignments(seed.adminToken, `${range}&page=1&limit=2`);
+      const body1 = page1.json() as typeof body0;
+      expect(body1.items).toHaveLength(2);
+      expect(body1.items.every(i => i.seriesId === seriesCId)).toBe(true);
+
+      // Default span (no start/end): one month back and forward from now, so
+      // the 2026 fixtures are excluded and the result is empty.
+      const defaultSpan = await getAssignments(seed.adminToken);
+      expect(defaultSpan.statusCode).toBe(200);
+      expect((defaultSpan.json() as typeof body0).total).toBe(0);
+
+      // Extending the span explicitly includes series D.
+      const wide = await getAssignments(
+        seed.adminToken,
+        'start=2027-10-20T00:00:00.000Z&end=2028-02-01T00:00:00.000Z&limit=200',
+      );
+      const wideBody = wide.json() as typeof body0;
+      expect(wideBody.total).toBeGreaterThan(4);
+      expect(wideBody.items.some(i => i.seriesId === seriesDId)).toBe(true);
+
+      // The member has no events:read permission.
+      const forbidden = await getAssignments(seed.memberToken, range);
+      expect(forbidden.statusCode).toBe(403);
+
+      // A user outside the organization is rejected.
+      const outsider = await app.inject({
+        method: 'GET',
+        url: `/api/v1/organizations/${seed.organizationId}/users/${randomUUID()}/event-assignments?${range}`,
+        headers: auth(seed.adminToken),
+      });
+      expect(outsider.statusCode).toBe(404);
+    });
+  });
+
   describe('POST /api/v1/event-series/:seriesId/occurrences/:occurrenceStart/cancel', () => {
     it('cancels an occurrence', async () => {
       const seed = await createEventsFixture();

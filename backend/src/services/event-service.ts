@@ -1310,6 +1310,165 @@ export async function getSeriesOccurrences(
   });
 }
 
+/** A work role slot of an occurrence that a user is assigned to. */
+export interface UserEventAssignmentRole {
+  slotId: number;
+  title: string;
+  workRoleId: number | null;
+  workRoleName: string | null;
+  isCritical: boolean;
+}
+
+/** An occurrence together with the slots the user is assigned to. */
+export interface UserEventAssignment {
+  occurrenceId: number | null;
+  seriesId: number;
+  title: string;
+  organizationId: string;
+  organizationName: string;
+  occurrenceStart: string;
+  start: string;
+  end: string;
+  isRescheduled: boolean;
+  isCancelled: boolean;
+  /** The effective work role slots of this occurrence the user is assigned to. */
+  roles: UserEventAssignmentRole[];
+}
+
+export interface PaginatedUserEventAssignments {
+  items: UserEventAssignment[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+/**
+ * Lists the occurrences of an organization's visible series within a time
+ * range that the given user is assigned to (via an effective work role slot),
+ * together with the slots (roles) they are assigned to. Paginated.
+ * @param organizationId - The organization to restrict the series to.
+ * @param targetUserId - The user whose assignments are listed.
+ * @param rangeStart - Start of the range (inclusive).
+ * @param rangeEnd - End of the range (inclusive).
+ * @param page - Zero-based page number.
+ * @param limit - Page size.
+ * @returns The paginated assignments, sorted by start.
+ */
+export async function getUserEventAssignments(
+  organizationId: string,
+  targetUserId: string,
+  rangeStart: Date,
+  rangeEnd: Date,
+  page: number,
+  limit: number,
+): Promise<PaginatedUserEventAssignments> {
+  logger.trace('eventService.getUserEventAssignments');
+  validateRange(rangeStart, rangeEnd);
+
+  // The target user must belong to the organization.
+  const membership = await db
+    .selectFrom('user_organizations')
+    .select('id')
+    .where('user_id', '=', targetUserId)
+    .where('organization_id', '=', organizationId)
+    .executeTakeFirst();
+  if (!membership) {
+    throw notFound(`User ${targetUserId} is not a member of organization ${organizationId}!`);
+  }
+
+  const series = await db
+    .selectFrom('event_series')
+    .selectAll('event_series')
+    .innerJoin('calendars', 'calendars.id', 'event_series.calendar_id')
+    .where('calendars.organization_id', '=', organizationId)
+    .where('is_visible', '=', true)
+    .orderBy('event_series.start', 'asc')
+    .execute();
+  const seriesIds = series.map(row => row.id);
+  const exceptionsBySeries = await fetchExceptionRules(seriesIds);
+  const organizationsByCalendar = await getCalendarOrganizations(
+    series.map(row => row.calendar_id),
+  );
+
+  const expanded: { series: EventSeries; occurrence: ExpandedOccurrence }[] = [];
+  for (const row of series) {
+    const exceptions = exceptionsBySeries.get(row.id) ?? [];
+    for (const occurrence of expandOccurrences(toRule(row), exceptions, rangeStart, rangeEnd)) {
+      expanded.push({ series: row, occurrence });
+    }
+  }
+  const occurrenceIds = await lookupOccurrenceIds(
+    expanded.map(e => ({ seriesId: e.series.id, occurrenceStart: e.occurrence.occurrenceStart })),
+  );
+
+  // All slots of the involved series plus the target user's assignments on them.
+  const slotData = await fetchSlotStatusData(seriesIds);
+  const allSlotIds = [
+    ...[...slotData.parentSlotsBySeries.values()].flat().map(s => s.id),
+    ...[...slotData.occurrenceSlotsByOccurrence.values()].flat().map(s => s.id),
+  ];
+  const assignedSlotIds = new Set<number>();
+  if (allSlotIds.length > 0) {
+    const assignmentRows = await db
+      .selectFrom('event_work_role_assignments')
+      .select('event_work_role_id')
+      .where('user_id', '=', targetUserId)
+      .where('event_work_role_id', 'in', allSlotIds)
+      .execute();
+    for (const row of assignmentRows) {
+      assignedSlotIds.add(row.event_work_role_id);
+    }
+  }
+
+  const items: UserEventAssignment[] = [];
+  for (const { series: row, occurrence } of expanded) {
+    const organization = organizationsByCalendar.get(row.calendar_id);
+    if (!organization) {
+      throw new Error(`Organization for calendar ${row.calendar_id} not found!`);
+    }
+    const key = `${row.id}:${occurrence.occurrenceStart.toISOString()}`;
+    const occurrenceId = occurrenceIds.get(key) ?? null;
+    // Effective slots: occurrence-level when the occurrence is materialized
+    // and has its own slots, otherwise the parent (series-level) slots.
+    const occurrenceSlots =
+      occurrenceId !== null ? (slotData.occurrenceSlotsByOccurrence.get(occurrenceId) ?? []) : [];
+    const slots =
+      occurrenceSlots.length > 0
+        ? occurrenceSlots
+        : (slotData.parentSlotsBySeries.get(row.id) ?? []);
+    const roles: UserEventAssignmentRole[] = slots
+      .filter(slot => assignedSlotIds.has(slot.id))
+      .map(slot => ({
+        slotId: slot.id,
+        title: slot.title,
+        workRoleId: slot.work_role_id,
+        workRoleName: slot.work_role_name,
+        isCritical: slot.is_critical,
+      }));
+    if (roles.length === 0) continue;
+    items.push({
+      occurrenceId,
+      seriesId: row.id,
+      title: row.title,
+      organizationId: organization.organizationId,
+      organizationName: organization.organizationName,
+      occurrenceStart: occurrence.occurrenceStart.toISOString(),
+      start: occurrence.start.toISOString(),
+      end: occurrence.end.toISOString(),
+      isRescheduled: occurrence.exception?.overrideStart != null,
+      isCancelled: occurrence.exception?.isCancelled ?? false,
+      roles,
+    });
+  }
+  items.sort((a, b) => a.start.localeCompare(b.start));
+  return {
+    items: items.slice(page * limit, page * limit + limit),
+    total: items.length,
+    page,
+    limit,
+  };
+}
+
 export async function getOccurrenceDetail(
   seriesId: number,
   occurrenceStart: Date,

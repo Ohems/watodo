@@ -184,6 +184,19 @@ export const occurrenceRangeQuerySchema = z
 
 export const occurrenceStartSchema = z.iso.datetime();
 
+// --- User event assignments (org user profile card) ---
+
+// The date span is optional; the controller defaults to one month back and
+// forward from the current date.
+export const userEventAssignmentsQuerySchema = z.object({
+  start: z.iso.datetime().optional(),
+  end: z.iso.datetime().optional(),
+  page: z.coerce.number().int().min(0).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+});
+
+export type UserEventAssignmentsQuery = z.infer<typeof userEventAssignmentsQuerySchema>;
+
 export const rescheduleOccurrenceSchema = z.object({
   start: z.iso.datetime(),
   end: z.iso.datetime().optional(),

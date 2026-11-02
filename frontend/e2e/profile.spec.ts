@@ -87,6 +87,35 @@ const myCerts = [
   },
 ];
 
+const mockEventAssignments = {
+  items: [
+    {
+      occurrenceId: 101,
+      seriesId: 5,
+      title: 'Weekly Community Meeting',
+      organizationId: ORG_ID,
+      organizationName: 'Test Org',
+      occurrenceStart: '2026-11-09T16:00:00.000Z',
+      start: '2026-11-09T16:00:00.000Z',
+      end: '2026-11-09T17:30:00.000Z',
+      isRescheduled: false,
+      isCancelled: false,
+      roles: [
+        {
+          slotId: 11,
+          title: 'Take minutes',
+          workRoleId: 1,
+          workRoleName: 'Setup Crew',
+          isCritical: true,
+        },
+      ],
+    },
+  ],
+  total: 1,
+  page: 0,
+  limit: 5,
+};
+
 async function setupProfilePage(
   page: import('@playwright/test').Page,
   user = adminUser(),
@@ -112,6 +141,13 @@ async function setupProfilePage(
     workRoles: myRoles,
     certifications: myCertifications,
   });
+  // Mock the current user's event assignments (paginated)
+  await page.route(
+    url =>
+      url.pathname === `/api/v1/organizations/${ORG_ID}/users/${user.id}/event-assignments` &&
+      url.searchParams.has('page'),
+    route => route.fulfill({ json: mockEventAssignments }),
+  );
 }
 
 test.describe('Profile page', () => {
@@ -132,7 +168,8 @@ test.describe('Profile page', () => {
       await page.goto('/profile');
 
       await expect(page.getByRole('heading', { name: 'My work roles' })).toBeVisible();
-      await expect(page.getByText('Setup Crew')).toBeVisible();
+      // "Setup Crew" also appears as a role badge in the event assignments card.
+      await expect(page.getByText('Setup Crew').first()).toBeVisible();
       await expect(page.getByText('Sets up the venue')).toBeVisible();
       await expect(page.getByText('Qualified')).toBeVisible();
     });
@@ -341,6 +378,84 @@ test.describe('Profile page', () => {
       await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible();
       await expect(page.getByText('Setup Crew').first()).toBeVisible();
       await expect(page.getByText('First Aid').first()).toBeVisible();
+    });
+  });
+
+  test.describe('event assignments card', () => {
+    function expectedDateInput(offsetMonths: number): string {
+      const now = new Date();
+      const d = new Date(now.getFullYear(), now.getMonth() + offsetMonths, now.getDate());
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${d.getFullYear()}-${month}-${day}`;
+    }
+
+    test('shows the current user’s assigned occurrences with roles and the default date span', async ({
+      page,
+    }) => {
+      await setupProfilePage(page);
+      const requests: string[] = [];
+      await page.route(
+        `**/api/v1/organizations/${ORG_ID}/users/user-1/event-assignments?*`,
+        route => {
+          requests.push(route.request().url());
+          return route.fulfill({ json: mockEventAssignments });
+        },
+      );
+      await page.goto('/profile');
+
+      await expect(page.getByRole('heading', { name: 'Event assignments' })).toBeVisible();
+      await expect(page.getByText('Weekly Community Meeting')).toBeVisible();
+      // The assigned role badge is shown inside the card.
+      await expect(
+        page.locator('span.mantine-Badge-label', { hasText: 'Setup Crew' }),
+      ).toBeVisible();
+
+      // Date inputs default to one month back and forward from today.
+      await expect(page.getByLabel('From')).toHaveValue(expectedDateInput(-1));
+      await expect(page.getByLabel('To')).toHaveValue(expectedDateInput(1));
+
+      // The request targets the current user and carries the default span.
+      await expect
+        .poll(() => requests.length, { message: 'event-assignments was called' })
+        .toBeGreaterThan(0);
+      const url = new URL(requests[0]);
+      expect(url.pathname).toBe(`/api/v1/organizations/${ORG_ID}/users/user-1/event-assignments`);
+      expect(url.searchParams.get('page')).toBe('0');
+      expect(url.searchParams.get('limit')).toBe('5');
+    });
+
+    test('changing the date span refetches with the new range', async ({ page }) => {
+      await setupProfilePage(page);
+      const requests: string[] = [];
+      await page.route(
+        `**/api/v1/organizations/${ORG_ID}/users/user-1/event-assignments?*`,
+        route => {
+          requests.push(route.request().url());
+          return route.fulfill({ json: mockEventAssignments });
+        },
+      );
+      await page.goto('/profile');
+
+      await expect(page.getByRole('heading', { name: 'Event assignments' })).toBeVisible();
+      await page.getByLabel('To').fill('2025-06-30');
+
+      const expectedEnd = new Date('2025-06-30T23:59:59').toISOString().slice(0, 19);
+      await expect
+        .poll(
+          () =>
+            requests.some(u => (new URL(u).searchParams.get('end') ?? '').startsWith(expectedEnd)),
+          { message: 'event-assignments was called with the new end date' },
+        )
+        .toBe(true);
+    });
+
+    test('regular user without events:read does not see the card', async ({ page }) => {
+      await setupProfilePage(page, regularUser());
+      await page.goto('/profile');
+
+      await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Event assignments' })).toHaveCount(0);
     });
   });
 });

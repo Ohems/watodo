@@ -240,6 +240,30 @@ export interface EventReadiness {
   unfilledCriticalCount: number;
 }
 
+/** A work role slot of an occurrence that a user is assigned to. */
+export interface UserEventAssignmentRole {
+  slotId: number;
+  title: string;
+  workRoleId: number | null;
+  workRoleName: string | null;
+  isCritical: boolean;
+}
+
+/** An occurrence together with the slots the user is assigned to. */
+export interface UserEventAssignment {
+  occurrenceId: number | null;
+  seriesId: number;
+  title: string;
+  organizationId: string;
+  organizationName: string;
+  occurrenceStart: string;
+  start: string;
+  end: string;
+  isRescheduled: boolean;
+  isCancelled: boolean;
+  roles: UserEventAssignmentRole[];
+}
+
 export interface EventComment {
   id: number;
   seriesId: number;

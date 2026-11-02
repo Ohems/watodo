@@ -30,6 +30,7 @@ import {
   useRemoveMyWorkRoleMutation,
   useUpdateMyCertificationMutation,
 } from '../../api/index.js';
+import { EventAssignmentsCard } from '../../components/EventAssignmentsCard/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
 import { selectActiveOrganizationId } from '../../store/organization-slice.js';
 
@@ -287,7 +288,7 @@ function ProfilePage() {
         )}
       </Paper>
 
-      <Paper shadow="sm" p="lg">
+      <Paper shadow="sm" p="lg" mb="lg">
         <Title order={4} mb="md">
           {t('profile.myCertifications')}
         </Title>
@@ -408,6 +409,9 @@ function ProfilePage() {
           </Stack>
         )}
       </Paper>
+
+      {/* Event assignments of the current user */}
+      <EventAssignmentsCard organizationId={activeOrganizationId} userId={currentUser.id} />
     </Box>
   );
 }

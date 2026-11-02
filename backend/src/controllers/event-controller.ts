@@ -14,7 +14,9 @@ import {
   eventWorkRoleUpdateSchema,
   occurrenceRangeQuerySchema,
   occurrenceStartSchema,
+  organizationUserParamsSchema,
   rescheduleOccurrenceSchema,
+  userEventAssignmentsQuerySchema,
 } from '../schemas/index.js';
 import {
   assignUserToOccurrenceWorkRole,
@@ -36,6 +38,7 @@ import {
   getOccurrenceDetailByRef,
   getOccurrences,
   getSeriesOccurrences,
+  getUserEventAssignments,
   importParentSlots,
   listEventComments,
   listEventSeries,
@@ -173,6 +176,35 @@ export async function getSeriesOccurrencesHandler(
     user.id,
   );
   return reply.status(200).send(occurrences);
+}
+
+/**
+ * Lists the event occurrences a specific organization user is assigned to
+ * (with the roles/slots), within an optional date span. The span defaults to
+ * one month back and forward from the current date.
+ */
+export async function getUserEventAssignmentsHandler(
+  request: FastifyRequest<{ Params: { organizationId: string; userId: string } }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const { organizationId, userId } = organizationUserParamsSchema.parse(request.params);
+  const query = userEventAssignmentsQuerySchema.parse(request.query);
+  const now = new Date();
+  const rangeStart = query.start
+    ? new Date(query.start)
+    : new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+  const rangeEnd = query.end
+    ? new Date(query.end)
+    : new Date(now.getFullYear(), now.getMonth() + 1, now.getDate());
+  const result = await getUserEventAssignments(
+    organizationId,
+    userId,
+    rangeStart,
+    rangeEnd,
+    query.page ?? 0,
+    query.limit ?? 10,
+  );
+  return reply.status(200).send(result);
 }
 
 export async function getOccurrenceDetailHandler(
