@@ -11,6 +11,7 @@ const mockUser: User = {
   email: 'test@example.com',
   description: '',
   phoneNumber: null,
+  language: 'en-GB',
   permissions: ['admin'],
   state: 'active',
   isEmployed: true,

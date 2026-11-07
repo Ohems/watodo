@@ -72,7 +72,7 @@ test.describe('Organization General page', () => {
       await page.goto('/organization/general');
 
       await page.getByRole('button', { name: 'Edit' }).click();
-      await expect(page.getByRole('heading', { name: 'Edit organization' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Edit organisation' })).toBeVisible();
 
       const nameInput = page.getByRole('textbox', { name: 'Name' });
       await nameInput.fill('Acme Events Updated');

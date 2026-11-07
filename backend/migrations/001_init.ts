@@ -16,6 +16,8 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     is_blocked: { type: 'boolean', notNull: true, default: false },
     description: { type: 'text', notNull: true, default: '' },
     state: { type: 'text', notNull: true, default: 'active' },
+    // UI language of the user (BCP 47 tag of a supported locale).
+    language: { type: 'text', notNull: true, default: 'en-GB' },
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });

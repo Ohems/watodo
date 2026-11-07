@@ -23,6 +23,7 @@ export interface UserResponse {
   isSuspended: boolean;
   isBlocked: boolean;
   phoneNumber: string | null;
+  language: string;
   createdAt: string;
   updatedAt: string;
   permissions: string[];
@@ -39,6 +40,7 @@ export function serializeUser(user: User, permissions: string[]): UserResponse {
     isSuspended: user.is_suspended,
     isBlocked: user.is_blocked,
     phoneNumber: user.phone_number,
+    language: user.language,
     createdAt: user.created_at.toISOString(),
     updatedAt: user.updated_at.toISOString(),
     permissions,
@@ -134,6 +136,7 @@ export async function updateUserProfile(
   if (data.email !== undefined) updateData.email = data.email;
   if (data.description !== undefined) updateData.description = data.description;
   if (data.phoneNumber !== undefined) updateData.phone_number = data.phoneNumber;
+  if (data.language !== undefined) updateData.language = data.language;
 
   updateData.updated_at = new Date();
 

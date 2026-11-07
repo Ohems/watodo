@@ -1,4 +1,4 @@
-import { Alert, Box, Button, Group, Modal, Paper, Stack, Text, Title } from '@mantine/core';
+import { Alert, Box, Button, Group, Modal, Paper, Select, Stack, Text, Title } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
@@ -13,6 +13,7 @@ import {
 } from '../../api/index.js';
 import EditField from '../../components/EditField/EditField.js';
 import { useAppDispatch } from '../../hooks/redux.js';
+import { LANGUAGE_LABELS, type Language, SUPPORTED_LANGUAGES } from '../../i18n/index.js';
 import { deleteCurrentUser } from '../../store/session.js';
 import type { AuthProviderInfo, FieldErrors, UserSelfUpdate } from '../../types/index.js';
 import { validateUserSelfUpdate } from '../../validation.js';
@@ -25,7 +26,7 @@ const FALLBACK_PROVIDERS: AuthProviderInfo[] = [
 ];
 
 function AccountPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const dispatch = useAppDispatch();
   const { data: currentUser } = useGetCurrentUserQuery();
   const { data: authAccounts = [] } = useGetAuthAccountsQuery();
@@ -44,6 +45,7 @@ function AccountPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [languageError, setLanguageError] = useState<string | null>(null);
 
   const providers = providersData?.providers ?? (providersError ? FALLBACK_PROVIDERS : null);
 
@@ -140,6 +142,18 @@ function AccountPage() {
       await unlinkAuthAccount(providerId).unwrap();
     } catch (error) {
       setAccountsError(getApiErrorMessage(error) || t('account.disconnectFailed'));
+    }
+  };
+
+  // The language is saved immediately (not part of the edit form) and the UI
+  // switches to it right away.
+  const handleLanguageChange = async (language: Language) => {
+    setLanguageError(null);
+    try {
+      await updateCurrentUser({ language }).unwrap();
+      await i18n.changeLanguage(language);
+    } catch (error) {
+      setLanguageError(getApiErrorMessage(error) || t('account.languageUpdateFailed'));
     }
   };
 
@@ -248,6 +262,31 @@ function AccountPage() {
             />
           </Box>
         </Stack>
+      </Paper>
+
+      <Paper shadow="sm" p="lg" mt="lg">
+        <Title order={5} mb="md">
+          {t('account.preferences')}
+        </Title>
+        {languageError && (
+          <Alert
+            color="red"
+            variant="light"
+            mb="md"
+            withCloseButton
+            onClose={() => setLanguageError(null)}
+          >
+            {languageError}
+          </Alert>
+        )}
+        <Select
+          label={t('account.language')}
+          data={SUPPORTED_LANGUAGES.map(code => ({ value: code, label: LANGUAGE_LABELS[code] }))}
+          value={currentUser.language}
+          onChange={value => {
+            if (value) void handleLanguageChange(value as Language);
+          }}
+        />
       </Paper>
 
       <Paper shadow="sm" p="lg" mt="lg">

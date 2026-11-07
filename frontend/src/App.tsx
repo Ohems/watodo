@@ -1,9 +1,11 @@
 import { Box, Loader, MantineProvider } from '@mantine/core';
 
+import { useEffect } from 'react';
 import { Provider } from 'react-redux';
 import { Route, Routes } from 'react-router-dom';
 import { useGetCurrentUserQuery } from './api/index.js';
 import NavBar from './components/NavBar/NavBar.js';
+import i18n from './i18n/index.js';
 import AccountPage from './pages/Account/Account.js';
 import ErrorPage from './pages/ErrorPage/ErrorPage.js';
 import CalendarPage from './pages/Events/CalendarPage.js';
@@ -29,6 +31,14 @@ import { store } from './store/index.js';
 
 function AppContent() {
   const { data: currentUser, isLoading, isError } = useGetCurrentUserQuery();
+
+  // Apply the language saved on the user's account once it is loaded. The
+  // initial language comes from localStorage (see i18n/index.ts).
+  useEffect(() => {
+    if (currentUser && currentUser.language !== i18n.language) {
+      void i18n.changeLanguage(currentUser.language);
+    }
+  }, [currentUser]);
 
   if (isError) {
     return <LoginPage />;

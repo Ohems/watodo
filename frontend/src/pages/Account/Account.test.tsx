@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { getToken, setToken } from '../../api/index.js';
+import i18n from '../../i18n/index.js';
 import { type MockApi, mockApi } from '../../test/api-mock.js';
 import { renderWithProviders } from '../../test/test-utils.js';
 import type { AuthAccount, AuthProviderInfo, User, UserSelfUpdate } from '../../types/index.js';
@@ -12,6 +13,7 @@ const mockUser: User = {
   email: 'alice@example.com',
   description: 'About Alice',
   phoneNumber: '+358401234567',
+  language: 'en-GB',
   permissions: [],
   state: 'active',
   isEmployed: false,
@@ -56,6 +58,7 @@ function mockAccountRoutes(mock: MockApi, state: AccountRoutes) {
       description: body.description ?? state.currentUser.description,
       phoneNumber:
         body.phoneNumber === undefined ? state.currentUser.phoneNumber : body.phoneNumber,
+      language: body.language ?? state.currentUser.language,
     };
     return state.currentUser;
   });
@@ -75,6 +78,7 @@ describe('AccountPage', () => {
   beforeEach(() => {
     mock = mockApi();
     localStorage.clear();
+    void i18n.changeLanguage('en-GB');
     state = {
       currentUser: mockUser,
       authAccounts: [...mockAuthAccounts],
@@ -203,6 +207,40 @@ describe('AccountPage', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Validation error');
     expect(screen.queryByText('Name is required')).not.toBeInTheDocument();
+  });
+
+  it('shows the language preference with the current language', async () => {
+    renderPage();
+
+    const select = await screen.findByRole('combobox', { name: 'Language' });
+    expect(select).toHaveValue('English (UK)');
+  });
+
+  it('saves a changed language and switches the UI language', async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Language' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Suomi', hidden: true }));
+
+    await waitFor(() => {
+      expect(mock.lastBody('PATCH', '/api/v1/users/@me')).toEqual({ language: 'fi' });
+    });
+    await waitFor(() => {
+      expect(i18n.language).toBe('fi');
+    });
+    // The page re-renders in Finnish.
+    expect(await screen.findByRole('heading', { name: 'Tili' })).toBeInTheDocument();
+  });
+
+  it('shows an error when changing the language fails', async () => {
+    mock.on('PATCH', '/api/v1/users/@me', { error: 'Validation error' }, 400);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Language' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'English (US)', hidden: true }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Validation error');
+    expect(i18n.language).toBe('en-GB');
   });
 
   it('lists connected login methods and offers to connect the others', async () => {

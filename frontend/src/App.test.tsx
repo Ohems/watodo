@@ -21,6 +21,7 @@ const mockUser: User = {
   email: 'test@example.com',
   description: '',
   phoneNumber: null,
+  language: 'en-GB',
   permissions: ['admin'],
   state: 'active',
   isEmployed: true,
@@ -163,7 +164,7 @@ describe('App', () => {
     expect(screen.getAllByText('Home').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Events').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Teams').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Organization').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Organisation').length).toBeGreaterThan(0);
   });
 
   it('renders the Home page on home route once the user is authenticated', async () => {
@@ -180,7 +181,7 @@ describe('App', () => {
     renderApp();
 
     expect(
-      await screen.findByRole('combobox', { name: 'Select organization' }),
+      await screen.findByRole('combobox', { name: 'Select organisation' }),
     ).toBeInTheDocument();
     expect((await screen.findAllByText('Community Org')).length).toBeGreaterThan(0);
   });
@@ -340,7 +341,7 @@ describe('EventConfigPage', () => {
     expect(await screen.findByRole('heading', { name: 'Summer Festival' })).toBeInTheDocument();
     // The organization label (also present in the navigation) and the
     // organization name of the event (also the active one in the nav bar).
-    expect(screen.getAllByText('Organization').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('Organisation').length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText('Community Org').length).toBeGreaterThanOrEqual(2);
   });
 });

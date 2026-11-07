@@ -6,6 +6,11 @@ export const updatedAtSchema = z.coerce.date();
 
 export const userStateSchema = z.enum(['active', 'inactive']);
 
+/** UI languages the app ships translations for (BCP 47 tags). */
+export const supportedLanguages = ['en-GB', 'en-US', 'fi'] as const;
+
+export const languageSchema = z.enum(supportedLanguages);
+
 /**
  * E.164 phone number: a plus sign followed by the country code and the
  * national number (7-15 digits in total).
@@ -37,6 +42,7 @@ export const userSelfUpdateSchema = z.object({
   email: z.email().optional(),
   description: z.string().nullable().optional(),
   phoneNumber: phoneNumberSchema.nullable().optional(),
+  language: languageSchema.optional(),
 });
 
 export const linkRequestSchema = z.object({

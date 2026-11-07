@@ -243,9 +243,9 @@
     "weekdaySat": "Sat",
     "weekdaySun": "Sun",
     "rescheduled": "rescheduled",
-    "cancelled": "cancelled",
+    "cancelled": "canceled",
     "occurrence": "Occurrence",
-    "occurrenceCancelled": "This occurrence is cancelled.",
+    "occurrenceCancelled": "This occurrence is canceled.",
     "occurrenceRescheduled": "Rescheduled from {{original}} to {{start}}.",
     "timeRange": "{{start}} - {{end}}",
     "workRoleSlots": "Work role slots",
@@ -339,7 +339,10 @@
     "saveFailed": "Failed to save changes",
     "connectFailed": "Failed to connect the login method",
     "disconnectFailed": "Failed to disconnect the login method",
-    "deleteFailed": "Failed to delete the account"
+    "deleteFailed": "Failed to delete the account",
+    "preferences": "Preferences",
+    "language": "Language",
+    "languageUpdateFailed": "Failed to change the language"
   },
   "errors": {
     "failedToFetchUsers": "Failed to fetch users",

@@ -68,6 +68,52 @@ test.describe('Account page', () => {
       await expect(page.getByRole('heading', { name: 'Danger zone' })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Delete account' })).toBeVisible();
     });
+
+    test('shows the language preference with the current language', async ({ page }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, []);
+      await page.goto('/account');
+
+      await expect(page.getByRole('heading', { name: 'Preferences' })).toBeVisible();
+      await expect(page.getByRole('combobox', { name: 'Language' })).toHaveValue('English (UK)');
+    });
+  });
+
+  test.describe('language preference', () => {
+    test('changing the language calls PATCH /users/@me with the selected language', async ({
+      page,
+    }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, [
+        { provider: 'discord', providerAccountId: '123', createdAt: '2025-01-01T00:00:00.000Z' },
+      ]);
+
+      // One route handling both GET and PATCH on the same URL; the language
+      // is kept in a variable so refetches return the updated user.
+      let currentLanguage = testUser.language;
+      await page.route('**/api/v1/users/@me', route => {
+        const request = route.request();
+        if (request.method() === 'PATCH') {
+          const body = request.postDataJSON() as { language?: string };
+          currentLanguage = body.language ?? currentLanguage;
+        }
+        return route.fulfill({ json: { ...testUser, language: currentLanguage } });
+      });
+
+      await page.goto('/account');
+
+      const patchRequest = page.waitForRequest(
+        req => req.url().includes('/api/v1/users/@me') && req.method() === 'PATCH',
+      );
+
+      await page.getByRole('combobox', { name: 'Language' }).click();
+      await page.getByRole('option', { name: 'Suomi' }).click();
+
+      const request = await patchRequest;
+      expect(request.postDataJSON()).toEqual({ language: 'fi' });
+      // The UI switches to Finnish immediately (the label is Finnish now).
+      await expect(page.getByRole('combobox', { name: 'Kieli' })).toHaveValue('Suomi');
+    });
   });
 
   test.describe('editing personal info', () => {
@@ -265,6 +311,8 @@ test.describe('Account page', () => {
       await expect(page.getByRole('heading', { name: 'Account' })).toBeVisible();
       await expect(page.getByText('Regular User').nth(1)).toBeVisible();
       await expect(page.getByRole('button', { name: 'Edit' })).toBeVisible();
+      // The language preference is self-service: no permission required.
+      await expect(page.getByRole('combobox', { name: 'Language' })).toHaveValue('English (UK)');
     });
   });
 });

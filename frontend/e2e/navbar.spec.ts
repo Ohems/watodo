@@ -19,20 +19,20 @@ test.describe('NavBar', () => {
       await expect(page.getByRole('link', { name: 'Home' })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Events' })).toBeVisible();
       await expect(page.getByRole('link', { name: 'Teams' })).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Organization' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Organisation' })).toBeVisible();
 
       // User name
       await expect(page.getByText('Alice')).toBeVisible();
 
       // Organization selector
-      await expect(page.getByRole('combobox', { name: 'Select organization' })).toBeVisible();
+      await expect(page.getByRole('combobox', { name: 'Select organisation' })).toBeVisible();
     });
 
     test('shows the active organization in the selector', async ({ page }) => {
       await mockCommonApis(page, adminUser(), [testOrg, secondOrg]);
       await page.goto('/');
 
-      const orgSelect = page.getByRole('combobox', { name: 'Select organization' });
+      const orgSelect = page.getByRole('combobox', { name: 'Select organisation' });
       await expect(orgSelect).toHaveValue('Acme Events');
     });
   });
@@ -71,7 +71,7 @@ test.describe('NavBar', () => {
       await mockCommonApis(page, adminUser(), [testOrg]);
       await page.goto('/');
 
-      await page.getByRole('button', { name: 'Organization' }).hover();
+      await page.getByRole('button', { name: 'Organisation' }).hover();
 
       await expect(page.getByRole('menuitem', { name: 'General' })).toBeVisible();
       await expect(page.getByRole('menuitem', { name: 'Sites' })).toBeVisible();
@@ -154,7 +154,7 @@ test.describe('NavBar', () => {
       await mockCommonApis(page, adminUser(), [testOrg, secondOrg]);
       await page.goto('/');
 
-      const orgSelect = page.getByRole('combobox', { name: 'Select organization' });
+      const orgSelect = page.getByRole('combobox', { name: 'Select organisation' });
       await expect(orgSelect).toHaveValue('Acme Events');
 
       // Switch to Beta Org
@@ -188,7 +188,7 @@ test.describe('No Organization page', () => {
 
     await expect(
       page.getByText(
-        'You are not a member of any organization yet. Please contact an administrator to be added to one.',
+        'You are not a member of any organisation yet. Please contact an administrator to be added to one.',
       ),
     ).toBeVisible();
   });

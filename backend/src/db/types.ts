@@ -13,6 +13,8 @@ export interface Users {
   is_blocked: Generated<boolean>;
   description: Generated<string>;
   state: Generated<string>;
+  /** UI language (BCP 47 tag of a supported locale, e.g. 'en-GB'). */
+  language: Generated<string>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }

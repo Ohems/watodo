@@ -29,6 +29,7 @@ import type {
 } from '../src/db/types.js';
 import { createLogger } from '../src/logger.js';
 import { PERMISSIONS, type Permission } from '../src/permissions.js';
+import { supportedLanguages } from '../src/schemas/index.js';
 import { seedPermissions } from '../src/services/permission-service.js';
 import {
   buildRruleString,
@@ -49,6 +50,8 @@ interface MockUserSeed {
   description: string;
   /** E.164 phone number (includes the country code); null when not set. */
   phoneNumber: string | null;
+  /** UI language; when omitted, languages cycle through the supported ones. */
+  language?: (typeof supportedLanguages)[number];
   isEmployed: boolean;
   isSuspended: boolean;
   isBlocked: boolean;
@@ -345,7 +348,7 @@ async function createRole(
 
 async function createMockUsers(tx: Tx, seeds: MockUserSeed[]): Promise<User[]> {
   const users: User[] = [];
-  for (const seed of seeds) {
+  for (const [index, seed] of seeds.entries()) {
     const user = await tx
       .insertInto('users')
       .values({
@@ -353,6 +356,7 @@ async function createMockUsers(tx: Tx, seeds: MockUserSeed[]): Promise<User[]> {
         email: seed.email,
         description: seed.description,
         phone_number: seed.phoneNumber,
+        language: seed.language ?? supportedLanguages[index % supportedLanguages.length],
         is_employed: seed.isEmployed,
         is_suspended: seed.isSuspended,
         is_blocked: seed.isBlocked,

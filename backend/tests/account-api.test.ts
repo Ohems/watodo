@@ -257,6 +257,44 @@ describe('Account API', () => {
       expect(emptyName.statusCode).toBe(400);
     });
 
+    it('lets a user change their UI language', async () => {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/api/v1/users/@me',
+        headers: { 'x-token': token },
+        payload: { language: 'fi' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().language).toBe('fi');
+
+      const row = await db
+        .selectFrom('users')
+        .select('language')
+        .where('id', '=', userId)
+        .executeTakeFirstOrThrow();
+      expect(row.language).toBe('fi');
+    });
+
+    it('rejects an unsupported language', async () => {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/api/v1/users/@me',
+        headers: { 'x-token': token },
+        payload: { language: 'de' },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toBe('Validation error');
+
+      const row = await db
+        .selectFrom('users')
+        .select('language')
+        .where('id', '=', userId)
+        .executeTakeFirstOrThrow();
+      expect(row.language).toBe('en-GB');
+    });
+
     it('rejects an email address that is already in use', async () => {
       const response = await app.inject({
         method: 'PATCH',
@@ -293,6 +331,7 @@ describe('Account API', () => {
       expect(body.name).toBeTruthy();
       expect(body.email).toBeTruthy();
       expect(body.phoneNumber).toBeNull();
+      expect(body.language).toBe('en-GB');
       expect(body.isEmployed).toBe(false);
       expect(body.isSuspended).toBe(false);
       expect(body.isBlocked).toBe(false);

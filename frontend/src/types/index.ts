@@ -1,3 +1,5 @@
+import type { Language } from '../i18n/index.js';
+
 export interface User {
   id: string;
   name: string;
@@ -5,6 +7,8 @@ export interface User {
   description: string;
   /** Optional contact number in E.164 format (includes the country code). */
   phoneNumber: string | null;
+  /** UI language (BCP 47 tag of a supported locale, e.g. 'en-GB'). */
+  language: Language;
   permissions: string[];
   state: 'active' | 'inactive';
   isEmployed: boolean;
@@ -28,6 +32,7 @@ export interface UserSelfUpdate {
   description?: string | null;
   /** E.164 format (includes the country code); null clears the number. */
   phoneNumber?: string | null;
+  language?: Language;
 }
 
 /** A login method (OAuth provider account) connected to the user's account. */
