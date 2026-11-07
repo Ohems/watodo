@@ -12,6 +12,7 @@ import {
   Select,
   Stack,
   Switch,
+  Table,
   Text,
   Textarea,
   Title,
@@ -457,38 +458,43 @@ function EventOccurrencePage() {
                       )}
                     </Group>
                   )}
-                  <Group gap="xs" mt={4} wrap="wrap">
-                    {slot.assignments.map(assignment => (
-                      <Badge
-                        key={assignment.id}
-                        size="sm"
-                        variant="outline"
-                        rightSection={
-                          canWrite ? (
-                            <ActionIcon
-                              size="xs"
-                              variant="transparent"
-                              onClick={() =>
-                                run(() =>
-                                  ensureOccurrenceId().then(occId =>
-                                    unassignUser({
-                                      occurrenceId: occId,
-                                      workRoleId: slot.id,
-                                      assignmentId: assignment.id,
-                                    }).unwrap(),
-                                  ),
-                                )
-                              }
-                            >
-                              <IconTrash size={10} />
-                            </ActionIcon>
-                          ) : undefined
-                        }
-                      >
-                        {assignment.userName}
-                      </Badge>
-                    ))}
-                  </Group>
+                  {/* Headerless table so the delete buttons align in a column. */}
+                  <Table mt={4} verticalSpacing="xs">
+                    <Table.Tbody>
+                      {slot.assignments.map(assignment => (
+                        <Table.Tr key={assignment.id}>
+                          <Table.Td>
+                            <Text size="md" fw={500}>
+                              {assignment.userName}
+                            </Text>
+                          </Table.Td>
+                          <Table.Td style={{ width: 40, textAlign: 'right' }}>
+                            {canWrite && (
+                              <ActionIcon
+                                size="sm"
+                                variant="subtle"
+                                color="red"
+                                aria-label={t('events.unassignUser', { name: assignment.userName })}
+                                onClick={() =>
+                                  run(() =>
+                                    ensureOccurrenceId().then(occId =>
+                                      unassignUser({
+                                        occurrenceId: occId,
+                                        workRoleId: slot.id,
+                                        assignmentId: assignment.id,
+                                      }).unwrap(),
+                                    ),
+                                  )
+                                }
+                              >
+                                <IconTrash size={14} />
+                              </ActionIcon>
+                            )}
+                          </Table.Td>
+                        </Table.Tr>
+                      ))}
+                    </Table.Tbody>
+                  </Table>
                   {canWrite && (
                     <Group gap="xs" mt={4} wrap="nowrap">
                       <Select

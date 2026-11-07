@@ -256,6 +256,7 @@
     "seriesWide": "Whole series",
     "assignUser": "Assign user",
     "assign": "Assign",
+    "unassignUser": "Remove {{name}} from this slot",
     "comments": "Comments",
     "addComment": "Add comment",
     "deleteComment": "Delete comment",
