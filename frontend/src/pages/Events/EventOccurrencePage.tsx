@@ -13,10 +13,11 @@ import {
   Stack,
   Switch,
   Text,
+  Textarea,
   Title,
 } from '@mantine/core';
 import { skipToken } from '@reduxjs/toolkit/query/react';
-import { IconPlus, IconTrash } from '@tabler/icons-react';
+import { IconPencil, IconPlus, IconTrash } from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -32,6 +33,7 @@ import {
   useImportParentSlotsMutation,
   useMaterializeOccurrenceMutation,
   useUnassignUserFromOccurrenceWorkRoleMutation,
+  useUpdateOccurrenceWorkRoleMutation,
 } from '../../api/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
 import { selectActiveOrganizationId } from '../../store/organization-slice.js';
@@ -69,11 +71,15 @@ function EventOccurrencePage() {
     error: detailError,
   } = useGetOccurrenceDetailByRefQuery(valid ? (occurrenceRef as string) : skipToken);
   const { data: userList = [] } = useGetUserListQuery(valid ? undefined : skipToken);
+  // Work roles are organization-scoped: always offer the ones of the
+  // organization that owns this event, not of the currently active one.
+  const eventOrganizationId = detail?.occurrence.organizationId ?? activeOrganizationId;
   const { data: workRoles = [] } = useGetAllWorkRolesQuery(
-    valid && activeOrganizationId ? activeOrganizationId : skipToken,
+    valid && eventOrganizationId ? eventOrganizationId : skipToken,
   );
 
   const [deleteSlot] = useDeleteOccurrenceWorkRoleMutation();
+  const [updateSlot] = useUpdateOccurrenceWorkRoleMutation();
   const [unassignUser] = useUnassignUserFromOccurrenceWorkRoleMutation();
   const [assignUser] = useAssignUserToOccurrenceWorkRoleMutation();
   const [createSlot] = useCreateOccurrenceWorkRoleMutation();
@@ -86,6 +92,8 @@ function EventOccurrencePage() {
   const [slotWorkRoleId, setSlotWorkRoleId] = useState<number | null>(null);
   const [slotIsCritical, setSlotIsCritical] = useState(false);
   const [assignUserIds, setAssignUserIds] = useState<Record<number, string>>({});
+  const [editingDescriptionId, setEditingDescriptionId] = useState<number | null>(null);
+  const [descriptionDraft, setDescriptionDraft] = useState('');
 
   const run = async (action: () => Promise<unknown>) => {
     setActionError(null);
@@ -353,34 +361,101 @@ function EventOccurrencePage() {
                       </Badge>
                     )}
                     <Badge size="sm" variant="light" color={slotColor}>
-                      {isUnfilled
-                        ? slot.isCritical
-                          ? t('events.criticalUnfilled')
-                          : t('events.optionalUnfilled')
-                        : t('events.filled')}
+                      {isUnfilled ? t('events.unfilled') : t('events.filled')}
                     </Badge>
                     {canWrite && (
-                      <ActionIcon
-                        size="sm"
-                        variant="subtle"
-                        color="red"
-                        aria-label={t('events.deleteSlot')}
-                        onClick={() =>
-                          run(() =>
-                            ensureOccurrenceId().then(occId =>
-                              deleteSlot({ occurrenceId: occId, workRoleId: slot.id }).unwrap(),
-                            ),
-                          )
-                        }
-                      >
-                        <IconTrash size={14} />
-                      </ActionIcon>
+                      <>
+                        <Divider orientation="vertical" />
+                        <Switch
+                          size="xs"
+                          label={t('events.criticalRole')}
+                          checked={slot.isCritical}
+                          onChange={() =>
+                            run(() =>
+                              ensureOccurrenceId().then(occId =>
+                                updateSlot({
+                                  occurrenceId: occId,
+                                  workRoleId: slot.id,
+                                  data: { isCritical: !slot.isCritical },
+                                }).unwrap(),
+                              ),
+                            )
+                          }
+                        />
+                        <ActionIcon
+                          size="sm"
+                          variant="subtle"
+                          color="red"
+                          aria-label={t('events.deleteSlot')}
+                          onClick={() =>
+                            run(() =>
+                              ensureOccurrenceId().then(occId =>
+                                deleteSlot({ occurrenceId: occId, workRoleId: slot.id }).unwrap(),
+                              ),
+                            )
+                          }
+                        >
+                          <IconTrash size={14} />
+                        </ActionIcon>
+                      </>
                     )}
                   </Group>
-                  {slot.description && (
-                    <Text size="sm" c="dimmed">
-                      {slot.description}
-                    </Text>
+                  {editingDescriptionId === slot.id ? (
+                    <Group gap="xs" mt={4} wrap="wrap">
+                      <Textarea
+                        size="xs"
+                        value={descriptionDraft}
+                        onChange={event => setDescriptionDraft(event.currentTarget.value)}
+                        placeholder={t('events.slotDescriptionPlaceholder')}
+                        autosize
+                        minRows={1}
+                        style={{ flex: 1, minWidth: 200 }}
+                      />
+                      <Button
+                        size="xs"
+                        onClick={() =>
+                          run(async () => {
+                            const occId = await ensureOccurrenceId();
+                            await updateSlot({
+                              occurrenceId: occId,
+                              workRoleId: slot.id,
+                              data: { description: descriptionDraft },
+                            }).unwrap();
+                            setEditingDescriptionId(null);
+                          })
+                        }
+                      >
+                        {t('save')}
+                      </Button>
+                      <Button
+                        size="xs"
+                        variant="subtle"
+                        onClick={() => setEditingDescriptionId(null)}
+                      >
+                        {t('cancel')}
+                      </Button>
+                    </Group>
+                  ) : (
+                    <Group gap={4} mt={4} wrap="nowrap">
+                      {slot.description && (
+                        <Text size="sm" c="dimmed">
+                          {slot.description}
+                        </Text>
+                      )}
+                      {canWrite && (
+                        <ActionIcon
+                          size="sm"
+                          variant="subtle"
+                          aria-label={t('events.editDescription')}
+                          onClick={() => {
+                            setEditingDescriptionId(slot.id);
+                            setDescriptionDraft(slot.description);
+                          }}
+                        >
+                          <IconPencil size={14} />
+                        </ActionIcon>
+                      )}
+                    </Group>
                   )}
                   <Group gap="xs" mt={4} wrap="wrap">
                     {slot.assignments.map(assignment => (

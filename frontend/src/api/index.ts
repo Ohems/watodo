@@ -590,6 +590,17 @@ export const api = createApi({
       }),
       invalidatesTags: ['OccurrenceDetail'],
     }),
+    updateOccurrenceWorkRole: build.mutation<
+      EventWorkRole,
+      { occurrenceId: number; workRoleId: number; data: EventWorkRoleUpdate }
+    >({
+      query: ({ occurrenceId, workRoleId, data }) => ({
+        url: `/api/v1/event-occurrences/${occurrenceId}/work-roles/${workRoleId}`,
+        method: 'PATCH',
+        body: data,
+      }),
+      invalidatesTags: ['OccurrenceDetail'],
+    }),
     deleteOccurrenceWorkRole: build.mutation<void, { occurrenceId: number; workRoleId: number }>({
       query: ({ occurrenceId, workRoleId }) => ({
         url: `/api/v1/event-occurrences/${occurrenceId}/work-roles/${workRoleId}`,
@@ -1192,6 +1203,7 @@ export const {
   useImportParentSlotsMutation,
   useMaterializeOccurrenceMutation,
   useCreateOccurrenceWorkRoleMutation,
+  useUpdateOccurrenceWorkRoleMutation,
   useDeleteOccurrenceWorkRoleMutation,
   useAssignUserToOccurrenceWorkRoleMutation,
   useUnassignUserFromOccurrenceWorkRoleMutation,

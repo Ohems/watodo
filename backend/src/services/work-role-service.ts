@@ -248,14 +248,36 @@ export async function deleteWorkRole(workRoleId: number): Promise<void> {
 
 /**
  * Links a certification to a work role (making it mandatory for that role).
+ * Both the work role and the certification must belong to the organization
+ * (certifications and work roles are organization-scoped catalog data).
+ * @param organizationId - The organization ID.
  * @param workRoleId - The work role ID.
  * @param certificationId - The certification ID.
  */
 export async function addCertificationToWorkRole(
+  organizationId: string,
   workRoleId: number,
   certificationId: number,
 ): Promise<void> {
   logger.trace('workRoleService.addCertificationToWorkRole');
+  const workRole = await db
+    .selectFrom('work_roles')
+    .select('id')
+    .where('id', '=', workRoleId)
+    .where('organization_id', '=', organizationId)
+    .executeTakeFirst();
+  if (!workRole) {
+    throw notFound(`Work role ${workRoleId} not found in organization ${organizationId}!`);
+  }
+  const certification = await db
+    .selectFrom('certifications')
+    .select('id')
+    .where('id', '=', certificationId)
+    .where('organization_id', '=', organizationId)
+    .executeTakeFirst();
+  if (!certification) {
+    throw notFound(`Certification ${certificationId} not found in organization ${organizationId}!`);
+  }
   await db
     .insertInto('certification_work_roles')
     .values({ work_role_id: workRoleId, certification_id: certificationId })
@@ -265,14 +287,25 @@ export async function addCertificationToWorkRole(
 
 /**
  * Removes a certification link from a work role.
+ * @param organizationId - The organization ID the work role must belong to.
  * @param workRoleId - The work role ID.
  * @param certificationId - The certification ID.
  */
 export async function removeCertificationFromWorkRole(
+  organizationId: string,
   workRoleId: number,
   certificationId: number,
 ): Promise<void> {
   logger.trace('workRoleService.removeCertificationFromWorkRole');
+  const workRole = await db
+    .selectFrom('work_roles')
+    .select('id')
+    .where('id', '=', workRoleId)
+    .where('organization_id', '=', organizationId)
+    .executeTakeFirst();
+  if (!workRole) {
+    throw notFound(`Work role ${workRoleId} not found in organization ${organizationId}!`);
+  }
   const result = await db
     .deleteFrom('certification_work_roles')
     .where('work_role_id', '=', workRoleId)

@@ -762,6 +762,12 @@ interface WeeklyMeetingUsers {
   occurrenceCommenter: User;
 }
 
+/** Optional catalog work roles (of the same organization) linked to the slots. */
+interface WeeklyMeetingWorkRoles {
+  setupRoleId?: number;
+  coffeeRoleId?: number;
+}
+
 // Creates a weekly recurring series (Mondays 18:00-19:30 local) with
 // series-wide and occurrence-specific work role slots, one cancelled occurrence in
 // the current month and one rescheduled occurrence in the next month, plus
@@ -772,6 +778,7 @@ async function seedWeeklyMeeting(
   calendarId: string,
   timezone: string,
   users: WeeklyMeetingUsers,
+  workRoles: WeeklyMeetingWorkRoles = {},
 ): Promise<EventSeries> {
   const startWall = firstWeekdayOfMonth(prevYear, prevMonth, 1);
   const start = at(
@@ -798,6 +805,8 @@ async function seedWeeklyMeeting(
     null,
     'Room setup',
     'Open the venue and arrange the chairs before the meeting.',
+    false,
+    workRoles.setupRoleId ?? null,
   );
   await assignUser(tx, setupSlot.id, users.setup.id);
   const coffeeSlot = await addWorkRoleSlot(
@@ -806,6 +815,8 @@ async function seedWeeklyMeeting(
     null,
     'Coffee and tea',
     'Make sure there is coffee, tea and water for everyone.',
+    false,
+    workRoles.coffeeRoleId ?? null,
   );
   await assignUser(tx, coffeeSlot.id, users.coffee.id);
 
@@ -1256,6 +1267,8 @@ export async function seedTestData(tx: Tx): Promise<void> {
       commenter: mockUsersOne[1],
       occurrenceCommenter: realUser,
     },
+    // Link the slots to this organization's own catalog work roles.
+    { setupRoleId: workRolesOne[0].id, coffeeRoleId: workRolesOne[2].id },
   );
   const minutesSlot = await addWorkRoleSlot(
     tx,
@@ -1732,13 +1745,21 @@ export async function seedTestData(tx: Tx): Promise<void> {
   );
 
   // A weekly recurring meeting spanning all three months.
-  await seedWeeklyMeeting(tx, 'Weekly Association Meeting', mainCalendar.id, 'Europe/Helsinki', {
-    setup: mockUsersTwo[0],
-    coffee: mockUsersTwo[2],
-    av: mockUsersTwo[3],
-    commenter: mockUsersTwo[1],
-    occurrenceCommenter: mockUsersTwo[4],
-  });
+  await seedWeeklyMeeting(
+    tx,
+    'Weekly Association Meeting',
+    mainCalendar.id,
+    'Europe/Helsinki',
+    {
+      setup: mockUsersTwo[0],
+      coffee: mockUsersTwo[2],
+      av: mockUsersTwo[3],
+      commenter: mockUsersTwo[1],
+      occurrenceCommenter: mockUsersTwo[4],
+    },
+    // Link the slots to this organization's own catalog work roles.
+    { setupRoleId: workRolesTwo[0].id, coffeeRoleId: workRolesTwo[2].id },
+  );
 
   // A daily weekday series in the mornings.
   const morningRunStartWall = firstWeekdayOfMonth(prevYear, prevMonth, 1);
@@ -1808,6 +1829,8 @@ export async function seedTestData(tx: Tx): Promise<void> {
     null,
     'Organize tables and chairs',
     'Set up tables and chairs for the potluck.',
+    false,
+    workRolesTwo[0].id,
   );
   await assignUser(tx, tablesSlot.id, mockUsersTwo[4].id);
   await addWorkRoleSlot(
@@ -1816,6 +1839,8 @@ export async function seedTestData(tx: Tx): Promise<void> {
     null,
     'Dessert table',
     'Run the dessert table. Currently unassigned.',
+    false,
+    workRolesTwo[2].id,
   );
   await addComment(
     tx,

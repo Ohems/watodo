@@ -1688,14 +1688,47 @@ async function getOccurrenceSlotOrThrow(occurrenceId: number, workRoleId: number
   return slot;
 }
 
-/** Updates a slot that belongs to the occurrence (parent slots are rejected). */
+/**
+ * Updates a slot that belongs to the occurrence. When the given slot ID is a
+ * parent (series-level) slot, the occurrence-level copy inherited from it is
+ * updated instead; parent slots themselves are never modified here.
+ */
 export async function updateOccurrenceWorkRole(
   occurrenceId: number,
   workRoleId: number,
   data: EventWorkRoleUpdate,
 ): Promise<EventWorkRoleResponse> {
-  const slot = await getOccurrenceSlotOrThrow(occurrenceId, workRoleId);
-  return updateEventWorkRole(slot.event_series_id, workRoleId, data);
+  let slot = await db
+    .selectFrom('event_work_roles')
+    .selectAll()
+    .where('id', '=', workRoleId)
+    .where('event_occurrence_id', '=', occurrenceId)
+    .executeTakeFirst();
+  if (!slot) {
+    // Maybe the caller referenced the parent (series-level) slot, which the
+    // occurrence page shows before the occurrence is materialized: resolve
+    // the occurrence-level copy inherited from that parent slot.
+    const occurrence = await db
+      .selectFrom('event_occurrences')
+      .select('event_series_id')
+      .where('id', '=', occurrenceId)
+      .executeTakeFirst();
+    if (!occurrence) {
+      throw notFound(`Event occurrence ${occurrenceId} not found!`);
+    }
+    const inheritedCopy = await db
+      .selectFrom('event_work_roles')
+      .selectAll()
+      .where('event_series_id', '=', occurrence.event_series_id)
+      .where('event_occurrence_id', '=', occurrenceId)
+      .where('inherited_from_work_role_id', '=', workRoleId)
+      .executeTakeFirst();
+    if (!inheritedCopy) {
+      throw notFound(`Work role slot ${workRoleId} not found in occurrence ${occurrenceId}!`);
+    }
+    slot = inheritedCopy;
+  }
+  return updateEventWorkRole(slot.event_series_id, slot.id, data);
 }
 
 /** Deletes a slot that belongs to the occurrence; parent slots are never deleted. */
@@ -1985,18 +2018,24 @@ export async function createEventWorkRole(
     }
   }
 
-  // Validate the work role if given; default the title from the work role.
+  // Validate the work role if given; default the title and description from
+  // the work role. Work roles are organization-scoped catalog data, so the
+  // work role must belong to the same organization as the series.
+  const organization = await getCalendarOrganizationOrThrow(series.calendar_id);
   let workRoleName: string | null = null;
+  let workRoleDescription: string | null = null;
   if (data.workRoleId != null) {
     const workRole = await db
       .selectFrom('work_roles')
-      .select(['id', 'name'])
+      .select(['id', 'name', 'description'])
       .where('id', '=', data.workRoleId)
+      .where('organization_id', '=', organization.organizationId)
       .executeTakeFirst();
     if (!workRole) {
-      throw notFound(`Work role ${data.workRoleId} not found!`);
+      throw notFound(`Work role ${data.workRoleId} not found in this organization!`);
     }
     workRoleName = workRole.name;
+    workRoleDescription = workRole.description;
   }
 
   const slot = await db
@@ -2006,7 +2045,7 @@ export async function createEventWorkRole(
       event_occurrence_id: eventOccurrenceId,
       inherited_from_work_role_id: null,
       title: data.title || workRoleName || 'Slot',
-      description: data.description ?? '',
+      description: data.description ?? workRoleDescription ?? '',
       is_critical: data.isCritical ?? false,
       work_role_id: data.workRoleId ?? null,
     })
@@ -2034,15 +2073,18 @@ export async function updateEventWorkRole(
     throw notFound(`Work role slot ${slotId} not found in event series ${seriesId}!`);
   }
 
-  // Validate the work role if given.
+  // Validate the work role if given; it must belong to the same organization
+  // as the series (work roles are organization-scoped catalog data).
   if (data.workRoleId != null) {
+    const organization = await getCalendarOrganizationOrThrow(series.calendar_id);
     const workRole = await db
       .selectFrom('work_roles')
       .select('id')
       .where('id', '=', data.workRoleId)
+      .where('organization_id', '=', organization.organizationId)
       .executeTakeFirst();
     if (!workRole) {
-      throw notFound(`Work role ${data.workRoleId} not found!`);
+      throw notFound(`Work role ${data.workRoleId} not found in this organization!`);
     }
   }
 

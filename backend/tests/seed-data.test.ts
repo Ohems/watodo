@@ -153,4 +153,63 @@ describe('seed-data script', () => {
     expect(warned).toBeDefined();
     expect(warned?.workRoleSlots.some(s => s.isCritical && s.assigneeCount === 0)).toBe(true);
   });
+
+  it('keeps organization-scoped data within its own organization', async () => {
+    await db.transaction().execute(seedTestData);
+
+    // Every event work role slot that links a catalog work role must reference
+    // a work role of the same organization as the event series (via calendar).
+    const slotRows = await db
+      .selectFrom('event_work_roles')
+      .innerJoin('event_series', 'event_series.id', 'event_work_roles.event_series_id')
+      .innerJoin('calendars', 'calendars.id', 'event_series.calendar_id')
+      .innerJoin('work_roles', 'work_roles.id', 'event_work_roles.work_role_id')
+      .select(['work_roles.organization_id as role_org', 'calendars.organization_id as series_org'])
+      .execute();
+    expect(slotRows.length).toBeGreaterThan(0);
+    for (const row of slotRows) {
+      expect(row.role_org).toBe(row.series_org);
+    }
+
+    // Team work role assignments: team and work role in the same organization.
+    const teamRoleRows = await db
+      .selectFrom('team_work_roles')
+      .innerJoin('teams', 'teams.id', 'team_work_roles.team_id')
+      .innerJoin('work_roles', 'work_roles.id', 'team_work_roles.work_role_id')
+      .select(['teams.organization_id as team_org', 'work_roles.organization_id as role_org'])
+      .execute();
+    expect(teamRoleRows.length).toBeGreaterThan(0);
+    for (const row of teamRoleRows) {
+      expect(row.role_org).toBe(row.team_org);
+    }
+
+    // Series team assignments: team and series in the same organization.
+    const seriesTeamRows = await db
+      .selectFrom('event_series_teams')
+      .innerJoin('teams', 'teams.id', 'event_series_teams.team_id')
+      .innerJoin('event_series', 'event_series.id', 'event_series_teams.event_series_id')
+      .innerJoin('calendars', 'calendars.id', 'event_series.calendar_id')
+      .select(['teams.organization_id as team_org', 'calendars.organization_id as series_org'])
+      .execute();
+    expect(seriesTeamRows.length).toBeGreaterThan(0);
+    for (const row of seriesTeamRows) {
+      expect(row.team_org).toBe(row.series_org);
+    }
+
+    // Certification work role links: certification and work role in the same
+    // organization.
+    const certRoleRows = await db
+      .selectFrom('certification_work_roles')
+      .innerJoin('work_roles', 'work_roles.id', 'certification_work_roles.work_role_id')
+      .innerJoin('certifications', 'certifications.id', 'certification_work_roles.certification_id')
+      .select([
+        'work_roles.organization_id as role_org',
+        'certifications.organization_id as cert_org',
+      ])
+      .execute();
+    expect(certRoleRows.length).toBeGreaterThan(0);
+    for (const row of certRoleRows) {
+      expect(row.cert_org).toBe(row.role_org);
+    }
+  });
 });

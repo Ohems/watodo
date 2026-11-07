@@ -1254,6 +1254,54 @@ describe('Events API', () => {
       });
       expect(response.statusCode).toBe(404);
     });
+
+    it('inherits the description from a linked work role of the same organization', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const workRoleId = (
+        await db
+          .insertInto('work_roles')
+          .values({
+            name: 'Kitchen Helper',
+            description: 'Help prepare and serve food.',
+            organization_id: seed.organizationId,
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/work-roles`,
+        headers: auth(seed.adminToken),
+        payload: { title: 'Kitchen Helper', workRoleId },
+      });
+      expect(response.statusCode).toBe(200);
+      const slot = response.json() as { description: string; workRoleName: string | null };
+      expect(slot.description).toBe('Help prepare and serve food.');
+      expect(slot.workRoleName).toBe('Kitchen Helper');
+    });
+
+    it('rejects a work role from another organization', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const otherOrgId = await createOrganization(`Other Org ${randomUUID()}`, {
+        defaultTimezone: 'UTC',
+      });
+      const otherWorkRoleId = (
+        await db
+          .insertInto('work_roles')
+          .values({ name: 'Other Org Role', organization_id: otherOrgId })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/work-roles`,
+        headers: auth(seed.adminToken),
+        payload: { title: 'Cross-org slot', workRoleId: otherWorkRoleId },
+      });
+      expect(response.statusCode).toBe(404);
+    });
   });
 
   describe('POST /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments', () => {
@@ -1435,6 +1483,162 @@ describe('Events API', () => {
       });
       expect(response.statusCode).toBe(200);
       expect((response.json() as { title: string }).title).toBe('Setup crew (updated)');
+    });
+
+    it('toggles the required (critical) flag and updates the description', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-series/${series.id}/work-roles/${slot.id}`,
+        headers: auth(seed.adminToken),
+        payload: { isCritical: true, description: 'Arrive 30 minutes early' },
+      });
+      expect(response.statusCode).toBe(200);
+      const updated = response.json() as { isCritical: boolean; description: string };
+      expect(updated.isCritical).toBe(true);
+      expect(updated.description).toBe('Arrive 30 minutes early');
+
+      // Toggle back to not required.
+      const back = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-series/${series.id}/work-roles/${slot.id}`,
+        headers: auth(seed.adminToken),
+        payload: { isCritical: false },
+      });
+      expect(back.statusCode).toBe(200);
+      expect((back.json() as { isCritical: boolean }).isCritical).toBe(false);
+    });
+
+    it('rejects a work role from another organization', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
+      const otherOrgId = await createOrganization(`Other Org ${randomUUID()}`, {
+        defaultTimezone: 'UTC',
+      });
+      const otherWorkRoleId = (
+        await db
+          .insertInto('work_roles')
+          .values({ name: 'Other Org Role', organization_id: otherOrgId })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-series/${series.id}/work-roles/${slot.id}`,
+        headers: auth(seed.adminToken),
+        payload: { workRoleId: otherWorkRoleId },
+      });
+      expect(response.statusCode).toBe(404);
+    });
+  });
+
+  describe('PATCH /api/v1/event-occurrences/:eventOccurrenceId/work-roles/:workRoleId', () => {
+    it('toggles required and edits the description of an occurrence-level slot', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, {
+        title: 'AV check',
+        occurrenceStart: '2026-10-21T16:00:00.000Z',
+      });
+      expect(slot.occurrenceId).not.toBeNull();
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-occurrences/${slot.occurrenceId as number}/work-roles/${slot.id}`,
+        headers: auth(seed.adminToken),
+        payload: { isCritical: true, description: 'Only for this occurrence' },
+      });
+      expect(response.statusCode).toBe(200);
+      const updated = response.json() as {
+        id: number;
+        occurrenceId: number;
+        isCritical: boolean;
+        description: string;
+      };
+      expect(updated.occurrenceId).toBe(slot.occurrenceId);
+      expect(updated.isCritical).toBe(true);
+      expect(updated.description).toBe('Only for this occurrence');
+
+      // Toggle back to not required.
+      const back = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-occurrences/${slot.occurrenceId as number}/work-roles/${slot.id}`,
+        headers: auth(seed.adminToken),
+        payload: { isCritical: false },
+      });
+      expect(back.statusCode).toBe(200);
+      expect((back.json() as { isCritical: boolean }).isCritical).toBe(false);
+    });
+
+    it('resolves a parent slot reference to its inherited occurrence copy', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const parentSlot = await createWorkRole(seed, series.id, {
+        title: 'Setup crew',
+        description: 'Parent description',
+      });
+      // Materialize the occurrence by adding an occurrence-scoped slot; the
+      // parent slot is inherited into the occurrence on materialization.
+      const occurrenceSlot = await createWorkRole(seed, series.id, {
+        title: 'Extra helper',
+        occurrenceStart: '2026-10-21T16:00:00.000Z',
+      });
+      const occurrenceId = occurrenceSlot.occurrenceId as number;
+      expect(occurrenceId).not.toBeNull();
+
+      // Reference the parent slot through the occurrence endpoint.
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-occurrences/${occurrenceId}/work-roles/${parentSlot.id}`,
+        headers: auth(seed.adminToken),
+        payload: { isCritical: true },
+      });
+      expect(response.statusCode).toBe(200);
+      const updated = response.json() as {
+        id: number;
+        isCritical: boolean;
+        inheritedFromWorkRoleId: number | null;
+      };
+      expect(updated.id).not.toBe(parentSlot.id);
+      expect(updated.inheritedFromWorkRoleId).toBe(parentSlot.id);
+      expect(updated.isCritical).toBe(true);
+
+      // The parent slot itself is unchanged.
+      const listResponse = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series/${series.id}/work-roles`,
+        headers: auth(seed.readerToken),
+      });
+      expect(listResponse.statusCode).toBe(200);
+      const parent = (listResponse.json() as { id: number; isCritical: boolean }[]).find(
+        s => s.id === parentSlot.id,
+      );
+      expect(parent?.isCritical).toBe(false);
+    });
+
+    it('returns 404 when the slot does not exist in the occurrence', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, {
+        title: 'AV check',
+        occurrenceStart: '2026-10-21T16:00:00.000Z',
+      });
+      const otherSeries = await createSeries(seed, {
+        title: 'Other series',
+        start: '2026-10-23T16:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+      });
+      const otherSlot = await createWorkRole(seed, otherSeries.id, { title: 'Other slot' });
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-occurrences/${slot.occurrenceId as number}/work-roles/${otherSlot.id}`,
+        headers: auth(seed.adminToken),
+        payload: { isCritical: true },
+      });
+      expect(response.statusCode).toBe(404);
     });
   });
 
