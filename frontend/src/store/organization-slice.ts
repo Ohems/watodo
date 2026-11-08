@@ -1,5 +1,5 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
-import { api } from '../api/index.js';
+import { organizationsApi } from '../api/index.js';
 import type { RootState } from './index.js';
 import { deleteCurrentUser, logout } from './session.js';
 
@@ -63,7 +63,7 @@ const organizationSlice = createSlice({
  */
 export function selectActiveOrganizationId(state: RootState): string | null {
   const stored = state.organization.activeOrganizationId;
-  const { data } = api.endpoints.getMyOrganizations.select()(state);
+  const { data } = organizationsApi.endpoints.getMyOrganizations.select()(state);
   if (data === undefined) return null;
   return data.some(organization => organization.id === stored) ? stored : (data[0]?.id ?? null);
 }
@@ -73,7 +73,7 @@ export function selectActiveOrganizationId(state: RootState): string | null {
  * organization is known and org-scoped queries can safely fire.
  */
 export function selectIsOrganizationLoaded(state: RootState): boolean {
-  const { data, isLoading } = api.endpoints.getMyOrganizations.select()(state);
+  const { data, isLoading } = organizationsApi.endpoints.getMyOrganizations.select()(state);
   return !isLoading && data !== undefined;
 }
 

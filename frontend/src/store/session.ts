@@ -1,5 +1,5 @@
 import { createAsyncThunk } from '@reduxjs/toolkit';
-import { api, clearToken } from '../api/index.js';
+import { api, authApi, clearToken, usersApi } from '../api/index.js';
 import type { AppDispatch } from './index.js';
 
 /**
@@ -11,7 +11,7 @@ export const logout = createAsyncThunk<void, void, { dispatch: AppDispatch }>(
   'user/logout',
   async (_, { dispatch }) => {
     try {
-      await dispatch(api.endpoints.logout.initiate()).unwrap();
+      await dispatch(authApi.endpoints.logout.initiate()).unwrap();
     } catch {
       // Log out locally even when the server call fails.
     }
@@ -24,7 +24,7 @@ export const logout = createAsyncThunk<void, void, { dispatch: AppDispatch }>(
 export const deleteCurrentUser = createAsyncThunk<void, void, { dispatch: AppDispatch }>(
   'user/deleteCurrentUser',
   async (_, { dispatch }) => {
-    await dispatch(api.endpoints.deleteCurrentUser.initiate()).unwrap();
+    await dispatch(usersApi.endpoints.deleteCurrentUser.initiate()).unwrap();
     clearToken();
     dispatch(api.util.resetApiState());
   },

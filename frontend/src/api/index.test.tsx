@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { type MockApi, mockApi } from '../test/api-mock.js';
 import { createTestStore, renderWithProviders } from '../test/test-utils.js';
 import type { User } from '../types/index.js';
-import { api, getApiErrorMessage, getLoginUrl, useGetCurrentUserQuery } from './index.js';
+import { getApiErrorMessage, getLoginUrl, useGetCurrentUserQuery, usersApi } from './index.js';
 
 const mockUser: User = {
   id: 'u1',
@@ -77,7 +77,7 @@ describe('api', () => {
     expect(await screen.findByText('Test User')).toBeInTheDocument();
     expect(mock.callCount('GET', '/api/v1/users/@me')).toBe(1);
 
-    await store.dispatch(api.endpoints.updateCurrentUser.initiate({ name: 'Renamed User' }));
+    await store.dispatch(usersApi.endpoints.updateCurrentUser.initiate({ name: 'Renamed User' }));
 
     await waitFor(() => {
       expect(mock.callCount('GET', '/api/v1/users/@me')).toBe(2);

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { api } from '../api/index.js';
+import { organizationsApi } from '../api/index.js';
 import { createTestStore } from '../test/test-utils.js';
 import type { Organization } from '../types/index.js';
 import organizationReducer, {
@@ -75,7 +75,9 @@ describe('selectActiveOrganizationId', () => {
 
   async function seedOrganizations(organizations: Organization[]) {
     const store = createTestStore();
-    await store.dispatch(api.util.upsertQueryData('getMyOrganizations', undefined, organizations));
+    await store.dispatch(
+      organizationsApi.util.upsertQueryData('getMyOrganizations', undefined, organizations),
+    );
     return store;
   }
 
@@ -115,7 +117,9 @@ describe('selectIsOrganizationLoaded', () => {
 
   async function seedOrganizations(organizations: Organization[]) {
     const store = createTestStore();
-    await store.dispatch(api.util.upsertQueryData('getMyOrganizations', undefined, organizations));
+    await store.dispatch(
+      organizationsApi.util.upsertQueryData('getMyOrganizations', undefined, organizations),
+    );
     return store;
   }
 

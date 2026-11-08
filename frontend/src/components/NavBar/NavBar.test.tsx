@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { api } from '../../api/index.js';
+import { organizationsApi } from '../../api/index.js';
 import { type MockApi, mockApi } from '../../test/api-mock.js';
 import { renderWithProviders } from '../../test/test-utils.js';
 import type { Organization, User } from '../../types/index.js';
@@ -68,7 +68,9 @@ describe('NavBar', () => {
 
     expect(await screen.findByText('Test User')).toBeInTheDocument();
     await waitFor(() => {
-      expect(api.endpoints.getMyOrganizations.select()(store.getState()).isSuccess).toBe(true);
+      expect(
+        organizationsApi.endpoints.getMyOrganizations.select()(store.getState()).isSuccess,
+      ).toBe(true);
     });
     expect(screen.queryByRole('combobox', { name: 'Select organisation' })).not.toBeInTheDocument();
   });
