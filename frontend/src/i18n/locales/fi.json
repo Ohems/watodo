@@ -37,6 +37,7 @@
     "orgUsers": "Käyttäjät",
     "profile": "Profiili",
     "account": "Tili",
+    "absences": "Poissaolot",
     "logout": "Kirjaudu ulos",
     "openSettings": "Avaa asetukset",
     "navigationMenu": "navigaatiovalikko",
@@ -55,7 +56,10 @@
     "manager": "Vastaava",
     "slotsFilled": "Paikat {{filled}}/{{total}}",
     "slotsUnfilledCritical": "Kriittiset paikat täyttämättä",
-    "missingManagedCritical": "Puuttuu alueeltasi: {{slots}}"
+    "missingManagedCritical": "Puuttuu alueeltasi: {{slots}}",
+    "quickAddAbsence": "Lisää poissaolo",
+    "quickNewEvent": "Uusi tapahtuma",
+    "quickCalendar": "Kalenteri"
   },
   "login": {
     "signInToContinue": "Jatka kirjautumalla sisään",
@@ -98,7 +102,8 @@
     "workRoles": "Työroolit",
     "eventSeries": "Tapahtumasarjat",
     "manager": "Vastaava",
-    "canManageTeam": "Voi hallita tätä tiimiä"
+    "canManageTeam": "Voi hallita tätä tiimiä",
+    "absentNow": "Poissa"
   },
   "sites": {
     "title": "Toimipaikat",
@@ -157,6 +162,23 @@
     "name": "Nimi",
     "email": "Sähköposti",
     "description": "Kuvaus"
+  },
+  "absences": {
+    "title": "Poissaolot",
+    "addAbsence": "Lisää poissaolo",
+    "newAbsence": "Uusi poissaolo",
+    "editAbsence": "Muokkaa poissaoloa",
+    "list": "Omat poissaolot",
+    "noAbsences": "Ei poissaoloja vielä",
+    "type": "Tyyppi",
+    "typeSick": "Sairas",
+    "typeAway": "Poissa",
+    "typeOther": "Muu",
+    "description": "Kuvaus",
+    "dates": "Aikaväli",
+    "startDate": "Alkupäivä",
+    "endDate": "Loppupäivä",
+    "endBeforeStart": "Loppupäivä ei voi olla ennen alkupäivää"
   },
   "orgUsers": {
     "title": "Käyttäjät",
@@ -256,6 +278,7 @@
     "seriesWide": "Koko sarja",
     "assignUser": "Määritä käyttäjä",
     "assign": "Määritä",
+    "absent": "poissa",
     "unassignUser": "Poista {{name}} tästä paikasta",
     "comments": "Kommentit",
     "addComment": "Lisää kommentti",

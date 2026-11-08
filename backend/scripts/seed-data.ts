@@ -251,6 +251,7 @@ const SUMMARY_TABLES = [
   'event_work_roles',
   'event_work_role_assignments',
   'event_comments',
+  'absences',
 ] as const;
 
 const now = new Date();
@@ -755,6 +756,21 @@ async function addNotification(
   await tx
     .insertInto('notifications')
     .values({ user_id: userId, organization_id: organizationId, title, body, is_read: isRead })
+    .execute();
+}
+
+/** Inserts an absence for a user (dates are inclusive calendar days, UTC). */
+async function addAbsence(
+  tx: Tx,
+  userId: string,
+  type: 'sick' | 'away' | 'other',
+  description: string,
+  startDate: Date,
+  endDate: Date,
+): Promise<void> {
+  await tx
+    .insertInto('absences')
+    .values({ user_id: userId, type, description, start_date: startDate, end_date: endDate })
     .execute();
 }
 
@@ -1965,6 +1981,30 @@ export async function seedTestData(tx: Tx): Promise<void> {
   );
 
   logger.info(`Seeded event series for "${secondOrganization.name}"`);
+
+  // Absences: one currently active, one upcoming and one in the past.
+  const utcDay = (offsetDays: number): Date =>
+    new Date(Date.UTC(thisYear, thisMonth, now.getUTCDate() + offsetDays));
+  // mockUsersOne[3] = Jukka Nieminen: sick right now.
+  await addAbsence(tx, mockUsersOne[3].id, 'sick', 'Flu, staying home.', utcDay(-1), utcDay(3));
+  // mockUsersOne[5] = Ville Lehtonen: away next month.
+  await addAbsence(
+    tx,
+    mockUsersOne[5].id,
+    'away',
+    'Family vacation.',
+    nextMonthStart,
+    new Date(nextMonthStart.getTime() + 6 * 24 * 60 * 60 * 1000),
+  );
+  // mockUsersTwo[2]: a past absence.
+  await addAbsence(
+    tx,
+    mockUsersTwo[2].id,
+    'other',
+    'Moved house.',
+    new Date(Date.UTC(prevYear, prevMonth, 10)),
+    new Date(Date.UTC(prevYear, prevMonth, 12)),
+  );
 
   logger.info('Test data seeded successfully:');
   for (const table of SUMMARY_TABLES) {

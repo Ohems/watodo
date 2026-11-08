@@ -37,6 +37,7 @@
     "orgUsers": "Users",
     "profile": "Profile",
     "account": "Account",
+    "absences": "Absences",
     "logout": "Logout",
     "openSettings": "Open settings",
     "navigationMenu": "navigation menu",
@@ -55,7 +56,10 @@
     "manager": "Manager",
     "slotsFilled": "Slots {{filled}}/{{total}}",
     "slotsUnfilledCritical": "Unfilled critical slots",
-    "missingManagedCritical": "Missing in your area: {{slots}}"
+    "missingManagedCritical": "Missing in your area: {{slots}}",
+    "quickAddAbsence": "Add absence",
+    "quickNewEvent": "New event",
+    "quickCalendar": "Calendar"
   },
   "login": {
     "signInToContinue": "Sign in to continue",
@@ -98,7 +102,8 @@
     "workRoles": "Work roles",
     "eventSeries": "Event series",
     "manager": "Manager",
-    "canManageTeam": "Can manage this team"
+    "canManageTeam": "Can manage this team",
+    "absentNow": "Absent"
   },
   "sites": {
     "title": "Sites",
@@ -157,6 +162,23 @@
     "name": "Name",
     "email": "Email",
     "description": "Description"
+  },
+  "absences": {
+    "title": "Absences",
+    "addAbsence": "Add absence",
+    "newAbsence": "New absence",
+    "editAbsence": "Edit absence",
+    "list": "My absences",
+    "noAbsences": "No absences yet",
+    "type": "Type",
+    "typeSick": "Sick",
+    "typeAway": "Away",
+    "typeOther": "Other",
+    "description": "Description",
+    "dates": "Dates",
+    "startDate": "Start date",
+    "endDate": "End date",
+    "endBeforeStart": "End date must not be before the start date"
   },
   "orgUsers": {
     "title": "Users",
@@ -256,6 +278,7 @@
     "seriesWide": "Whole series",
     "assignUser": "Assign user",
     "assign": "Assign",
+    "absent": "absent",
     "unassignUser": "Remove {{name}} from this slot",
     "comments": "Comments",
     "addComment": "Add comment",

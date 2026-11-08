@@ -6,6 +6,7 @@ import { Route, Routes } from 'react-router-dom';
 import { useGetCurrentUserQuery } from './api/index.js';
 import NavBar from './components/NavBar/NavBar.js';
 import i18n from './i18n/index.js';
+import AbsencesPage from './pages/Absences/AbsencesPage.js';
 import AccountPage from './pages/Account/Account.js';
 import ErrorPage from './pages/ErrorPage/ErrorPage.js';
 import CalendarPage from './pages/Events/CalendarPage.js';
@@ -77,6 +78,7 @@ function AppContent() {
         <Route path="/organization/work-roles" element={<OrgWorkRolesPage />} />
         <Route path="/organization/work-roles/:workRoleId" element={<WorkRoleConfigPage />} />
         <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/absences" element={<AbsencesPage />} />
         <Route path="/organization/users" element={<OrgUsersPage />} />
         <Route path="/organization/users/:userId" element={<OrgUserProfilePage />} />
         <Route path="/users" element={<UserList />} />

@@ -1,5 +1,8 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import type {
+  Absence,
+  AbsencePush,
+  AbsenceUpdate,
   AuthAccount,
   AuthProviderInfo,
   Calendar,
@@ -173,6 +176,7 @@ export const api = createApi({
     'EventSeriesManagement',
     'EventTypes',
     'UserEventAssignments',
+    'Absence',
   ],
   endpoints: build => ({
     // --- Auth ---
@@ -211,8 +215,8 @@ export const api = createApi({
       providesTags: result =>
         result ? ['CurrentUser', { type: 'User', id: result.id }] : ['CurrentUser'],
     }),
-    getUserList: build.query<UserListItem[], void>({
-      query: () => '/api/v1/users/list',
+    getUserList: build.query<UserListItem[], { start?: string; end?: string } | undefined>({
+      query: query => withQuery('/api/v1/users/list', query ?? {}),
       providesTags: ['UserList'],
     }),
     updateUser: build.mutation<User, { userId: string; data: UserPush }>({
@@ -243,6 +247,32 @@ export const api = createApi({
     unlinkAuthAccount: build.mutation<void, string>({
       query: provider => ({ url: `/api/v1/users/@me/auth-accounts/${provider}`, method: 'DELETE' }),
       invalidatesTags: ['AuthAccounts'],
+    }),
+
+    // --- Absences (self-service, current user) ---
+
+    getMyAbsences: build.query<Absence[], { start?: string; end?: string } | undefined>({
+      query: query => withQuery('/api/v1/users/@me/absences', query ?? {}),
+      providesTags: ['Absence'],
+    }),
+    createAbsence: build.mutation<Absence, AbsencePush>({
+      query: data => ({ url: '/api/v1/users/@me/absences', method: 'POST', body: data }),
+      invalidatesTags: ['Absence', 'UserList', 'Occurrences', 'UserEventAssignments'],
+    }),
+    updateAbsence: build.mutation<Absence, { absenceId: number; data: AbsenceUpdate }>({
+      query: ({ absenceId, data }) => ({
+        url: `/api/v1/users/@me/absences/${absenceId}`,
+        method: 'PATCH',
+        body: data,
+      }),
+      invalidatesTags: ['Absence', 'UserList', 'Occurrences', 'UserEventAssignments'],
+    }),
+    deleteAbsence: build.mutation<void, number>({
+      query: absenceId => ({
+        url: `/api/v1/users/@me/absences/${absenceId}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['Absence', 'UserList'],
     }),
 
     // --- Organizations ---
@@ -1165,6 +1195,10 @@ export const {
   useGetUserQuery,
   useGetCurrentUserQuery,
   useGetUserListQuery,
+  useGetMyAbsencesQuery,
+  useCreateAbsenceMutation,
+  useUpdateAbsenceMutation,
+  useDeleteAbsenceMutation,
   useUpdateUserMutation,
   useDeleteUserMutation,
   useUpdateCurrentUserMutation,

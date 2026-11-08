@@ -190,6 +190,22 @@ export interface CertificationWorkRoles {
   created_at: Generated<Date>;
 }
 
+export type AbsenceType = 'sick' | 'away' | 'other';
+
+/** A personal absence period (sick leave, vacation, ...). Dates are inclusive calendar days. */
+export interface Absences {
+  id: Generated<number>;
+  user_id: string;
+  type: AbsenceType;
+  description: Generated<string>;
+  /** First day of the absence (inclusive). */
+  start_date: Date;
+  /** Last day of the absence (inclusive). */
+  end_date: Date;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
 export interface Notifications {
   id: Generated<number>;
   user_id: string;
@@ -328,6 +344,7 @@ export interface Database {
   user_work_roles: UserWorkRoles;
   user_certifications: UserCertifications;
   certification_work_roles: CertificationWorkRoles;
+  absences: Absences;
   notifications: Notifications;
   calendars: Calendars;
   event_types: EventTypes;
@@ -403,6 +420,10 @@ export type UserCertificationUpdate = Updateable<UserCertifications>;
 
 export type CertificationWorkRole = Selectable<CertificationWorkRoles>;
 export type NewCertificationWorkRole = Insertable<CertificationWorkRoles>;
+
+export type Absence = Selectable<Absences>;
+export type NewAbsence = Insertable<Absences>;
+export type AbsenceUpdate = Updateable<Absences>;
 
 export type Notification = Selectable<Notifications>;
 export type NewNotification = Insertable<Notifications>;

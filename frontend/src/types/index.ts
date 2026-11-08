@@ -45,6 +45,8 @@ export interface AuthAccount {
 export interface UserListItem {
   id: string;
   name: string;
+  /** True when the user has an absence overlapping the requested range. */
+  hasAbsence: boolean;
 }
 
 export interface AuthProviderInfo {
@@ -347,6 +349,8 @@ export interface TeamMember {
   userEmail: string;
   /** When true, the member can manage this specific team. */
   isManager: boolean;
+  /** True when the member currently has an active absence. */
+  hasActiveAbsence: boolean;
   createdAt: string;
 }
 
@@ -502,6 +506,34 @@ export interface UserCertificationUpdate {
   certificationDate?: string | null;
   validUntilDate?: string | null;
 }
+
+// --- Absences ---
+
+export type AbsenceType = 'sick' | 'away' | 'other';
+
+export interface Absence {
+  id: number;
+  userId: string;
+  type: AbsenceType;
+  description: string;
+  /** First day of the absence (inclusive), ISO date. */
+  startDate: string;
+  /** Last day of the absence (inclusive), ISO date. */
+  endDate: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AbsencePush {
+  type: AbsenceType;
+  description?: string;
+  /** ISO date (YYYY-MM-DD). */
+  startDate: string;
+  /** ISO date (YYYY-MM-DD), inclusive. */
+  endDate: string;
+}
+
+export type AbsenceUpdate = Partial<AbsencePush>;
 
 // --- Notifications ---
 

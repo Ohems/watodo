@@ -71,7 +71,11 @@ function EventOccurrencePage() {
     isLoading: loading,
     error: detailError,
   } = useGetOccurrenceDetailByRefQuery(valid ? (occurrenceRef as string) : skipToken);
-  const { data: userList = [] } = useGetUserListQuery(valid ? undefined : skipToken);
+  // The user list is fetched with the occurrence's time range so users with
+  // an overlapping absence are marked (hasAbsence) and sorted last below.
+  const { data: userList = [] } = useGetUserListQuery(
+    detail ? { start: detail.occurrence.start, end: detail.occurrence.end } : skipToken,
+  );
   // Work roles are organization-scoped: always offer the ones of the
   // organization that owns this event, not of the currently active one.
   const eventOrganizationId = detail?.occurrence.organizationId ?? activeOrganizationId;
@@ -502,7 +506,24 @@ function EventOccurrencePage() {
                         placeholder={t('events.assignUser')}
                         data={userList
                           .filter(user => !slot.assignments.some(a => a.userId === user.id))
+                          // Users with an absence for this occurrence are
+                          // sorted last (the sort is stable, so the name order
+                          // is kept within both groups).
+                          .sort((a, b) => Number(a.hasAbsence) - Number(b.hasAbsence))
                           .map(user => ({ value: user.id, label: user.name }))}
+                        renderOption={({ option }) => {
+                          const user = userList.find(u => u.id === option.value);
+                          return (
+                            <Group gap="xs" wrap="nowrap">
+                              <span>{option.label}</span>
+                              {user?.hasAbsence && (
+                                <Badge size="xs" color="orange" variant="light">
+                                  {t('events.absent')}
+                                </Badge>
+                              )}
+                            </Group>
+                          );
+                        }}
                         value={assignUserIds[slot.id] ?? null}
                         onChange={value =>
                           setAssignUserIds(prev => ({ ...prev, [slot.id]: value ?? '' }))

@@ -56,7 +56,7 @@ function TeamManagementPage() {
     activeOrganizationId && teamId ? { organizationId: activeOrganizationId, teamId } : skipToken;
   const { data: team, isLoading: loading, error: teamError } = useGetTeamQuery(teamArg);
   const { data: members = [] } = useGetTeamMembersQuery(teamArg);
-  const { data: allUsers = [] } = useGetUserListQuery();
+  const { data: allUsers = [] } = useGetUserListQuery(undefined);
   const { data: workRoles = [] } = useGetAllWorkRolesQuery(activeOrganizationId ?? skipToken);
   const { data: seriesData } = useGetEventSeriesManagementListQuery(
     activeOrganizationId
@@ -366,6 +366,11 @@ function TeamManagementPage() {
                         {member.userName.charAt(0).toUpperCase()}
                       </Avatar>
                       <Text size="sm">{member.userName}</Text>
+                      {member.hasActiveAbsence && (
+                        <Badge color="orange" variant="light" size="sm">
+                          {t('teams.absentNow')}
+                        </Badge>
+                      )}
                     </Group>
                   </Table.Td>
                   <Table.Td>

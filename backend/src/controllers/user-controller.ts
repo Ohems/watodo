@@ -2,6 +2,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { getAuth } from '../middleware/auth.js';
 import {
   providerSchema,
+  userListQuerySchema,
   userPushSchema,
   userQuerySchema,
   userSelfUpdateSchema,
@@ -44,10 +45,11 @@ export async function getCurrentUserHandler(
 }
 
 export async function getUserListHandler(
-  _request: FastifyRequest,
+  request: FastifyRequest<{ Querystring: unknown }>,
   reply: FastifyReply,
 ): Promise<void> {
-  const userList = await getUserList();
+  const query = userListQuerySchema.parse(request.query ?? {});
+  const userList = await getUserList(query);
   return reply.status(200).send(userList);
 }
 

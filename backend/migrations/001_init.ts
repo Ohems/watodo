@@ -304,6 +304,27 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
   pgm.createIndex('certification_work_roles', 'work_role_id');
   pgm.createIndex('certification_work_roles', 'certification_id');
 
+  // Absences: a personal period during which a user is not available (e.g.
+  // sick leave or vacation). `start_date` and `end_date` are inclusive
+  // calendar days. When an absence overlaps an event occurrence the user is
+  // assigned to, the assignment is removed and the event's managers are
+  // notified.
+  pgm.createTable('absences', {
+    id: { type: 'serial', primaryKey: true },
+    user_id: { type: 'uuid', notNull: true, references: 'users', onDelete: 'CASCADE' },
+    type: { type: 'text', notNull: true },
+    description: { type: 'text', notNull: true, default: '' },
+    /** First day of the absence (inclusive). */
+    start_date: { type: 'date', notNull: true },
+    /** Last day of the absence (inclusive). */
+    end_date: { type: 'date', notNull: true },
+    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+    updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+  });
+  pgm.addConstraint('absences', 'absences_type_check', "CHECK (type IN ('sick', 'away', 'other'))");
+  pgm.addConstraint('absences', 'absences_date_range_valid', 'CHECK (end_date >= start_date)');
+  pgm.createIndex('absences', 'user_id');
+
   // Notifications (per-user)
   pgm.createTable('notifications', {
     id: { type: 'serial', primaryKey: true },
@@ -604,6 +625,7 @@ export async function down(pgm: MigrationBuilder): Promise<void> {
   pgm.dropTable('roles');
   pgm.dropTable('event_types');
   pgm.dropTable('calendars');
+  pgm.dropTable('absences');
   pgm.dropTable('notifications');
   pgm.dropTable('certification_work_roles');
   pgm.dropTable('user_certifications');

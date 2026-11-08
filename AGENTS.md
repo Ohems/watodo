@@ -205,7 +205,7 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 - `POST /api/v1/auth/:provider/link` - Start an OAuth flow that connects another login method to the current account (auth required)
 - `GET /api/v1/auth/logout` - Logout
 - `GET /api/v1/users` - List users with permissions (paginated, `user-management:read`)
-- `GET /api/v1/users/list` - Simple user list (id + name, no auth)
+- `GET /api/v1/users/list` - Simple user list (id + name, no auth). With `start`/`end` ISO-datetime query params, each item also has `hasAbsence` (an absence overlaps that range), used to mark unavailable users in the assignment dropdown
 - `GET /api/v1/users/@me` - Current user with permissions (auth required)
 - `PATCH /api/v1/users/@me` - Update own personal information (auth required)
 - `DELETE /api/v1/users/@me` - Delete own account (auth required)
@@ -258,7 +258,7 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 - `GET /api/v1/organizations/:organizationId/teams/:teamId` - Get team (`team-management:read`)
 - `PATCH /api/v1/organizations/:organizationId/teams/:teamId` - Update team, including leader/work roles/event series (`team-management:write`)
 - `DELETE /api/v1/organizations/:organizationId/teams/:teamId` - Delete team (`team-management:write`)
-- `GET /api/v1/organizations/:organizationId/teams/:teamId/members` - List team members (`team-management:read`)
+- `GET /api/v1/organizations/:organizationId/teams/:teamId/members` - List team members, each with `hasActiveAbsence` (`team-management:read`)
 - `POST /api/v1/organizations/:organizationId/teams/:teamId/members` - Add team member, optionally with the manager toggle (`team-management:write`)
 - `PATCH /api/v1/organizations/:organizationId/teams/:teamId/members/:userId` - Update team member, e.g. toggle `isManager` (`team-management:write`)
 - `DELETE /api/v1/organizations/:organizationId/teams/:teamId/members/:userId` - Remove team member (`team-management:write`)

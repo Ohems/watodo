@@ -10,6 +10,7 @@ import type {
   TeamPush,
   TeamUpdate,
 } from '../schemas/index.js';
+import { usersWithActiveAbsence } from './absence-service.js';
 
 const logger = createLogger('team-service');
 
@@ -21,6 +22,8 @@ export interface TeamMemberResponse {
   userEmail: string;
   /** When true, the member can manage this specific team. */
   isManager: boolean;
+  /** True when the member currently has an active absence. */
+  hasActiveAbsence: boolean;
   createdAt: string;
 }
 
@@ -456,6 +459,7 @@ export async function listTeamMembers(teamId: string): Promise<TeamMemberRespons
     .orderBy('users.name', 'asc')
     .execute();
 
+  const activeAbsences = await usersWithActiveAbsence(rows.map(row => row.user_id));
   return rows.map(row => ({
     id: row.id,
     teamId: row.team_id,
@@ -463,6 +467,7 @@ export async function listTeamMembers(teamId: string): Promise<TeamMemberRespons
     userName: row.user_name,
     userEmail: row.user_email,
     isManager: row.is_manager,
+    hasActiveAbsence: activeAbsences.has(row.user_id),
     createdAt: row.created_at.toISOString(),
   }));
 }
@@ -502,6 +507,7 @@ export async function addTeamMember(
       .values({ team_id: teamId, user_id: data.userId, is_manager: data.isManager ?? false })
       .returningAll()
       .executeTakeFirstOrThrow();
+    const activeAbsences = await usersWithActiveAbsence([user.id]);
     return {
       id: member.id,
       teamId: member.team_id,
@@ -509,6 +515,7 @@ export async function addTeamMember(
       userName: user.name,
       userEmail: user.email,
       isManager: member.is_manager,
+      hasActiveAbsence: activeAbsences.has(user.id),
       createdAt: member.created_at.toISOString(),
     };
   } catch (error) {
@@ -549,6 +556,7 @@ export async function updateTeamMember(
     .select(['name', 'email'])
     .where('id', '=', userId)
     .executeTakeFirstOrThrow();
+  const activeAbsences = await usersWithActiveAbsence([userId]);
   return {
     id: member.id,
     teamId: member.team_id,
@@ -556,6 +564,7 @@ export async function updateTeamMember(
     userName: user.name,
     userEmail: user.email,
     isManager: member.is_manager,
+    hasActiveAbsence: activeAbsences.has(userId),
     createdAt: member.created_at.toISOString(),
   };
 }

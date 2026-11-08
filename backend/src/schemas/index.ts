@@ -421,6 +421,42 @@ export const certificationWorkRoleParamsSchema = z.object({
   certificationId: z.coerce.number().int(),
 });
 
+// --- Absences ---
+
+export const absenceTypeSchema = z.enum(['sick', 'away', 'other']);
+
+const absenceBaseSchema = z.object({
+  type: absenceTypeSchema,
+  description: z.string().optional(),
+  /** First day of the absence (inclusive), ISO date. */
+  startDate: z.iso.date(),
+  /** Last day of the absence (inclusive), ISO date. */
+  endDate: z.iso.date(),
+});
+
+export const absencePushSchema = absenceBaseSchema.refine(data => data.endDate >= data.startDate, {
+  message: 'End date must not be before the start date',
+  path: ['endDate'],
+});
+
+export const absenceUpdateSchema = absenceBaseSchema.partial();
+
+/** Optional range filter for the absence list (overlaps [start, end]). */
+export const absenceQuerySchema = z.object({
+  start: z.iso.date().optional(),
+  end: z.iso.date().optional(),
+});
+
+export const absenceParamsSchema = z.object({
+  absenceId: z.coerce.number().int(),
+});
+
+/** Optional occurrence range for the simple user list; marks users absent in the range. */
+export const userListQuerySchema = z.object({
+  start: z.iso.datetime().optional(),
+  end: z.iso.datetime().optional(),
+});
+
 // --- Notifications ---
 
 export const notificationUpdateSchema = z.object({
@@ -491,6 +527,11 @@ export type UserWorkRoleUpdate = z.infer<typeof userWorkRoleUpdateSchema>;
 export type UserCertificationPush = z.infer<typeof userCertificationPushSchema>;
 export type UserCertificationUpdate = z.infer<typeof userCertificationUpdateSchema>;
 export type CertificationWorkRolePush = z.infer<typeof certificationWorkRolePushSchema>;
+export type AbsenceType = z.infer<typeof absenceTypeSchema>;
+export type AbsencePush = z.infer<typeof absencePushSchema>;
+export type AbsenceUpdate = z.infer<typeof absenceUpdateSchema>;
+export type AbsenceQuery = z.infer<typeof absenceQuerySchema>;
+export type UserListQuery = z.infer<typeof userListQuerySchema>;
 export type NotificationUpdate = z.infer<typeof notificationUpdateSchema>;
 export type TableQuery = z.infer<typeof tableQuerySchema>;
 export type EventSeriesListQuery = z.infer<typeof eventSeriesListQuerySchema>;

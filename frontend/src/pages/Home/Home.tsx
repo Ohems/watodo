@@ -11,7 +11,13 @@ import {
   Text,
   Title,
 } from '@mantine/core';
-import { IconBell, IconCalendarEvent, IconCheck } from '@tabler/icons-react';
+import {
+  IconBell,
+  IconCalendarEvent,
+  IconCalendarPlus,
+  IconCheck,
+  IconMinus,
+} from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -21,6 +27,7 @@ import {
   useMarkAllNotificationsReadMutation,
   useMarkNotificationReadMutation,
 } from '../../api/index.js';
+import { AbsenceDialog } from '../../components/AbsenceDialog/index.js';
 import type { EventOccurrence, Notification, OccurrenceSlotStatus } from '../../types/index.js';
 import { occurrenceRef } from '../../types/index.js';
 
@@ -71,6 +78,25 @@ function Home() {
   });
   const [markAllRead] = useMarkAllNotificationsReadMutation();
   const [markRead] = useMarkNotificationReadMutation();
+  const [absenceDialogOpen, setAbsenceDialogOpen] = useState(false);
+
+  const quickActions = [
+    {
+      label: t('home.quickAddAbsence'),
+      icon: <IconMinus size={16} />,
+      onClick: () => setAbsenceDialogOpen(true),
+    },
+    {
+      label: t('home.quickNewEvent'),
+      icon: <IconCalendarPlus size={16} />,
+      onClick: () => navigate('/events/management'),
+    },
+    {
+      label: t('home.quickCalendar'),
+      icon: <IconCalendarEvent size={16} />,
+      onClick: () => navigate('/events/calendar'),
+    },
+  ];
 
   const notifications = notificationsData?.items ?? [];
   const unreadCount = notificationsData?.unreadCount ?? 0;
@@ -111,6 +137,20 @@ function Home() {
       </Title>
 
       <Stack gap="lg">
+        {/* Quick actions */}
+        <Group gap="sm">
+          {quickActions.map(action => (
+            <Button
+              key={action.label}
+              variant="light"
+              leftSection={action.icon}
+              onClick={action.onClick}
+            >
+              {action.label}
+            </Button>
+          ))}
+        </Group>
+
         {/* Notifications card */}
         <Card shadow="sm" withBorder>
           <Group justify="space-between" mb="md">
@@ -266,6 +306,12 @@ function Home() {
           )}
         </Card>
       </Stack>
+
+      <AbsenceDialog
+        opened={absenceDialogOpen}
+        absence={null}
+        onClose={() => setAbsenceDialogOpen(false)}
+      />
     </Box>
   );
 }
