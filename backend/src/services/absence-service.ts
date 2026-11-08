@@ -372,8 +372,15 @@ async function removeOverlappingAssignmentsAndNotify(
         .values({
           user_id: managerId,
           organization_id: organizationId,
-          title: 'Assignment removed due to absence',
-          body: `${userName} was removed from "${occurrence.title}" (${startText}) because of an absence (${absence.type}, ${absence.startDate} - ${absence.endDate}).`,
+          message_key: 'assignmentRemovedDueToAbsence',
+          params: {
+            userName,
+            eventTitle: occurrence.title,
+            start: startText,
+            absenceType: absence.type,
+            absenceStart: absence.startDate,
+            absenceEnd: absence.endDate,
+          },
         })
         .execute();
     }

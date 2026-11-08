@@ -33,8 +33,8 @@ async function seed(): Promise<Seed> {
     .values({
       user_id: user.id,
       organization_id: organizationId,
-      title: 'You have been assigned a work role',
-      body: 'You are assigned to "Room setup".',
+      message_key: 'workRoleAssigned',
+      params: { role: 'Room setup', eventTitle: 'Weekly Community Meeting' },
       is_read: false,
     })
     .returningAll()
@@ -44,8 +44,8 @@ async function seed(): Promise<Seed> {
     .values({
       user_id: user.id,
       organization_id: null,
-      title: 'Welcome to Watodo',
-      body: 'Your account is ready.',
+      message_key: 'welcome',
+      params: {},
       is_read: false,
     })
     .returningAll()
@@ -65,7 +65,8 @@ interface NotificationResponse {
   id: number;
   organizationId: string | null;
   organizationName: string | null;
-  title: string;
+  messageKey: string;
+  params: Record<string, unknown>;
   isRead: boolean;
 }
 
@@ -107,9 +108,17 @@ describe('Notifications API', () => {
       expect(organizationNotification).toBeDefined();
       expect(organizationNotification?.organizationId).toBe(seedData.organizationId);
       expect(organizationNotification?.organizationName).toBe(seedData.organizationName);
+      // The message is language-neutral: a catalog key plus params, rendered
+      // client-side (or at send time for email/push) in the user's language.
+      expect(organizationNotification?.messageKey).toBe('workRoleAssigned');
+      expect(organizationNotification?.params).toEqual({
+        role: 'Room setup',
+        eventTitle: 'Weekly Community Meeting',
+      });
       expect(personalNotification).toBeDefined();
       expect(personalNotification?.organizationId).toBeNull();
       expect(personalNotification?.organizationName).toBeNull();
+      expect(personalNotification?.messageKey).toBe('welcome');
     });
 
     it('returns 401 without a token', async () => {
@@ -131,6 +140,38 @@ describe('Notifications API', () => {
       expect(body.isRead).toBe(true);
       expect(body.organizationId).toBe(seedData.organizationId);
       expect(body.organizationName).toBe(seedData.organizationName);
+    });
+  });
+
+  describe('GET /api/v1/locales/:lng', () => {
+    it('serves the notification message bundle of a supported language without auth', async () => {
+      const response = await app.inject({ method: 'GET', url: '/api/v1/locales/fi' });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as {
+        lng: string;
+        notifications: Record<string, { title: string; body: string }>;
+      };
+      expect(body.lng).toBe('fi');
+      expect(body.notifications.workRoleAssigned.title).toBe('Sinut on määrätty työrooliin');
+      expect(body.notifications.workRoleAssigned.body).toContain('{{role}}');
+      expect(body.notifications.welcome.title).toBeTruthy();
+    });
+
+    it('serves the English bundles', async () => {
+      for (const lng of ['en-GB', 'en-US']) {
+        const response = await app.inject({ method: 'GET', url: `/api/v1/locales/${lng}` });
+        expect(response.statusCode).toBe(200);
+        const body = response.json() as {
+          notifications: Record<string, { title: string; body: string }>;
+        };
+        expect(body.notifications.upcomingEvent.body).toContain('{{eventTitle}}');
+      }
+    });
+
+    it('rejects an unsupported language', async () => {
+      const response = await app.inject({ method: 'GET', url: '/api/v1/locales/de' });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toBe('Validation error');
     });
   });
 });

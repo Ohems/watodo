@@ -1,6 +1,7 @@
 import { db } from '../database.js';
 import type { Notification } from '../db/types.js';
-import { notFound } from '../http-error.js';
+import { badRequest, notFound } from '../http-error.js';
+import { isNotificationMessageKey, notificationMessageParams } from '../i18n/messages.js';
 import { createLogger } from '../logger.js';
 import type { NotificationUpdate, TableQuery } from '../schemas/index.js';
 
@@ -11,8 +12,10 @@ export interface NotificationResponse {
   userId: string;
   organizationId: string | null;
   organizationName: string | null;
-  title: string;
-  body: string;
+  /** Language-neutral message key; rendered per user language by the client. */
+  messageKey: string;
+  /** Structured params interpolated into the message template. */
+  params: Record<string, unknown>;
   isRead: boolean;
   createdAt: string;
 }
@@ -33,8 +36,8 @@ function serializeNotification(notification: NotificationRow): NotificationRespo
     userId: notification.user_id,
     organizationId: notification.organization_id,
     organizationName: notification.organization_name,
-    title: notification.title,
-    body: notification.body,
+    messageKey: notification.message_key,
+    params: notification.params,
     isRead: notification.is_read,
     createdAt: notification.created_at.toISOString(),
   };
@@ -45,8 +48,8 @@ const notificationSelect = [
   'notifications.user_id',
   'notifications.organization_id',
   'organizations.name as organization_name',
-  'notifications.title',
-  'notifications.body',
+  'notifications.message_key',
+  'notifications.params',
   'notifications.is_read',
   'notifications.created_at',
 ] as const;
@@ -160,23 +163,39 @@ export async function markAllRead(userId: string): Promise<number> {
 }
 
 /**
- * Creates a notification for a user.
+ * Creates a notification for a user. The message is stored language-neutrally
+ * as a catalog key plus params; clients and email/push senders render it in
+ * the recipient's language.
  * @param userId - The user ID.
- * @param title - The notification title.
- * @param body - The notification body.
+ * @param key - The notification message key (see i18n/messages.ts).
+ * @param params - The template params, validated against the key's schema.
  * @param organizationId - The organization the notification belongs to, if any.
  * @returns The created notification.
  */
 export async function createNotification(
   userId: string,
-  title: string,
-  body = '',
+  key: string,
+  params: unknown = {},
   organizationId?: string,
 ): Promise<NotificationResponse> {
   logger.trace('notificationService.createNotification');
+  if (!isNotificationMessageKey(key)) {
+    throw badRequest(`Unknown notification message key: ${key}`);
+  }
+  let validatedParams: Record<string, unknown>;
+  try {
+    validatedParams = notificationMessageParams(key, params);
+  } catch {
+    throw badRequest(`Invalid params for notification message key: ${key}`);
+  }
   const notification = await db
     .insertInto('notifications')
-    .values({ user_id: userId, organization_id: organizationId ?? null, title, body })
+    .values({
+      user_id: userId,
+      organization_id: organizationId ?? null,
+      message_key: key,
+      params: validatedParams,
+    })
     .returningAll()
     .executeTakeFirstOrThrow();
   return serializeNotification(await getNotificationRowOrThrow(notification.id, userId));

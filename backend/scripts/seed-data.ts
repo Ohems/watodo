@@ -27,6 +27,7 @@ import type {
   Site,
   User,
 } from '../src/db/types.js';
+import type { NotificationMessageKey } from '../src/i18n/messages.js';
 import { createLogger } from '../src/logger.js';
 import { PERMISSIONS, type Permission } from '../src/permissions.js';
 import { supportedLanguages } from '../src/schemas/index.js';
@@ -749,13 +750,19 @@ async function addNotification(
   tx: Tx,
   userId: string,
   organizationId: string,
-  title: string,
-  body: string,
+  key: NotificationMessageKey,
+  params: Record<string, unknown>,
   isRead: boolean,
 ): Promise<void> {
   await tx
     .insertInto('notifications')
-    .values({ user_id: userId, organization_id: organizationId, title, body, is_read: isRead })
+    .values({
+      user_id: userId,
+      organization_id: organizationId,
+      message_key: key,
+      params,
+      is_read: isRead,
+    })
     .execute();
 }
 
@@ -1501,37 +1508,31 @@ export async function seedTestData(tx: Tx): Promise<void> {
   await assignTeamsToSeries(tx, festivalPlanning.id, [teamsOne[1].id]);
   await assignTeamsToSeries(tx, kickoff.id, [teamsOne[0].id, teamsOne[1].id]);
 
-  // Notifications for the first organization's users.
+  // Notifications for the first organization's users. Messages are stored as
+  // catalog keys + params and rendered in each user's language.
+  await addNotification(tx, realUser.id, firstOrganization.id, 'welcome', {}, false);
   await addNotification(
     tx,
     realUser.id,
     firstOrganization.id,
-    'Welcome to Watodo',
-    'Your organization has been set up. Explore the calendar and invite your team.',
-    false,
-  );
-  await addNotification(
-    tx,
-    realUser.id,
-    firstOrganization.id,
-    'Upcoming event',
-    'Summer Festival Planning is happening this month. Check the calendar for details.',
+    'upcomingEvent',
+    { eventTitle: 'Summer Festival Planning' },
     false,
   );
   await addNotification(
     tx,
     mockUsersOne[0].id,
     firstOrganization.id,
-    'You have been assigned a work role',
-    'You are assigned to "Room setup" for the Weekly Community Meeting.',
+    'workRoleAssigned',
+    { role: 'Room setup', eventTitle: 'Weekly Community Meeting' },
     true,
   );
   await addNotification(
     tx,
     mockUsersOne[2].id,
     firstOrganization.id,
-    'New event comment',
-    'Someone commented on the Weekly Community Meeting.',
+    'newEventComment',
+    { eventTitle: 'Weekly Community Meeting' },
     false,
   );
 
@@ -1959,24 +1960,24 @@ export async function seedTestData(tx: Tx): Promise<void> {
     tx,
     realUser.id,
     secondOrganization.id,
-    'New organization ready',
-    'Riverside Community Association has been created. Start adding events.',
+    'organizationCreated',
+    { organizationName: 'Riverside Community Association' },
     false,
   );
   await addNotification(
     tx,
     mockUsersTwo[0].id,
     secondOrganization.id,
-    'You are now an event coordinator',
-    'You have been assigned the Event Coordinator role.',
+    'roleAssigned',
+    { roleName: 'Event Coordinator' },
     true,
   );
   await addNotification(
     tx,
     mockUsersTwo[4].id,
     secondOrganization.id,
-    'Upcoming event',
-    'Community Potluck is happening this month. Sign up for a dish.',
+    'upcomingEvent',
+    { eventTitle: 'Community Potluck' },
     false,
   );
 

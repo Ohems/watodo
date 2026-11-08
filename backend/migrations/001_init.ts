@@ -325,15 +325,18 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
   pgm.addConstraint('absences', 'absences_date_range_valid', 'CHECK (end_date >= start_date)');
   pgm.createIndex('absences', 'user_id');
 
-  // Notifications (per-user)
+  // Notifications (per-user). The message is stored language-neutrally as a
+  // key into the backend message catalog plus structured params; it is
+  // rendered per recipient (users.language) at read time in the app and at
+  // send time for email/push.
   pgm.createTable('notifications', {
     id: { type: 'serial', primaryKey: true },
     user_id: { type: 'uuid', notNull: true, references: 'users', onDelete: 'CASCADE' },
     // The organization this notification belongs to, if any (null for purely
     // personal notifications).
     organization_id: { type: 'uuid', references: 'organizations', onDelete: 'SET NULL' },
-    title: { type: 'text', notNull: true },
-    body: { type: 'text', notNull: true, default: '' },
+    message_key: { type: 'text', notNull: true },
+    params: { type: 'jsonb', notNull: true, default: '{}' },
     is_read: { type: 'boolean', notNull: true, default: false },
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });

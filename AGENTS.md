@@ -200,6 +200,7 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 
 - `GET /api/health` - Health check (no auth)
 - `GET /api/v1/auth/providers` - List supported auth providers (no auth)
+- `GET /api/v1/locales/:lng` - Server-owned locale bundle for a supported language (`en-GB`, `en-US`, `fi`; no auth). Currently contains the `notifications` message templates; the frontend merges them into its i18n resources and renders notifications with them
 - `GET /api/v1/auth/:provider/login` - Start OAuth flow (discord, google, microsoft)
 - `GET /api/v1/auth/:provider/callback` - OAuth callback
 - `POST /api/v1/auth/:provider/link` - Start an OAuth flow that connects another login method to the current account (auth required)
@@ -396,6 +397,13 @@ frontend/src/
   certification work roles (mandatory certifications per role),
   event series, event occurrences, event work roles (slots), event work role
   assignments, and event comments.
+  Notifications store their message language-neutrally as `message_key` +
+  `params` (jsonb): `message_key` is a key into the backend message catalog
+  (`backend/src/i18n/`, per-language templates with `{{placeholder}}` params,
+  validated by the zod registry in `src/i18n/messages.ts`). The in-app list is
+  rendered client-side from the bundle served by `GET /api/v1/locales/:lng`;
+  email/push delivery renders it server-side with `renderNotificationMessage`
+  in the recipient's `users.language`.
   Events can be assigned to a site (optionally reserving the whole site)
   and/or a specific room within a site.
 - **Occurrence model**: `event_series` is expanded on the fly by the recurrence

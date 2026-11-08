@@ -179,52 +179,65 @@ function Home() {
             </Text>
           ) : (
             <Stack gap="xs">
-              {notifications.map(notification => (
-                <Group
-                  key={notification.id}
-                  justify="space-between"
-                  wrap="nowrap"
-                  style={{
-                    padding: '8px 12px',
-                    borderRadius: 4,
-                    backgroundColor: notification.isRead
-                      ? 'transparent'
-                      : 'var(--mantine-color-blue-0)',
-                    cursor: 'pointer',
-                  }}
-                  onClick={() => handleMarkRead(notification)}
-                >
-                  <Box style={{ flex: 1 }}>
-                    <Text size="sm" fw={notification.isRead ? 400 : 600}>
-                      {notification.title}
-                    </Text>
-                    {notification.body && (
-                      <Text size="xs" c="dimmed">
-                        {notification.body}
+              {notifications.map(notification => {
+                // The message is stored as a catalog key + params and rendered
+                // here in the current UI language (backend bundle under
+                // `notifications.*`).
+                const title = t(
+                  `notifications.${notification.messageKey}.title`,
+                  notification.params,
+                );
+                const body = t(
+                  `notifications.${notification.messageKey}.body`,
+                  notification.params,
+                );
+                return (
+                  <Group
+                    key={notification.id}
+                    justify="space-between"
+                    wrap="nowrap"
+                    style={{
+                      padding: '8px 12px',
+                      borderRadius: 4,
+                      backgroundColor: notification.isRead
+                        ? 'transparent'
+                        : 'var(--mantine-color-blue-0)',
+                      cursor: 'pointer',
+                    }}
+                    onClick={() => handleMarkRead(notification)}
+                  >
+                    <Box style={{ flex: 1 }}>
+                      <Text size="sm" fw={notification.isRead ? 400 : 600}>
+                        {title}
                       </Text>
-                    )}
-                    <Group gap="xs" wrap="nowrap">
-                      <Text size="xs" c="dimmed">
-                        {new Date(notification.createdAt).toLocaleString()}
-                      </Text>
-                      {notification.organizationName && (
-                        <Badge size="xs" variant="light" color="gray">
-                          {notification.organizationName}
-                        </Badge>
+                      {body && (
+                        <Text size="xs" c="dimmed">
+                          {body}
+                        </Text>
                       )}
-                    </Group>
-                  </Box>
-                  {!notification.isRead && (
-                    <ActionIcon
-                      variant="subtle"
-                      size="sm"
-                      onClick={() => handleMarkRead(notification)}
-                    >
-                      <IconCheck size={14} />
-                    </ActionIcon>
-                  )}
-                </Group>
-              ))}
+                      <Group gap="xs" wrap="nowrap">
+                        <Text size="xs" c="dimmed">
+                          {new Date(notification.createdAt).toLocaleString()}
+                        </Text>
+                        {notification.organizationName && (
+                          <Badge size="xs" variant="light" color="gray">
+                            {notification.organizationName}
+                          </Badge>
+                        )}
+                      </Group>
+                    </Box>
+                    {!notification.isRead && (
+                      <ActionIcon
+                        variant="subtle"
+                        size="sm"
+                        onClick={() => handleMarkRead(notification)}
+                      >
+                        <IconCheck size={14} />
+                      </ActionIcon>
+                    )}
+                  </Group>
+                );
+              })}
             </Stack>
           )}
         </Card>

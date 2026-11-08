@@ -543,8 +543,14 @@ export interface Notification {
   /** The organization this notification belongs to, if any. */
   organizationId: string | null;
   organizationName: string | null;
-  title: string;
-  body: string;
+  /**
+   * Language-neutral key into the backend message catalog, rendered via the
+   * `notifications.<key>.title` / `notifications.<key>.body` translations
+   * (served by GET /api/v1/locales/:lng).
+   */
+  messageKey: string;
+  /** Structured params interpolated into the message template. */
+  params: Record<string, unknown>;
   isRead: boolean;
   createdAt: string;
 }

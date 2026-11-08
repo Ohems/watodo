@@ -45,8 +45,8 @@ test.describe('Home page', () => {
           userId: 'user-1',
           organizationId: ORG_ID,
           organizationName: 'Test Org',
-          title: 'New assignment',
-          body: 'You were assigned to Setup Crew',
+          messageKey: 'workRoleAssigned',
+          params: { role: 'Setup Crew', eventTitle: 'Community Cleanup' },
           isRead: false,
           createdAt: '2025-06-15T10:00:00.000Z',
         },
@@ -55,8 +55,8 @@ test.describe('Home page', () => {
           userId: 'user-1',
           organizationId: null,
           organizationName: null,
-          title: 'System update',
-          body: 'The system was updated',
+          messageKey: 'welcome',
+          params: {},
           isRead: true,
           createdAt: '2025-06-14T08:00:00.000Z',
         },
@@ -67,9 +67,12 @@ test.describe('Home page', () => {
 
       await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible();
       await expect(page.getByText('Notifications')).toBeVisible();
-      await expect(page.getByText('New assignment')).toBeVisible();
-      await expect(page.getByText('You were assigned to Setup Crew')).toBeVisible();
-      await expect(page.getByText('System update')).toBeVisible();
+      // Messages are rendered from the key + params via the locale bundle.
+      await expect(page.getByText('You have been assigned a work role')).toBeVisible();
+      await expect(
+        page.getByText('You are assigned to "Setup Crew" for Community Cleanup.'),
+      ).toBeVisible();
+      await expect(page.getByText('Welcome to Watodo')).toBeVisible();
       await expect(page.getByText('1 unread')).toBeVisible();
       await expect(page.getByRole('button', { name: 'Mark all as read' })).toBeVisible();
     });
@@ -257,8 +260,8 @@ test.describe('Home page', () => {
           userId: 'user-1',
           organizationId: ORG_ID,
           organizationName: 'Test Org',
-          title: 'Click me',
-          body: 'Unread notification',
+          messageKey: 'newEventComment',
+          params: { eventTitle: 'Weekly Meeting' },
           isRead: false,
           createdAt: '2025-06-15T10:00:00.000Z',
         },
@@ -272,9 +275,9 @@ test.describe('Home page', () => {
       });
 
       await page.goto('/');
-      await expect(page.getByText('Click me')).toBeVisible();
+      await expect(page.getByText('New event comment')).toBeVisible();
 
-      await page.getByText('Click me').click();
+      await page.getByText('New event comment').click();
 
       // Wait for the PATCH request to be captured
       await expect
@@ -347,8 +350,8 @@ test.describe('Home page', () => {
           userId: 'user-1',
           organizationId: ORG_ID,
           organizationName: 'Test Org',
-          title: 'Hello',
-          body: 'World',
+          messageKey: 'newEventComment',
+          params: { eventTitle: 'Weekly Meeting' },
           isRead: false,
           createdAt: '2025-06-15T10:00:00.000Z',
         },
@@ -358,8 +361,8 @@ test.describe('Home page', () => {
       await page.goto('/');
 
       await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible();
-      await expect(page.getByText('Hello')).toBeVisible();
-      await expect(page.getByText('World')).toBeVisible();
+      await expect(page.getByText('New event comment')).toBeVisible();
+      await expect(page.getByText('Someone commented on Weekly Meeting.')).toBeVisible();
     });
   });
 });

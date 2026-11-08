@@ -1,12 +1,17 @@
 import { z } from 'zod';
+import { SUPPORTED_LANGUAGES } from '../i18n/index.js';
 import { createdAtSchema, updatedAtSchema } from './common.js';
 
 export const userStateSchema = z.enum(['active', 'inactive']);
 
 /** UI languages the app ships translations for (BCP 47 tags). */
-export const supportedLanguages = ['en-GB', 'en-US', 'fi'] as const;
+export const supportedLanguages = SUPPORTED_LANGUAGES;
 
 export const languageSchema = z.enum(supportedLanguages);
+
+export const localeParamsSchema = z.object({
+  lng: languageSchema,
+});
 
 /**
  * E.164 phone number: a plus sign followed by the country code and the

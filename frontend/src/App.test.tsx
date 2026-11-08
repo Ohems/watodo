@@ -5,6 +5,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it } from 'vitest';
 import App from './App.js';
 import { api, clearToken } from './api/index.js';
+import { loadBackendBundle } from './i18n/index.js';
 import { store } from './store/index.js';
 import { type MockApi, mockApi } from './test/api-mock.js';
 import type {
@@ -76,10 +77,27 @@ function renderApp(route = '/', strict = false) {
   return render(strict ? <StrictMode>{tree}</StrictMode> : tree);
 }
 
+/** The en-GB notification message bundle served by GET /api/v1/locales/:lng. */
+const NOTIFICATION_BUNDLE_EN_GB = {
+  welcome: { title: 'Welcome to Watodo', body: 'Your organisation has been set up.' },
+  workRoleAssigned: {
+    title: 'You have been assigned a work role',
+    body: 'You are assigned to "{{role}}" for {{eventTitle}}.',
+  },
+  upcomingEvent: {
+    title: 'Upcoming event',
+    body: '{{eventTitle}} is happening this month. Check the calendar for details.',
+  },
+};
+
 /** Mocks the endpoints used by the app shell and the Home page. */
 function mockShellRoutes(mock: MockApi) {
   mock.on('GET', '/api/v1/users/@me', mockUser);
   mock.on('GET', '/api/v1/organizations', [mockOrganization]);
+  mock.on('GET', '/api/v1/locales/en-GB', {
+    lng: 'en-GB',
+    notifications: NOTIFICATION_BUNDLE_EN_GB,
+  });
   mock.on('GET', '/api/v1/notifications', {
     items: [],
     total: 0,
@@ -246,13 +264,15 @@ describe('App', () => {
 describe('Home', () => {
   it('shows upcoming events from all organizations, each labeled with its organization', async () => {
     mockShellRoutes(mock);
+    // Load the server-owned notification templates into i18n.
+    await loadBackendBundle('en-GB');
     const notification: Notification = {
       id: 1,
       userId: '1',
       organizationId: 'org-2',
       organizationName: 'Other Org',
-      title: 'You have been assigned a work role',
-      body: 'You are assigned to "Room setup".',
+      messageKey: 'workRoleAssigned',
+      params: { role: 'Room setup', eventTitle: 'Weekly Community Meeting' },
       isRead: false,
       createdAt: new Date().toISOString(),
     };
@@ -287,6 +307,10 @@ describe('Home', () => {
     expect(screen.getAllByText('Community Org').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Other Org').length).toBeGreaterThanOrEqual(2);
     expect(await screen.findByText('You have been assigned a work role')).toBeInTheDocument();
+    // The body is rendered from the message key + params in the current language.
+    expect(
+      await screen.findByText('You are assigned to "Room setup" for Weekly Community Meeting.'),
+    ).toBeInTheDocument();
     // The Home page is the only view without an organization filter.
     const url = lastCallUrl(mock, '/api/v1/event-series/occurrences');
     expect(url).toBeDefined();

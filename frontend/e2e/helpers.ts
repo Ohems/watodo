@@ -132,6 +132,86 @@ export async function mockNotifications(
   );
 }
 
+// Notification message bundles mirroring the backend catalog (the frontend
+// fetches them from GET /api/v1/locales/:lng and renders messages with them).
+const NOTIFICATION_BUNDLE_EN = {
+  welcome: {
+    title: 'Welcome to Watodo',
+    body: 'Your organisation has been set up. Explore the calendar and invite your team.',
+  },
+  organizationCreated: {
+    title: 'New organisation ready',
+    body: '{{organizationName}} has been created. Start adding events.',
+  },
+  upcomingEvent: {
+    title: 'Upcoming event',
+    body: '{{eventTitle}} is happening this month. Check the calendar for details.',
+  },
+  workRoleAssigned: {
+    title: 'You have been assigned a work role',
+    body: 'You are assigned to "{{role}}" for {{eventTitle}}.',
+  },
+  newEventComment: {
+    title: 'New event comment',
+    body: 'Someone commented on {{eventTitle}}.',
+  },
+  roleAssigned: {
+    title: 'Role assigned',
+    body: 'You have been assigned the {{roleName}} role.',
+  },
+  assignmentRemovedDueToAbsence: {
+    title: 'Assignment removed due to absence',
+    body: '{{userName}} was removed from "{{eventTitle}}" ({{start}}).',
+  },
+};
+
+const NOTIFICATION_BUNDLE_FI = {
+  welcome: {
+    title: 'Tervetuloa Watodoon',
+    body: 'Organisaatiosi on nyt perustettu. Tutki kalenteria ja kutsu tiimisi mukaan.',
+  },
+  organizationCreated: {
+    title: 'Uusi organisaatio valmis',
+    body: '{{organizationName}} on luotu. Ala lisätä tapahtumia.',
+  },
+  upcomingEvent: {
+    title: 'Tuleva tapahtuma',
+    body: '{{eventTitle}} järjestetään tässä kuussa. Katso lisätiedot kalenterista.',
+  },
+  workRoleAssigned: {
+    title: 'Sinut on määrätty työrooliin',
+    body: 'Sinut on määrätty rooliin "{{role}}" tapahtumaan {{eventTitle}}.',
+  },
+  newEventComment: {
+    title: 'Uusi tapahtumakommentti',
+    body: 'Joku kommentoi tapahtumaa {{eventTitle}}.',
+  },
+  roleAssigned: {
+    title: 'Rooli määrätty',
+    body: 'Sinulle on määrätty rooli {{roleName}}.',
+  },
+  assignmentRemovedDueToAbsence: {
+    title: 'Määritys poistettu poissaolon vuoksi',
+    body: '{{userName}} poistettiin tapahtumasta "{{eventTitle}}" ({{start}}).',
+  },
+};
+
+const NOTIFICATION_BUNDLES: Record<string, unknown> = {
+  'en-GB': NOTIFICATION_BUNDLE_EN,
+  'en-US': NOTIFICATION_BUNDLE_EN,
+  fi: NOTIFICATION_BUNDLE_FI,
+};
+
+/** Mocks the locale bundle endpoint (server-owned notification templates). */
+export async function mockLocaleBundles(page: Page): Promise<void> {
+  await page.route('**/api/v1/locales/*', route => {
+    const lng = new URL(route.request().url()).pathname.split('/').at(-1) ?? 'en-GB';
+    return route.fulfill({
+      json: { lng, notifications: NOTIFICATION_BUNDLES[lng] ?? NOTIFICATION_BUNDLE_EN },
+    });
+  });
+}
+
 /** Mocks the occurrences endpoint (used by Home and Calendar). */
 export async function mockOccurrences(page: Page, occurrences: unknown[] = []): Promise<void> {
   await page.route('**/api/v1/event-series/occurrences?*', route =>
@@ -152,6 +232,7 @@ export async function mockCommonApis(
   await mockCurrentUser(page, user);
   await mockOrganizations(page, orgs);
   await mockAuthProviders(page);
+  await mockLocaleBundles(page);
   await mockNotifications(page);
   await mockOccurrences(page);
 }

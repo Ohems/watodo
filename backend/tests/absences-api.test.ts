@@ -299,8 +299,11 @@ describe('Absences API', () => {
         .where('user_id', '=', seedData.otherUserId)
         .execute();
       expect(notifications).toHaveLength(1);
-      expect(notifications[0].title).toBe('Assignment removed due to absence');
-      expect(notifications[0].body).toContain('Overlap Event');
+      expect(notifications[0].message_key).toBe('assignmentRemovedDueToAbsence');
+      expect(notifications[0].params).toMatchObject({
+        eventTitle: 'Overlap Event',
+        userName: expect.any(String),
+      });
       expect(notifications[0].organization_id).toBe(seedData.organizationId);
 
       // The absent user themself (team leader) is not notified.

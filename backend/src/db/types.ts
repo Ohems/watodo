@@ -211,8 +211,10 @@ export interface Notifications {
   user_id: string;
   /** The organization this notification belongs to, if any. */
   organization_id: string | null;
-  title: string;
-  body: Generated<string>;
+  /** Key into the backend notification message catalog (see src/i18n). */
+  message_key: string;
+  /** Structured interpolation params for the message template (jsonb). */
+  params: Generated<Record<string, unknown>>;
   is_read: Generated<boolean>;
   created_at: Generated<Date>;
 }
