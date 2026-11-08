@@ -491,7 +491,13 @@ Group frontend tests by the page or component being tested, for example `Account
 
 - Tests live in `frontend/e2e/`.
 - Config: `frontend/playwright.config.ts` (3 browsers: chromium, firefox, webkit).
-- The dev server starts automatically before tests (port 5173).
+- Playwright starts its own frontend instance before tests: a production build
+  served by `vite preview` on port 4173 (so it never clashes with a dev server
+  on 5173). See `frontend/playwright.config.ts` (`webServer`). No backend is
+  needed: every API call the pages make is mocked via `page.route` (see
+  `e2e/helpers.ts`; `mockCommonApis` includes the auth provider list, and the
+  specs that do not use it mock it in their own `beforeEach`). The frontend
+  has no hardcoded provider fallback.
 - Run: `npm run test:e2e -w frontend`
 - Install browsers first: `npm run playwright:install -w frontend`
 
@@ -554,6 +560,19 @@ Common E2E pitfalls to avoid:
   '...' && url.searchParams.has('page'), ...)` over glob patterns like
   `**/api/v1/.../sites?*` for list endpoints, because globs can accidentally
   intercept single-entity requests (e.g. `/sites/site-1`).
+
+### Flaky tests
+
+Whenever a test is observed to be flaky (it fails intermittently and passes on
+a re-run, in any suite: backend, frontend unit, or E2E), make it robust in the
+same change, even when the flake is unrelated to the feature currently being
+worked on. Fix the root cause rather than masking it: wait for the specific
+condition instead of sleeping, use deterministic locators and mocks, avoid
+depending on ordering or timing, and reduce parallelism or split the test when
+a shared resource is the bottleneck. Do not raise timeouts to hide flakes
+(the E2E per-test timeout of 20 seconds must not be increased), and do not add
+`test.retry`-style masking in local runs; retries in CI may hide, not fix, the
+problem.
 
 ## Environment Variables
 

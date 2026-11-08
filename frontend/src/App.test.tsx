@@ -136,13 +136,34 @@ beforeEach(() => {
 });
 
 describe('App', () => {
-  it('shows the login page when the user is unauthenticated', async () => {
+  it('shows the login page with the mocked providers when the user is unauthenticated', async () => {
+    mock.on('GET', '/api/v1/users/@me', { error: 'Unauthorized' }, 401);
+    mock.on('GET', '/api/v1/auth/providers', {
+      providers: [
+        { id: 'discord', name: 'Discord', configured: true },
+        { id: 'google', name: 'Google', configured: true },
+        { id: 'microsoft', name: 'Microsoft', configured: true },
+      ],
+    });
+
+    renderApp();
+
+    expect(await screen.findByText('Sign in to continue')).toBeInTheDocument();
+    expect(await screen.findByText('Sign in with Discord')).toBeInTheDocument();
+    expect(screen.getByText('Sign in with Google')).toBeInTheDocument();
+    expect(screen.getByText('Sign in with Microsoft')).toBeInTheDocument();
+  });
+
+  it('shows the no-providers message when the provider list is empty', async () => {
     mock.on('GET', '/api/v1/users/@me', { error: 'Unauthorized' }, 401);
     mock.on('GET', '/api/v1/auth/providers', { providers: [] });
 
     renderApp();
 
     expect(await screen.findByText('Sign in to continue')).toBeInTheDocument();
+    expect(
+      await screen.findByText('No login methods are configured on this server.'),
+    ).toBeInTheDocument();
   });
 
   it('renders the app shell once the user is authenticated', async () => {

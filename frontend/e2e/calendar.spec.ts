@@ -1,5 +1,6 @@
 import { expect, type Page, test } from '@playwright/test';
 import moment from 'moment';
+import { mockAuthProviders } from './helpers.js';
 
 const ORG_ID = 'org-1';
 
@@ -39,6 +40,7 @@ async function mockApi(page: Page) {
   // Playwright matches routes in reverse registration order.
   await page.route('**/api/v1/users/@me', route => route.fulfill({ json: mockUser }));
   await page.route('**/api/v1/organizations', route => route.fulfill({ json: [mockOrganization] }));
+  await mockAuthProviders(page);
   await page.route(`**/api/v1/organizations/${ORG_ID}/sites/all`, route =>
     route.fulfill({ json: [] }),
   );

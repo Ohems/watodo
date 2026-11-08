@@ -1,19 +1,13 @@
 import { Box, Button, Center, Loader, Paper, Stack, Text } from '@mantine/core';
 import { useTranslation } from 'react-i18next';
 import { getLoginUrl, useGetAuthProvidersQuery } from '../../api/index.js';
-import type { AuthProviderInfo } from '../../types/index.js';
-
-/** Used when the provider list cannot be fetched from the API. */
-const FALLBACK_PROVIDERS: AuthProviderInfo[] = [
-  { id: 'discord', name: 'Discord', configured: false },
-  { id: 'google', name: 'Google', configured: false },
-  { id: 'microsoft', name: 'Microsoft', configured: false },
-];
 
 function LoginPage() {
   const { t } = useTranslation();
   const { data, isError } = useGetAuthProvidersQuery();
-  const providers = data?.providers ?? (isError ? FALLBACK_PROVIDERS : null);
+  // No hardcoded fallback: the provider list always comes from the API (the
+  // E2E tests mock it; on error an empty list is shown).
+  const providers = data?.providers ?? (isError ? [] : null);
 
   // The backend redirects back here after the provider callback.
   const returnUrl = window.location.href;
@@ -41,6 +35,10 @@ function LoginPage() {
           <Text c="dimmed">{t('login.signInToContinue')}</Text>
           {providers === null ? (
             <Loader />
+          ) : providers.length === 0 ? (
+            <Text c="dimmed" size="sm">
+              {t('login.noProviders')}
+            </Text>
           ) : (
             providers.map(provider => (
               <Button

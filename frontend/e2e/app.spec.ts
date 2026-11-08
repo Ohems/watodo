@@ -1,4 +1,11 @@
 import { expect, test } from '@playwright/test';
+import { mockAuthProviders } from './helpers.js';
+
+// The provider list is always mocked: the login page has no hardcoded
+// fallback, and no E2E test should reach a real backend.
+test.beforeEach(async ({ page }) => {
+  await mockAuthProviders(page);
+});
 
 test.describe('Watodo App', () => {
   test('greets an unauthorized user with the login screen', async ({ page }) => {

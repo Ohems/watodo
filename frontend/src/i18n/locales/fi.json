@@ -64,7 +64,8 @@
   "login": {
     "signInToContinue": "Jatka kirjautumalla sisään",
     "signInWith": "Kirjaudu sisään: {{provider}}",
-    "logoAlt": "Watodo"
+    "logoAlt": "Watodo",
+    "noProviders": "Kirjautumistapoja ei ole määritetty tälle palvelimelle."
   },
   "error": {
     "oops": "Hups!",

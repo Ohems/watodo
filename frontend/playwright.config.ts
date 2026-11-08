@@ -14,7 +14,10 @@ export default defineConfig({
   },
   reporter: 'html',
   use: {
-    baseURL: 'http://localhost:5173',
+    // The E2E tests run against a dedicated `vite preview` instance on its
+    // own port, so they never clash with a dev server the developer may be
+    // running on 5173.
+    baseURL: 'http://localhost:4173',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
@@ -23,10 +26,15 @@ export default defineConfig({
     { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
     { name: 'webkit', use: { ...devices['Desktop Safari'] } },
   ],
-  webServer: {
-    command: 'npm run dev',
-    url: 'http://localhost:5173',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120 * 1000,
-  },
+  webServer: [
+    {
+      // Dedicated frontend for the tests: a production build served by
+      // `vite preview` on port 4173. Always started fresh (rebuild included),
+      // never reusing another instance, so tests always run current code.
+      command: 'npm run build && npm run preview -- --port 4173 --strictPort',
+      url: 'http://localhost:4173',
+      reuseExistingServer: false,
+      timeout: 120 * 1000,
+    },
+  ],
 });

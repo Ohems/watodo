@@ -64,7 +64,8 @@
   "login": {
     "signInToContinue": "Sign in to continue",
     "signInWith": "Sign in with {{provider}}",
-    "logoAlt": "Watodo"
+    "logoAlt": "Watodo",
+    "noProviders": "No login methods are configured on this server."
   },
   "error": {
     "oops": "Oops!",

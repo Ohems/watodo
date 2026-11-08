@@ -15,15 +15,8 @@ import EditField from '../../components/EditField/EditField.js';
 import { useAppDispatch } from '../../hooks/redux.js';
 import { LANGUAGE_LABELS, type Language, SUPPORTED_LANGUAGES } from '../../i18n/index.js';
 import { deleteCurrentUser } from '../../store/session.js';
-import type { AuthProviderInfo, FieldErrors, UserSelfUpdate } from '../../types/index.js';
+import type { FieldErrors, UserSelfUpdate } from '../../types/index.js';
 import { validateUserSelfUpdate } from '../../validation.js';
-
-/** Used when the provider list cannot be fetched from the API. */
-const FALLBACK_PROVIDERS: AuthProviderInfo[] = [
-  { id: 'discord', name: 'Discord', configured: false },
-  { id: 'google', name: 'Google', configured: false },
-  { id: 'microsoft', name: 'Microsoft', configured: false },
-];
 
 function AccountPage() {
   const { t, i18n } = useTranslation();
@@ -47,7 +40,9 @@ function AccountPage() {
   const [deleting, setDeleting] = useState(false);
   const [languageError, setLanguageError] = useState<string | null>(null);
 
-  const providers = providersData?.providers ?? (providersError ? FALLBACK_PROVIDERS : null);
+  // No hardcoded fallback: the provider list always comes from the API (the
+  // E2E tests mock it; on error an empty list is shown).
+  const providers = providersData?.providers ?? (providersError ? [] : null);
 
   // The backend redirects back here with ?linkError=... when connecting a
   // login method fails.
@@ -63,9 +58,7 @@ function AccountPage() {
 
   if (!currentUser) return null;
 
-  const configuredProviders = (providers ?? FALLBACK_PROVIDERS).filter(
-    provider => provider.configured,
-  );
+  const configuredProviders = (providers ?? []).filter(provider => provider.configured);
   const canDisconnect = authAccounts.length > 1;
 
   const startEditing = () => {
