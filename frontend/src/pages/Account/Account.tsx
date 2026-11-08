@@ -15,8 +15,11 @@ import EditField from '../../components/EditField/EditField.js';
 import { useAppDispatch } from '../../hooks/redux.js';
 import { LANGUAGE_LABELS, type Language, SUPPORTED_LANGUAGES } from '../../i18n/index.js';
 import { deleteCurrentUser } from '../../store/session.js';
-import type { FieldErrors, UserSelfUpdate } from '../../types/index.js';
+import type { FieldErrors, UserSelfUpdate, WeekStart } from '../../types/index.js';
 import { validateUserSelfUpdate } from '../../validation.js';
+
+/** Week start options offered in the preferences. */
+const WEEK_START_OPTIONS: WeekStart[] = ['sunday', 'monday'];
 
 function AccountPage() {
   const { t, i18n } = useTranslation();
@@ -39,6 +42,7 @@ function AccountPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [languageError, setLanguageError] = useState<string | null>(null);
+  const [weekStartError, setWeekStartError] = useState<string | null>(null);
 
   // No hardcoded fallback: the provider list always comes from the API (the
   // E2E tests mock it; on error an empty list is shown).
@@ -147,6 +151,17 @@ function AccountPage() {
       await i18n.changeLanguage(language);
     } catch (error) {
       setLanguageError(getApiErrorMessage(error) || t('account.languageUpdateFailed'));
+    }
+  };
+
+  // The week start is saved immediately (not part of the edit form) so the
+  // calendars switch right away.
+  const handleWeekStartChange = async (weekStart: WeekStart) => {
+    setWeekStartError(null);
+    try {
+      await updateCurrentUser({ weekStart }).unwrap();
+    } catch (error) {
+      setWeekStartError(getApiErrorMessage(error) || t('account.weekStartUpdateFailed'));
     }
   };
 
@@ -272,14 +287,37 @@ function AccountPage() {
             {languageError}
           </Alert>
         )}
-        <Select
-          label={t('account.language')}
-          data={SUPPORTED_LANGUAGES.map(code => ({ value: code, label: LANGUAGE_LABELS[code] }))}
-          value={currentUser.language}
-          onChange={value => {
-            if (value) void handleLanguageChange(value as Language);
-          }}
-        />
+        <Stack gap="md">
+          <Select
+            label={t('account.language')}
+            data={SUPPORTED_LANGUAGES.map(code => ({ value: code, label: LANGUAGE_LABELS[code] }))}
+            value={currentUser.language}
+            onChange={value => {
+              if (value) void handleLanguageChange(value as Language);
+            }}
+          />
+          {weekStartError && (
+            <Alert
+              color="red"
+              variant="light"
+              withCloseButton
+              onClose={() => setWeekStartError(null)}
+            >
+              {weekStartError}
+            </Alert>
+          )}
+          <Select
+            label={t('account.weekStart')}
+            data={WEEK_START_OPTIONS.map(option => ({
+              value: option,
+              label: t(`account.weekStart_${option}`),
+            }))}
+            value={currentUser.weekStart}
+            onChange={value => {
+              if (value) void handleWeekStartChange(value as WeekStart);
+            }}
+          />
+        </Stack>
       </Paper>
 
       <Paper shadow="sm" p="lg" mt="lg">

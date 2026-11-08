@@ -9,6 +9,9 @@ export const supportedLanguages = SUPPORTED_LANGUAGES;
 
 export const languageSchema = z.enum(supportedLanguages);
 
+/** First day of the week shown in calendars. */
+export const weekStartSchema = z.enum(['sunday', 'monday']);
+
 export const localeParamsSchema = z.object({
   lng: languageSchema,
 });
@@ -45,6 +48,7 @@ export const userSelfUpdateSchema = z.object({
   description: z.string().nullable().optional(),
   phoneNumber: phoneNumberSchema.nullable().optional(),
   language: languageSchema.optional(),
+  weekStart: weekStartSchema.optional(),
 });
 
 export const userQuerySchema = z.object({

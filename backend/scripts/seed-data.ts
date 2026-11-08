@@ -26,6 +26,7 @@ import type {
   Room,
   Site,
   User,
+  WeekStart,
 } from '../src/db/types.js';
 import type { NotificationMessageKey } from '../src/i18n/messages.js';
 import { createLogger } from '../src/logger.js';
@@ -42,6 +43,9 @@ import {
 
 const logger = createLogger('seed-data');
 
+/** Calendar week start values; seeded mock users cycle through them. */
+const WEEK_STARTS: WeekStart[] = ['sunday', 'monday'];
+
 type Tx = Transaction<Database>;
 type Executor = Kysely<Database> | Transaction<Database>;
 
@@ -53,6 +57,8 @@ interface MockUserSeed {
   phoneNumber: string | null;
   /** UI language; when omitted, languages cycle through the supported ones. */
   language?: (typeof supportedLanguages)[number];
+  /** Calendar week start; when omitted, values cycle through the supported ones. */
+  weekStart?: WeekStart;
   isEmployed: boolean;
   isSuspended: boolean;
   isBlocked: boolean;
@@ -359,6 +365,7 @@ async function createMockUsers(tx: Tx, seeds: MockUserSeed[]): Promise<User[]> {
         description: seed.description,
         phone_number: seed.phoneNumber,
         language: seed.language ?? supportedLanguages[index % supportedLanguages.length],
+        week_start: seed.weekStart ?? WEEK_STARTS[index % WEEK_STARTS.length],
         is_employed: seed.isEmployed,
         is_suspended: seed.isSuspended,
         is_blocked: seed.isBlocked,

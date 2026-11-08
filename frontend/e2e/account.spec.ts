@@ -116,6 +116,48 @@ test.describe('Account page', () => {
     });
   });
 
+  test.describe('week start preference', () => {
+    test('shows the week start preference with the current week start', async ({ page }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, []);
+      await page.goto('/account');
+
+      await expect(page.getByRole('combobox', { name: 'Week starts on' })).toHaveValue('Sunday');
+    });
+
+    test('changing the week start calls PATCH /users/@me with the selected value', async ({
+      page,
+    }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, []);
+
+      // One route handling both GET and PATCH on the same URL; the week start
+      // is kept in a variable so refetches return the updated user.
+      let currentWeekStart = testUser.weekStart;
+      await page.route('**/api/v1/users/@me', route => {
+        const request = route.request();
+        if (request.method() === 'PATCH') {
+          const body = request.postDataJSON() as { weekStart?: string };
+          currentWeekStart = body.weekStart ?? currentWeekStart;
+        }
+        return route.fulfill({ json: { ...testUser, weekStart: currentWeekStart } });
+      });
+
+      await page.goto('/account');
+
+      const patchRequest = page.waitForRequest(
+        req => req.url().includes('/api/v1/users/@me') && req.method() === 'PATCH',
+      );
+
+      await page.getByRole('combobox', { name: 'Week starts on' }).click();
+      await page.getByRole('option', { name: 'Monday' }).click();
+
+      const request = await patchRequest;
+      expect(request.postDataJSON()).toEqual({ weekStart: 'monday' });
+      await expect(page.getByRole('combobox', { name: 'Week starts on' })).toHaveValue('Monday');
+    });
+  });
+
   test.describe('editing personal info', () => {
     test('edit and save calls PATCH /users/@me with correct data', async ({ page }) => {
       await mockCommonApis(page, testUser);

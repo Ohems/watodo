@@ -23,6 +23,7 @@ const mockUser: User = {
   description: '',
   phoneNumber: null,
   language: 'en-GB',
+  weekStart: 'sunday',
   permissions: ['admin'],
   state: 'active',
   isEmployed: true,

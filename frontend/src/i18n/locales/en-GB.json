@@ -366,7 +366,11 @@
     "deleteFailed": "Failed to delete the account",
     "preferences": "Preferences",
     "language": "Language",
-    "languageUpdateFailed": "Failed to change the language"
+    "languageUpdateFailed": "Failed to change the language",
+    "weekStart": "Week starts on",
+    "weekStart_sunday": "Sunday",
+    "weekStart_monday": "Monday",
+    "weekStartUpdateFailed": "Failed to change the week start"
   },
   "errors": {
     "failedToFetchUsers": "Failed to fetch users",

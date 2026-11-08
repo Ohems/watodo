@@ -2,6 +2,9 @@ import type { Generated, Insertable, Selectable, Updateable } from 'kysely';
 
 export type AuthProvider = 'discord' | 'google' | 'microsoft';
 
+/** First day of the week shown in calendars. */
+export type WeekStart = 'sunday' | 'monday';
+
 export interface Users {
   id: Generated<string>;
   email: string;
@@ -15,6 +18,8 @@ export interface Users {
   state: Generated<string>;
   /** UI language (BCP 47 tag of a supported locale, e.g. 'en-GB'). */
   language: Generated<string>;
+  /** First day of the week shown in calendars ('sunday' or 'monday'). */
+  week_start: Generated<WeekStart>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }

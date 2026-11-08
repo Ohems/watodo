@@ -18,9 +18,16 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     state: { type: 'text', notNull: true, default: 'active' },
     // UI language of the user (BCP 47 tag of a supported locale).
     language: { type: 'text', notNull: true, default: 'en-GB' },
+    // First day of the week shown in calendars.
+    week_start: { type: 'text', notNull: true, default: 'sunday' },
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
+  pgm.addConstraint(
+    'users',
+    'users_week_start_check',
+    "CHECK (week_start IN ('sunday', 'monday'))",
+  );
 
   // Authentication accounts (one user can have accounts from multiple providers)
   pgm.createTable('auth_accounts', {

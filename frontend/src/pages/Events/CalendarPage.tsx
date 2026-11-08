@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   useGetAllRoomsQuery,
   useGetAllSitesQuery,
+  useGetCurrentUserQuery,
   useGetOccurrencesQuery,
   useGetTeamsQuery,
 } from '../../api/index.js';
@@ -27,6 +28,7 @@ function CalendarPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
+  const { data: currentUser } = useGetCurrentUserQuery();
 
   const now = new Date();
 
@@ -142,6 +144,7 @@ function CalendarPage() {
         events={events}
         onRangeChange={newRange => setRange(newRange)}
         onSelectEvent={handleEventClick}
+        weekStart={currentUser?.weekStart ?? 'sunday'}
       />
     </Box>
   );

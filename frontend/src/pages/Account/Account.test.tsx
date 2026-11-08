@@ -14,6 +14,7 @@ const mockUser: User = {
   description: 'About Alice',
   phoneNumber: '+358401234567',
   language: 'en-GB',
+  weekStart: 'sunday',
   permissions: [],
   state: 'active',
   isEmployed: false,
@@ -59,6 +60,7 @@ function mockAccountRoutes(mock: MockApi, state: AccountRoutes) {
       phoneNumber:
         body.phoneNumber === undefined ? state.currentUser.phoneNumber : body.phoneNumber,
       language: body.language ?? state.currentUser.language,
+      weekStart: body.weekStart ?? state.currentUser.weekStart,
     };
     return state.currentUser;
   });
@@ -241,6 +243,38 @@ describe('AccountPage', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Validation error');
     expect(i18n.language).toBe('en-GB');
+  });
+
+  it('shows the week start preference with the current week start', async () => {
+    renderPage();
+
+    const select = await screen.findByRole('combobox', { name: 'Week starts on' });
+    expect(select).toHaveValue('Sunday');
+  });
+
+  it('saves a changed week start', async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Week starts on' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Monday', hidden: true }));
+
+    await waitFor(() => {
+      expect(mock.lastBody('PATCH', '/api/v1/users/@me')).toEqual({ weekStart: 'monday' });
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'Week starts on' })).toHaveValue('Monday');
+    });
+  });
+
+  it('shows an error when changing the week start fails', async () => {
+    mock.on('PATCH', '/api/v1/users/@me', { error: 'Validation error' }, 400);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Week starts on' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Monday', hidden: true }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Validation error');
+    expect(screen.getByRole('combobox', { name: 'Week starts on' })).toHaveValue('Sunday');
   });
 
   it('lists connected login methods and offers to connect the others', async () => {

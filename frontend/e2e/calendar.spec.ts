@@ -10,6 +10,8 @@ const mockUser = {
   email: 'test@example.com',
   description: '',
   phoneNumber: null,
+  language: 'en-GB',
+  weekStart: 'sunday',
   permissions: ['admin'],
   state: 'active',
   isEmployed: true,
@@ -32,13 +34,13 @@ const mockOrganization = {
  * Stubs every API call the calendar page needs and injects an auth token so
  * the app renders the calendar instead of the login screen.
  */
-async function mockApi(page: Page) {
+async function mockApi(page: Page, user: typeof mockUser = mockUser) {
   await page.addInitScript(() => {
     localStorage.setItem('watodo_token', 'e2e-test-token');
   });
   // More specific routes are registered after the generic ones because
   // Playwright matches routes in reverse registration order.
-  await page.route('**/api/v1/users/@me', route => route.fulfill({ json: mockUser }));
+  await page.route('**/api/v1/users/@me', route => route.fulfill({ json: user }));
   await page.route('**/api/v1/organizations', route => route.fulfill({ json: [mockOrganization] }));
   await mockAuthProviders(page);
   await page.route(`**/api/v1/organizations/${ORG_ID}/sites/all`, route =>
@@ -85,11 +87,16 @@ async function switchView(page: Page, name: 'Month' | 'Week' | 'Day' | 'Agenda')
   await toolbar(page).getByRole('button', { name, exact: true }).click();
 }
 
-async function openCalendar(page: Page) {
-  await mockApi(page);
+async function openCalendar(page: Page, user: typeof mockUser = mockUser) {
+  await mockApi(page, user);
   await page.goto('/events/calendar');
   await expect(page.locator('.rbc-calendar')).toBeVisible();
   await expect(toolbarLabel(page)).toHaveText(monthLabel(new Date()));
+}
+
+/** Texts of the month view's weekday header cells, in display order. */
+function weekdayHeaders(page: Page) {
+  return page.locator('.rbc-month-header .rbc-header');
 }
 
 test.describe('Calendar page navigation', () => {
@@ -169,5 +176,34 @@ test.describe('Calendar page navigation', () => {
 
     await clickNavigate(page, 'Today');
     await expect(toolbarLabel(page)).toHaveText(monthLabel(now));
+  });
+});
+
+test.describe('Calendar week start', () => {
+  test('the month view starts the week on Sunday by default', async ({ page }) => {
+    await openCalendar(page);
+
+    await expect(weekdayHeaders(page).first()).toHaveText('Sun');
+    await expect(weekdayHeaders(page).nth(6)).toHaveText('Sat');
+  });
+
+  test('the month view starts the week on Monday when the user configured it', async ({ page }) => {
+    await openCalendar(page, { ...mockUser, weekStart: 'monday' });
+
+    await expect(weekdayHeaders(page).first()).toHaveText('Mon');
+    await expect(weekdayHeaders(page).nth(6)).toHaveText('Sun');
+  });
+
+  test('the week view starts on Monday when the user configured it', async ({ page }) => {
+    await openCalendar(page, { ...mockUser, weekStart: 'monday' });
+    const now = new Date();
+
+    await switchView(page, 'Week');
+    // With Monday as the first day, the week's label starts on the Monday of
+    // the current week (the test's moment still uses Sunday-based weeks).
+    const start = moment(now).startOf('isoWeek');
+    const end = moment(now).endOf('isoWeek');
+    const endText = start.isSame(end, 'month') ? end.format('DD') : end.format('MMMM DD');
+    await expect(toolbarLabel(page)).toHaveText(`${start.format('MMMM DD')} – ${endText}`);
   });
 });

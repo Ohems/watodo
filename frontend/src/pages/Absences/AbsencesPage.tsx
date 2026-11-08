@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next';
 import {
   getApiErrorMessage,
   useDeleteAbsenceMutation,
+  useGetCurrentUserQuery,
   useGetMyAbsencesQuery,
 } from '../../api/index.js';
 import { AbsenceDialog } from '../../components/AbsenceDialog/index.js';
@@ -39,6 +40,7 @@ const TYPE_COLORS: Record<AbsenceType, string> = {
 function AbsencesPage() {
   const { t } = useTranslation();
   const { data: absences, isLoading } = useGetMyAbsencesQuery(undefined);
+  const { data: currentUser } = useGetCurrentUserQuery();
   const [deleteAbsence] = useDeleteAbsenceMutation();
 
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -100,7 +102,11 @@ function AbsencesPage() {
       )}
 
       <Card shadow="sm" withBorder mb="lg">
-        <Calendar events={calendarEvents} defaultView="month" />
+        <Calendar
+          events={calendarEvents}
+          defaultView="month"
+          weekStart={currentUser?.weekStart ?? 'sunday'}
+        />
       </Card>
 
       <Card shadow="sm" withBorder>

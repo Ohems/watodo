@@ -1,9 +1,23 @@
 import moment from 'moment';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Calendar as BigCalendar, momentLocalizer, type View } from 'react-big-calendar';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
+import type { WeekStart } from '../../types/index.js';
 
-const localizer = momentLocalizer(moment);
+/** moment `week.dow` value per week start (0 = Sunday, 1 = Monday). */
+const WEEK_START_DOW: Record<WeekStart, number> = { sunday: 0, monday: 1 };
+
+/**
+ * Builds a localizer whose weeks start on the configured day. The moment
+ * locale's `week.dow` is set so that both `localeData().firstDayOfWeek()`
+ * (used by the week/day views) and `startOf('week')` (used to compute the
+ * visible days of the month view) agree on the same first day. moment is
+ * only used by this component, so adjusting its locale is contained here.
+ */
+function createLocalizer(weekStart: WeekStart) {
+  moment.updateLocale(moment.locale(), { week: { dow: WEEK_START_DOW[weekStart] } });
+  return momentLocalizer(moment);
+}
 
 export interface CalendarEvent {
   title: string;
@@ -18,6 +32,8 @@ interface CalendarProps {
   onSelectEvent?: (event: CalendarEvent) => void;
   onRangeChange?: (range: { start: Date; end: Date }) => void;
   defaultView?: View;
+  /** First day of the week; defaults to Sunday. */
+  weekStart?: WeekStart;
 }
 
 function Calendar({
@@ -25,7 +41,10 @@ function Calendar({
   onSelectEvent,
   onRangeChange,
   defaultView = 'month',
+  weekStart = 'sunday',
 }: CalendarProps) {
+  const localizer = useMemo(() => createLocalizer(weekStart), [weekStart]);
+
   // The calendar is controlled: the visible date and view live in state here,
   // so every navigation step is computed from the date that is actually
   // rendered. Leaving navigation to react-big-calendar's internal state made

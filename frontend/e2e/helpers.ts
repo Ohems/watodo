@@ -11,6 +11,7 @@ export interface MockUser {
   description: string;
   phoneNumber: string | null;
   language: string;
+  weekStart: string;
   permissions: string[];
   state: 'active' | 'inactive';
   isEmployed: boolean;
@@ -28,6 +29,7 @@ export function createUser(overrides: Partial<MockUser> = {}): MockUser {
     description: '',
     phoneNumber: null,
     language: 'en-GB',
+    weekStart: 'sunday',
     permissions: ['admin'],
     state: 'active',
     isEmployed: true,

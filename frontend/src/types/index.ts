@@ -1,5 +1,8 @@
 import type { Language } from '../i18n/index.js';
 
+/** First day of the week shown in calendars. */
+export type WeekStart = 'sunday' | 'monday';
+
 export interface User {
   id: string;
   name: string;
@@ -9,6 +12,8 @@ export interface User {
   phoneNumber: string | null;
   /** UI language (BCP 47 tag of a supported locale, e.g. 'en-GB'). */
   language: Language;
+  /** First day of the week shown in calendars. */
+  weekStart: WeekStart;
   permissions: string[];
   state: 'active' | 'inactive';
   isEmployed: boolean;
@@ -33,6 +38,7 @@ export interface UserSelfUpdate {
   /** E.164 format (includes the country code); null clears the number. */
   phoneNumber?: string | null;
   language?: Language;
+  weekStart?: WeekStart;
 }
 
 /** A login method (OAuth provider account) connected to the user's account. */
