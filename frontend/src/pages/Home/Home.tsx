@@ -28,6 +28,7 @@ import {
   useMarkNotificationReadMutation,
 } from '../../api/index.js';
 import { AbsenceDialog } from '../../components/AbsenceDialog/index.js';
+import { useFormatters } from '../../hooks/use-formatters.js';
 import type { EventOccurrence, Notification, OccurrenceSlotStatus } from '../../types/index.js';
 import { occurrenceRef } from '../../types/index.js';
 
@@ -54,6 +55,7 @@ function SlotStatusBadge({ slots }: { slots: OccurrenceSlotStatus[] }) {
 function Home() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { formatDate, formatDateTime } = useFormatters();
 
   // The range is fixed for the lifetime of the page so the query cache key
   // stays stable.
@@ -217,7 +219,7 @@ function Home() {
                       )}
                       <Group gap="xs" wrap="nowrap">
                         <Text size="xs" c="dimmed">
-                          {new Date(notification.createdAt).toLocaleString()}
+                          {formatDateTime(notification.createdAt)}
                         </Text>
                         {notification.organizationName && (
                           <Badge size="xs" variant="light" color="gray">
@@ -276,9 +278,7 @@ function Home() {
                       {occ.title}
                     </Text>
                     <Text size="xs" c="dimmed">
-                      {occ.isAllDay
-                        ? new Date(occ.start).toLocaleDateString()
-                        : new Date(occ.start).toLocaleString()}
+                      {occ.isAllDay ? formatDate(occ.start) : formatDateTime(occ.start)}
                     </Text>
                   </Box>
                   <Group

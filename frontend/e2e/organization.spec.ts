@@ -6,6 +6,7 @@ import {
   mockCommonApis,
   mockOrgApis,
   ORG_ID,
+  pickDate,
   regularUser,
   userWithPermissions,
 } from './helpers.js';
@@ -1109,8 +1110,11 @@ test.describe('Organization User Profile page', () => {
       await page.getByPlaceholder('Select a certification...').click();
       await page.getByRole('option', { name: 'Forklift License' }).click();
 
-      // Set date
-      await page.getByLabel('Certification date').fill('2025-06-01');
+      // Set date (the empty picker opens on the current month, so pick a
+      // date in the current month)
+      const now = new Date();
+      const certDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-05`;
+      await pickDate(page, 'Certification date', certDate);
 
       await page.getByRole('button', { name: 'Add certification' }).click();
 
@@ -1119,7 +1123,7 @@ test.describe('Organization User Profile page', () => {
         .toBe(1);
       expect(captured[0].body).toMatchObject({
         certificationId: 2,
-        certificationDate: '2025-06-01',
+        certificationDate: certDate,
       });
     });
   });
@@ -1163,9 +1167,9 @@ test.describe('Organization User Profile page', () => {
         page.locator('span.mantine-Badge-label', { hasText: 'Setup Crew' }),
       ).toBeVisible();
 
-      // Date inputs default to one month back and forward from today.
-      await expect(page.getByLabel('From')).toHaveValue(expectedDateInput(-1));
-      await expect(page.getByLabel('To')).toHaveValue(expectedDateInput(1));
+      // Date fields default to one month back and forward from today.
+      await expect(page.getByLabel('From')).toHaveText(expectedDateInput(-1));
+      await expect(page.getByLabel('To')).toHaveText(expectedDateInput(1));
 
       // The request carries the default span and pagination.
       await expect
@@ -1190,10 +1194,15 @@ test.describe('Organization User Profile page', () => {
       await page.goto('/organization/users/user-2');
 
       await expect(page.getByRole('heading', { name: 'Event assignments' })).toBeVisible();
-      await page.getByLabel('From').fill('2025-01-01');
+      // The "From" field defaults to one month back, so its picker opens on
+      // that month; pick the 5th of it.
+      const now = new Date();
+      const fromDate = new Date(now.getFullYear(), now.getMonth() - 1, 5);
+      const from = `${fromDate.getFullYear()}-${String(fromDate.getMonth() + 1).padStart(2, '0')}-05`;
+      await pickDate(page, 'From', from);
 
       // The app sends the local-midnight ISO of the picked date.
-      const expectedStart = new Date('2025-01-01T00:00:00').toISOString();
+      const expectedStart = new Date(`${from}T00:00:00`).toISOString();
       await expect
         .poll(
           () =>

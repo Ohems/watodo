@@ -5,6 +5,7 @@ import App from './App.js';
 import './i18n/index.js';
 
 import '@mantine/core/styles.css';
+import '@mantine/dates/styles.css';
 import './index.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(

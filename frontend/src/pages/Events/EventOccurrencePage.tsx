@@ -37,12 +37,9 @@ import {
   useUpdateOccurrenceWorkRoleMutation,
 } from '../../api/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
+import { useFormatters } from '../../hooks/use-formatters.js';
 import { selectActiveOrganizationId } from '../../store/organization-slice.js';
 import type { RecurrenceFreq, RecurrenceInput } from '../../types/index.js';
-
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString();
-}
 
 /**
  * Full-page view of a single event instance (one occurrence of a series).
@@ -54,6 +51,7 @@ function formatDateTime(iso: string): string {
 function EventOccurrencePage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { formatDate, formatDateTime } = useFormatters();
   const { occurrenceRef: occurrenceRefParam } = useParams<{ occurrenceRef: string }>();
 
   const occurrenceRef = occurrenceRefParam ? decodeURIComponent(occurrenceRefParam) : null;
@@ -170,7 +168,7 @@ function EventOccurrencePage() {
       })}`;
     }
     if (recurrence.until) {
-      text += ` ${t('events.recurrenceUntil', { date: new Date(recurrence.until).toLocaleDateString() })}`;
+      text += ` ${t('events.recurrenceUntil', { date: formatDate(recurrence.until) })}`;
     }
     if (recurrence.count) {
       text += ` ${t('events.recurrenceCount', { count: recurrence.count })}`;

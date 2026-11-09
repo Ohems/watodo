@@ -1,8 +1,30 @@
-import type { Page, Route } from '@playwright/test';
+import type { Locator, Page, Route } from '@playwright/test';
 
 // ---------------------------------------------------------------------------
 // Mock data factories
 // ---------------------------------------------------------------------------
+
+/**
+ * Picks a date (yyyy-mm-dd) in a date field (a DateField/DateTimeField
+ * button, given as a label or locator). The picker opens on the month of the
+ * field's current value (or the current month when empty), so the date must
+ * be in that displayed month. Day buttons are labelled with their full date
+ * (e.g. "10 November 2026").
+ */
+export async function pickDate(page: Page, field: string | Locator, date: string): Promise<void> {
+  const [year, month, day] = date.split('-').map(Number);
+  const locator = typeof field === 'string' ? page.getByLabel(field) : field;
+  await locator.click();
+  // The open picker's target references its dropdown via aria-controls; closed
+  // pickers keep their dropdown mounted, so scope the day button to the open one.
+  const dropdownId = await locator.getAttribute('aria-controls');
+  const dropdown = dropdownId
+    ? page.locator(`[id="${dropdownId}"]`)
+    : page.locator('[data-dates-dropdown]:visible');
+  const monthName = new Date(year, month - 1, day).toLocaleString('en-GB', { month: 'long' });
+  // exact: "5 December 2026" must not match "15 December 2026"
+  await dropdown.getByRole('button', { name: `${day} ${monthName} ${year}`, exact: true }).click();
+}
 
 export interface MockUser {
   id: string;
@@ -12,6 +34,8 @@ export interface MockUser {
   phoneNumber: string | null;
   language: string;
   weekStart: string;
+  dateFormat: string;
+  timeFormat: string;
   permissions: string[];
   state: 'active' | 'inactive';
   isEmployed: boolean;
@@ -30,6 +54,8 @@ export function createUser(overrides: Partial<MockUser> = {}): MockUser {
     phoneNumber: null,
     language: 'en-GB',
     weekStart: 'sunday',
+    dateFormat: 'ymd',
+    timeFormat: '24h',
     permissions: ['admin'],
     state: 'active',
     isEmployed: true,

@@ -15,6 +15,8 @@ const mockUser: User = {
   phoneNumber: '+358401234567',
   language: 'en-GB',
   weekStart: 'sunday',
+  dateFormat: 'ymd',
+  timeFormat: '24h',
   permissions: [],
   state: 'active',
   isEmployed: false,
@@ -61,6 +63,8 @@ function mockAccountRoutes(mock: MockApi, state: AccountRoutes) {
         body.phoneNumber === undefined ? state.currentUser.phoneNumber : body.phoneNumber,
       language: body.language ?? state.currentUser.language,
       weekStart: body.weekStart ?? state.currentUser.weekStart,
+      dateFormat: body.dateFormat ?? state.currentUser.dateFormat,
+      timeFormat: body.timeFormat ?? state.currentUser.timeFormat,
     };
     return state.currentUser;
   });
@@ -275,6 +279,68 @@ describe('AccountPage', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Validation error');
     expect(screen.getByRole('combobox', { name: 'Week starts on' })).toHaveValue('Sunday');
+  });
+
+  it('shows the date and time format preferences with the current values', async () => {
+    renderPage();
+
+    expect(await screen.findByRole('combobox', { name: 'Date format' })).toHaveValue(
+      'YYYY-MM-DD (year-month-day)',
+    );
+    expect(screen.getByRole('combobox', { name: 'Time format' })).toHaveValue(
+      '24-hour clock (14:30)',
+    );
+  });
+
+  it('saves a changed date format', async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Date format' }));
+    fireEvent.click(
+      await screen.findByRole('option', { name: 'DD/MM/YYYY (day-month-year)', hidden: true }),
+    );
+
+    await waitFor(() => {
+      expect(mock.lastBody('PATCH', '/api/v1/users/@me')).toEqual({ dateFormat: 'dmy' });
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'Date format' })).toHaveValue(
+        'DD/MM/YYYY (day-month-year)',
+      );
+    });
+  });
+
+  it('saves a changed time format', async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Time format' }));
+    fireEvent.click(
+      await screen.findByRole('option', { name: '12-hour clock (2:30 PM)', hidden: true }),
+    );
+
+    await waitFor(() => {
+      expect(mock.lastBody('PATCH', '/api/v1/users/@me')).toEqual({ timeFormat: '12h' });
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'Time format' })).toHaveValue(
+        '12-hour clock (2:30 PM)',
+      );
+    });
+  });
+
+  it('shows an error when changing the time format fails', async () => {
+    mock.on('PATCH', '/api/v1/users/@me', { error: 'Validation error' }, 400);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Time format' }));
+    fireEvent.click(
+      await screen.findByRole('option', { name: '12-hour clock (2:30 PM)', hidden: true }),
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Validation error');
+    expect(screen.getByRole('combobox', { name: 'Time format' })).toHaveValue(
+      '24-hour clock (14:30)',
+    );
   });
 
   it('lists connected login methods and offers to connect the others', async () => {

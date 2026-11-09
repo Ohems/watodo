@@ -28,6 +28,7 @@ import {
   useUpdateEventSeriesConfigMutation,
 } from '../../api/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
+import { useFormatters } from '../../hooks/use-formatters.js';
 import { selectActiveOrganizationId } from '../../store/organization-slice.js';
 
 function EventConfigPage() {
@@ -35,6 +36,7 @@ function EventConfigPage() {
   const { eventId } = useParams<{ eventId: string }>();
   const navigate = useNavigate();
   const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
+  const { formatDateTime } = useFormatters();
   const { data: currentUser } = useGetCurrentUserQuery();
   const canWrite =
     currentUser?.permissions?.includes('admin') === true ||
@@ -167,7 +169,7 @@ function EventConfigPage() {
             <Text size="sm" fw={500} c="dimmed" mb={4}>
               {t('events.start')}
             </Text>
-            <Text>{new Date(series.start).toLocaleString()}</Text>
+            <Text>{formatDateTime(series.start)}</Text>
           </Box>
 
           <Box>

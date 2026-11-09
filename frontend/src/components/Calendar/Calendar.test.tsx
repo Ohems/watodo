@@ -13,14 +13,14 @@ describe('Calendar', () => {
   it('starts the week on Sunday by default', () => {
     const { container } = render(<Calendar />);
     const headers = weekdayHeaders(container);
-    expect(headers[0]).toBe('Sun');
-    expect(headers[6]).toBe('Sat');
+    expect(headers[0]).toMatch(/^Sun$/);
+    expect(headers[6]).toMatch(/^Sat$/);
   });
 
   it('starts the week on Monday when configured', () => {
     const { container } = render(<Calendar weekStart="monday" />);
     const headers = weekdayHeaders(container);
-    expect(headers[0]).toBe('Mon');
-    expect(headers[6]).toBe('Sun');
+    expect(headers[0]).toMatch(/^Mon$/);
+    expect(headers[6]).toMatch(/^Sun$/);
   });
 });

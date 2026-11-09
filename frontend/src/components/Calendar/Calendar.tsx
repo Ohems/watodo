@@ -1,22 +1,28 @@
-import moment from 'moment';
+import { format, getDay, type StartOfWeekOptions, startOfWeek } from 'date-fns';
+import { enUS } from 'date-fns/locale';
 import { useMemo, useState } from 'react';
-import { Calendar as BigCalendar, momentLocalizer, type View } from 'react-big-calendar';
+import { Calendar as BigCalendar, dateFnsLocalizer, type View } from 'react-big-calendar';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import type { WeekStart } from '../../types/index.js';
 
-/** moment `week.dow` value per week start (0 = Sunday, 1 = Monday). */
-const WEEK_START_DOW: Record<WeekStart, number> = { sunday: 0, monday: 1 };
+/** date-fns `weekStartsOn` value per week start (0 = Sunday, 1 = Monday). */
+const WEEK_STARTS_ON: Record<WeekStart, 0 | 1> = { sunday: 0, monday: 1 };
 
 /**
- * Builds a localizer whose weeks start on the configured day. The moment
- * locale's `week.dow` is set so that both `localeData().firstDayOfWeek()`
- * (used by the week/day views) and `startOf('week')` (used to compute the
- * visible days of the month view) agree on the same first day. moment is
- * only used by this component, so adjusting its locale is contained here.
+ * Builds a localizer whose weeks start on the configured day. The date-fns
+ * `startOfWeek` is bound to the configured `weekStartsOn`, so both the
+ * week/day views (`firstOfWeek`) and the month view's visible days agree on
+ * the same first day without touching any global locale state.
  */
 function createLocalizer(weekStart: WeekStart) {
-  moment.updateLocale(moment.locale(), { week: { dow: WEEK_START_DOW[weekStart] } });
-  return momentLocalizer(moment);
+  const weekStartsOn = WEEK_STARTS_ON[weekStart];
+  return dateFnsLocalizer({
+    format,
+    getDay,
+    startOfWeek: (date: Date, options?: StartOfWeekOptions) =>
+      startOfWeek(date, { ...options, weekStartsOn }),
+    locales: { en: enUS },
+  });
 }
 
 export interface CalendarEvent {

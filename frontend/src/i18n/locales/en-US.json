@@ -370,7 +370,16 @@
     "weekStart": "Week starts on",
     "weekStart_sunday": "Sunday",
     "weekStart_monday": "Monday",
-    "weekStartUpdateFailed": "Failed to change the week start"
+    "weekStartUpdateFailed": "Failed to change the week start",
+    "dateFormat": "Date format",
+    "dateFormat_ymd": "YYYY-MM-DD (year-month-day)",
+    "dateFormat_mdy": "MM/DD/YYYY (month-day-year)",
+    "dateFormat_dmy": "DD/MM/YYYY (day-month-year)",
+    "dateFormatUpdateFailed": "Failed to change the date format",
+    "timeFormat": "Time format",
+    "timeFormat_24h": "24-hour clock (14:30)",
+    "timeFormat_12h": "12-hour clock (2:30 PM)",
+    "timeFormatUpdateFailed": "Failed to change the time format"
   },
   "errors": {
     "failedToFetchUsers": "Failed to fetch users",

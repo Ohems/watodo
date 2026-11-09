@@ -12,6 +12,12 @@ export const languageSchema = z.enum(supportedLanguages);
 /** First day of the week shown in calendars. */
 export const weekStartSchema = z.enum(['sunday', 'monday']);
 
+/** Date format used when displaying dates. */
+export const dateFormatSchema = z.enum(['ymd', 'mdy', 'dmy']);
+
+/** Time format used when displaying times: 24-hour or 12-hour clock. */
+export const timeFormatSchema = z.enum(['24h', '12h']);
+
 export const localeParamsSchema = z.object({
   lng: languageSchema,
 });
@@ -49,6 +55,8 @@ export const userSelfUpdateSchema = z.object({
   phoneNumber: phoneNumberSchema.nullable().optional(),
   language: languageSchema.optional(),
   weekStart: weekStartSchema.optional(),
+  dateFormat: dateFormatSchema.optional(),
+  timeFormat: timeFormatSchema.optional(),
 });
 
 export const userQuerySchema = z.object({

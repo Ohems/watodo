@@ -19,12 +19,14 @@ import { db, disconnectDatabase } from '../src/database.js';
 import type {
   Calendar,
   Database,
+  DateFormat,
   EventSeries,
   EventWorkRole,
   NewEventSeries,
   Role,
   Room,
   Site,
+  TimeFormat,
   User,
   WeekStart,
 } from '../src/db/types.js';
@@ -46,6 +48,12 @@ const logger = createLogger('seed-data');
 /** Calendar week start values; seeded mock users cycle through them. */
 const WEEK_STARTS: WeekStart[] = ['sunday', 'monday'];
 
+/** Date format values; seeded mock users cycle through them. */
+const DATE_FORMATS: DateFormat[] = ['ymd', 'mdy', 'dmy'];
+
+/** Time format values; seeded mock users cycle through them. */
+const TIME_FORMATS: TimeFormat[] = ['24h', '12h'];
+
 type Tx = Transaction<Database>;
 type Executor = Kysely<Database> | Transaction<Database>;
 
@@ -59,6 +67,10 @@ interface MockUserSeed {
   language?: (typeof supportedLanguages)[number];
   /** Calendar week start; when omitted, values cycle through the supported ones. */
   weekStart?: WeekStart;
+  /** Date format; when omitted, values cycle through the supported ones. */
+  dateFormat?: DateFormat;
+  /** Time format; when omitted, values cycle through the supported ones. */
+  timeFormat?: TimeFormat;
   isEmployed: boolean;
   isSuspended: boolean;
   isBlocked: boolean;
@@ -366,6 +378,8 @@ async function createMockUsers(tx: Tx, seeds: MockUserSeed[]): Promise<User[]> {
         phone_number: seed.phoneNumber,
         language: seed.language ?? supportedLanguages[index % supportedLanguages.length],
         week_start: seed.weekStart ?? WEEK_STARTS[index % WEEK_STARTS.length],
+        date_format: seed.dateFormat ?? DATE_FORMATS[index % DATE_FORMATS.length],
+        time_format: seed.timeFormat ?? TIME_FORMATS[index % TIME_FORMATS.length],
         is_employed: seed.isEmployed,
         is_suspended: seed.isSuspended,
         is_blocked: seed.isBlocked,

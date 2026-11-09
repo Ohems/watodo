@@ -26,6 +26,8 @@ export interface UserResponse {
   phoneNumber: string | null;
   language: string;
   weekStart: string;
+  dateFormat: string;
+  timeFormat: string;
   createdAt: string;
   updatedAt: string;
   permissions: string[];
@@ -44,6 +46,8 @@ export function serializeUser(user: User, permissions: string[]): UserResponse {
     phoneNumber: user.phone_number,
     language: user.language,
     weekStart: user.week_start,
+    dateFormat: user.date_format,
+    timeFormat: user.time_format,
     createdAt: user.created_at.toISOString(),
     updatedAt: user.updated_at.toISOString(),
     permissions,
@@ -167,6 +171,8 @@ export async function updateUserProfile(
   if (data.phoneNumber !== undefined) updateData.phone_number = data.phoneNumber;
   if (data.language !== undefined) updateData.language = data.language;
   if (data.weekStart !== undefined) updateData.week_start = data.weekStart;
+  if (data.dateFormat !== undefined) updateData.date_format = data.dateFormat;
+  if (data.timeFormat !== undefined) updateData.time_format = data.timeFormat;
 
   updateData.updated_at = new Date();
 

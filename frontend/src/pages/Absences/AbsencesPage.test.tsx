@@ -53,6 +53,24 @@ function mockAbsenceRoutes(mock: MockApi, state: { absences: Absence[] }) {
   });
 }
 
+/** Formats a Date as the yyyy-mm-dd value used by the date fields and the API. */
+function formatDate(d: Date): string {
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${month}-${day}`;
+}
+
+/**
+ * Picks a date in the date field with the given label. The picker opens on
+ * the current month, so the date must be in the current month. Day buttons
+ * are labelled with their full date (e.g. "10 November 2026").
+ */
+async function pickDate(label: RegExp, date: Date) {
+  fireEvent.click(screen.getByLabelText(label));
+  const dayName = `${date.getDate()} ${date.toLocaleString('en-GB', { month: 'long' })} ${date.getFullYear()}`;
+  fireEvent.click(await screen.findByRole('button', { name: dayName }));
+}
+
 describe('AbsencesPage', () => {
   let mock: MockApi;
   let state: { absences: Absence[] };
@@ -81,15 +99,16 @@ describe('AbsencesPage', () => {
   });
 
   it('creates an absence through the add dialog', async () => {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 10);
+    const end = new Date(now.getFullYear(), now.getMonth(), 12);
+
     renderWithProviders(<AbsencesPage />, { route: '/absences' });
     fireEvent.click(await screen.findByRole('button', { name: 'Add absence' }));
 
     const dialog = await screen.findByRole('dialog');
-    fireEvent.change(dialog.querySelector('input[type="date"]') as HTMLElement, {
-      target: { value: '2026-11-01' },
-    });
-    const dateInputs = dialog.querySelectorAll('input[type="date"]');
-    fireEvent.change(dateInputs[1], { target: { value: '2026-11-03' } });
+    await pickDate(/^Start date/, start);
+    await pickDate(/^End date/, end);
     fireEvent.change(dialog.querySelector('textarea') as HTMLElement, {
       target: { value: 'Conference' },
     });
@@ -103,11 +122,26 @@ describe('AbsencesPage', () => {
     expect(body).toMatchObject({
       type: 'away',
       description: 'Conference',
-      startDate: '2026-11-01',
-      endDate: '2026-11-03',
+      startDate: formatDate(start),
+      endDate: formatDate(end),
     });
     // The new absence shows up in the list after the cache invalidation.
-    expect(await screen.findByText('2026-11-01 - 2026-11-03')).toBeInTheDocument();
+    expect(
+      await screen.findByText(`${formatDate(start)} - ${formatDate(end)}`),
+    ).toBeInTheDocument();
+  });
+
+  it('defaults the end date to the start date when only the start is set', async () => {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 10);
+
+    renderWithProviders(<AbsencesPage />, { route: '/absences' });
+    fireEvent.click(await screen.findByRole('button', { name: 'Add absence' }));
+
+    await screen.findByRole('dialog');
+    await pickDate(/^Start date/, start);
+
+    expect(screen.getByLabelText(/^End date/)).toHaveTextContent(formatDate(start));
   });
 
   it('deletes an absence', async () => {

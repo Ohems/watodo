@@ -5,6 +5,12 @@ export type AuthProvider = 'discord' | 'google' | 'microsoft';
 /** First day of the week shown in calendars. */
 export type WeekStart = 'sunday' | 'monday';
 
+/** Date format used when displaying dates: year-month-day, month-day-year or day-month-year. */
+export type DateFormat = 'ymd' | 'mdy' | 'dmy';
+
+/** Time format used when displaying times: 24-hour or 12-hour clock. */
+export type TimeFormat = '24h' | '12h';
+
 export interface Users {
   id: Generated<string>;
   email: string;
@@ -20,6 +26,10 @@ export interface Users {
   language: Generated<string>;
   /** First day of the week shown in calendars ('sunday' or 'monday'). */
   week_start: Generated<WeekStart>;
+  /** Date format used when displaying dates ('ymd', 'mdy' or 'dmy'). */
+  date_format: Generated<DateFormat>;
+  /** Time format used when displaying times ('24h' or '12h'). */
+  time_format: Generated<TimeFormat>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }

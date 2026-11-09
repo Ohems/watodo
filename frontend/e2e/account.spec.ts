@@ -158,6 +158,85 @@ test.describe('Account page', () => {
     });
   });
 
+  test.describe('date and time format preferences', () => {
+    test('show the current formats', async ({ page }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, []);
+      await page.goto('/account');
+
+      await expect(page.getByRole('combobox', { name: 'Date format' })).toHaveValue(
+        'YYYY-MM-DD (year-month-day)',
+      );
+      await expect(page.getByRole('combobox', { name: 'Time format' })).toHaveValue(
+        '24-hour clock (14:30)',
+      );
+    });
+
+    test('changing the date format calls PATCH /users/@me with the selected value', async ({
+      page,
+    }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, []);
+
+      let currentDateFormat = testUser.dateFormat;
+      await page.route('**/api/v1/users/@me', route => {
+        const request = route.request();
+        if (request.method() === 'PATCH') {
+          const body = request.postDataJSON() as { dateFormat?: string };
+          currentDateFormat = body.dateFormat ?? currentDateFormat;
+        }
+        return route.fulfill({ json: { ...testUser, dateFormat: currentDateFormat } });
+      });
+
+      await page.goto('/account');
+
+      const patchRequest = page.waitForRequest(
+        req => req.url().includes('/api/v1/users/@me') && req.method() === 'PATCH',
+      );
+
+      await page.getByRole('combobox', { name: 'Date format' }).click();
+      await page.getByRole('option', { name: 'MM/DD/YYYY (month-day-year)' }).click();
+
+      const request = await patchRequest;
+      expect(request.postDataJSON()).toEqual({ dateFormat: 'mdy' });
+      await expect(page.getByRole('combobox', { name: 'Date format' })).toHaveValue(
+        'MM/DD/YYYY (month-day-year)',
+      );
+    });
+
+    test('changing the time format calls PATCH /users/@me with the selected value', async ({
+      page,
+    }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, []);
+
+      let currentTimeFormat = testUser.timeFormat;
+      await page.route('**/api/v1/users/@me', route => {
+        const request = route.request();
+        if (request.method() === 'PATCH') {
+          const body = request.postDataJSON() as { timeFormat?: string };
+          currentTimeFormat = body.timeFormat ?? currentTimeFormat;
+        }
+        return route.fulfill({ json: { ...testUser, timeFormat: currentTimeFormat } });
+      });
+
+      await page.goto('/account');
+
+      const patchRequest = page.waitForRequest(
+        req => req.url().includes('/api/v1/users/@me') && req.method() === 'PATCH',
+      );
+
+      await page.getByRole('combobox', { name: 'Time format' }).click();
+      await page.getByRole('option', { name: '12-hour clock (2:30 PM)' }).click();
+
+      const request = await patchRequest;
+      expect(request.postDataJSON()).toEqual({ timeFormat: '12h' });
+      await expect(page.getByRole('combobox', { name: 'Time format' })).toHaveValue(
+        '12-hour clock (2:30 PM)',
+      );
+    });
+  });
+
   test.describe('editing personal info', () => {
     test('edit and save calls PATCH /users/@me with correct data', async ({ page }) => {
       await mockCommonApis(page, testUser);

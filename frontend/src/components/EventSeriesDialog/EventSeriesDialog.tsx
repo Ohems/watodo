@@ -25,6 +25,8 @@ import type {
   RecurrenceFreq,
   RecurrenceInput,
 } from '../../types/index.js';
+import DateField from '../DateField/index.js';
+import DateTimeField from '../DateTimeField/index.js';
 
 interface EventSeriesDialogProps {
   open: boolean;
@@ -245,13 +247,7 @@ function EventSeriesDialog({
           onChange={value => setCalendarId(value ?? '')}
           required
         />
-        <TextInput
-          label={t('events.start')}
-          type="datetime-local"
-          value={start}
-          onChange={event => setStart(event.target.value)}
-          required
-        />
+        <DateTimeField label={t('events.start')} value={start} onChange={setStart} required />
         <TextInput
           label={t('events.durationMinutes')}
           type="number"
@@ -325,12 +321,7 @@ function EventSeriesDialog({
                 description={t('events.monthDaysHint')}
               />
             )}
-            <TextInput
-              label={t('events.until')}
-              type="date"
-              value={until}
-              onChange={event => setUntil(event.target.value)}
-            />
+            <DateField label={t('events.until')} value={until} onChange={setUntil} />
             <TextInput
               label={t('events.count')}
               type="number"

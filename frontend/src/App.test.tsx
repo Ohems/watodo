@@ -24,6 +24,8 @@ const mockUser: User = {
   phoneNumber: null,
   language: 'en-GB',
   weekStart: 'sunday',
+  dateFormat: 'ymd',
+  timeFormat: '24h',
   permissions: ['admin'],
   state: 'active',
   isEmployed: true,

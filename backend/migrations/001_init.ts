@@ -20,6 +20,10 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     language: { type: 'text', notNull: true, default: 'en-GB' },
     // First day of the week shown in calendars.
     week_start: { type: 'text', notNull: true, default: 'sunday' },
+    // Date format used when displaying dates.
+    date_format: { type: 'text', notNull: true, default: 'ymd' },
+    // Time format used when displaying times: 24-hour or 12-hour clock.
+    time_format: { type: 'text', notNull: true, default: '24h' },
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
@@ -28,6 +32,12 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     'users_week_start_check',
     "CHECK (week_start IN ('sunday', 'monday'))",
   );
+  pgm.addConstraint(
+    'users',
+    'users_date_format_check',
+    "CHECK (date_format IN ('ymd', 'mdy', 'dmy'))",
+  );
+  pgm.addConstraint('users', 'users_time_format_check', "CHECK (time_format IN ('24h', '12h'))");
 
   // Authentication accounts (one user can have accounts from multiple providers)
   pgm.createTable('auth_accounts', {

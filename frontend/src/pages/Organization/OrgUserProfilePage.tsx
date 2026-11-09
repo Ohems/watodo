@@ -11,7 +11,6 @@ import {
   Select,
   Stack,
   Text,
-  TextInput,
   Title,
 } from '@mantine/core';
 import { skipToken } from '@reduxjs/toolkit/query/react';
@@ -33,6 +32,7 @@ import {
   useUpdateUserCertificationMutation,
   useUpdateUserWorkRoleMutation,
 } from '../../api/index.js';
+import DateField from '../../components/DateField/index.js';
 import { EventAssignmentsCard } from '../../components/EventAssignmentsCard/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
 import {
@@ -373,19 +373,15 @@ function OrgUserProfilePage() {
               clearable
               style={{ flex: 1 }}
             />
-            <TextInput
-              type="date"
+            <DateField
               label={t('orgUsers.certificationDate')}
               value={newCertDate}
-              onChange={e => setNewCertDate(e.target.value)}
-              placeholder=""
+              onChange={setNewCertDate}
             />
-            <TextInput
-              type="date"
+            <DateField
               label={t('orgUsers.validUntilDate')}
               value={newValidUntil}
-              onChange={e => setNewValidUntil(e.target.value)}
-              placeholder=""
+              onChange={setNewValidUntil}
             />
             <Button onClick={handleAddCert} disabled={!newCertId}>
               {t('orgUsers.addCertificationButton')}
@@ -441,29 +437,25 @@ function OrgUserProfilePage() {
                   </Group>
                   {canManage && isEditing && editDates && (
                     <Group align="flex-end" mt="xs">
-                      <TextInput
-                        type="date"
+                      <DateField
                         label={t('orgUsers.certificationDate')}
                         value={editDates.certificationDate}
-                        onChange={e =>
+                        onChange={value =>
                           setEditingCertDates(prev => ({
                             ...prev,
-                            [c.id]: { ...prev[c.id], certificationDate: e.target.value },
+                            [c.id]: { ...prev[c.id], certificationDate: value },
                           }))
                         }
-                        placeholder=""
                       />
-                      <TextInput
-                        type="date"
+                      <DateField
                         label={t('orgUsers.validUntilDate')}
                         value={editDates.validUntilDate}
-                        onChange={e =>
+                        onChange={value =>
                           setEditingCertDates(prev => ({
                             ...prev,
-                            [c.id]: { ...prev[c.id], validUntilDate: e.target.value },
+                            [c.id]: { ...prev[c.id], validUntilDate: value },
                           }))
                         }
-                        placeholder=""
                       />
                       <Button size="xs" onClick={() => saveCertDates(c.id)}>
                         {t('orgUsers.saveDates')}

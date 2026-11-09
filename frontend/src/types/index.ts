@@ -3,6 +3,12 @@ import type { Language } from '../i18n/index.js';
 /** First day of the week shown in calendars. */
 export type WeekStart = 'sunday' | 'monday';
 
+/** Date format used when displaying dates: year-month-day, month-day-year or day-month-year. */
+export type DateFormat = 'ymd' | 'mdy' | 'dmy';
+
+/** Time format used when displaying times: 24-hour or 12-hour clock. */
+export type TimeFormat = '24h' | '12h';
+
 export interface User {
   id: string;
   name: string;
@@ -14,6 +20,10 @@ export interface User {
   language: Language;
   /** First day of the week shown in calendars. */
   weekStart: WeekStart;
+  /** Date format used when displaying dates. */
+  dateFormat: DateFormat;
+  /** Time format used when displaying times. */
+  timeFormat: TimeFormat;
   permissions: string[];
   state: 'active' | 'inactive';
   isEmployed: boolean;
@@ -39,6 +49,8 @@ export interface UserSelfUpdate {
   phoneNumber?: string | null;
   language?: Language;
   weekStart?: WeekStart;
+  dateFormat?: DateFormat;
+  timeFormat?: TimeFormat;
 }
 
 /** A login method (OAuth provider account) connected to the user's account. */

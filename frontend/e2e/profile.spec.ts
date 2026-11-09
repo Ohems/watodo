@@ -7,6 +7,7 @@ import {
   mockMyWorkRolesAndCerts,
   mockOrgApis,
   ORG_ID,
+  pickDate,
   regularUser,
 } from './helpers.js';
 
@@ -282,9 +283,11 @@ test.describe('Profile page', () => {
       await page.getByPlaceholder('Select a certification...').click();
       await page.getByRole('option', { name: 'Forklift License' }).click();
 
-      // Set certification date
-      const dateInputs = page.getByLabel('Certification date');
-      await dateInputs.fill('2025-06-01');
+      // Set certification date (the empty picker opens on the current month,
+      // so pick a date in the current month)
+      const now = new Date();
+      const certDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-05`;
+      await pickDate(page, 'Certification date', certDate);
 
       // Click Add certification
       await page.getByRole('button', { name: 'Add certification' }).click();
@@ -294,7 +297,7 @@ test.describe('Profile page', () => {
         .toBe(1);
       expect(captured[0].body).toMatchObject({
         certificationId: 2,
-        certificationDate: '2025-06-01',
+        certificationDate: certDate,
       });
     });
 
@@ -352,10 +355,11 @@ test.describe('Profile page', () => {
       const certsSection = page.getByRole('heading', { name: 'My certifications' }).locator('..');
       await certsSection.getByRole('button', { name: 'Edit' }).click();
 
-      // After clicking Edit, the edit form appears with date inputs.
-      // The add form also has these labels, so use last() to get the edit form's inputs.
-      await page.getByLabel('Certification date').last().fill('2025-02-01');
-      await page.getByLabel('Valid until').last().fill('2028-01-15');
+      // After clicking Edit, the edit form appears with date pickers that
+      // open on the month of their current value (2025-01 and 2027-01). The
+      // add form also has these labels, so use last() to get the edit form's.
+      await pickDate(page, page.getByLabel('Certification date').last(), '2025-01-20');
+      await pickDate(page, page.getByLabel('Valid until').last(), '2027-01-10');
 
       // Save dates
       await page.getByRole('button', { name: 'Save dates' }).click();
@@ -364,8 +368,8 @@ test.describe('Profile page', () => {
         .poll(() => captured.length, { message: 'PATCH my/certifications/20 was called' })
         .toBe(1);
       expect(captured[0].body).toMatchObject({
-        certificationDate: '2025-02-01',
-        validUntilDate: '2028-01-15',
+        certificationDate: '2025-01-20',
+        validUntilDate: '2027-01-10',
       });
     });
   });
@@ -411,9 +415,9 @@ test.describe('Profile page', () => {
         page.locator('span.mantine-Badge-label', { hasText: 'Setup Crew' }),
       ).toBeVisible();
 
-      // Date inputs default to one month back and forward from today.
-      await expect(page.getByLabel('From')).toHaveValue(expectedDateInput(-1));
-      await expect(page.getByLabel('To')).toHaveValue(expectedDateInput(1));
+      // Date fields default to one month back and forward from today.
+      await expect(page.getByLabel('From')).toHaveText(expectedDateInput(-1));
+      await expect(page.getByLabel('To')).toHaveText(expectedDateInput(1));
 
       // The request targets the current user and carries the default span.
       await expect
@@ -438,9 +442,14 @@ test.describe('Profile page', () => {
       await page.goto('/profile');
 
       await expect(page.getByRole('heading', { name: 'Event assignments' })).toBeVisible();
-      await page.getByLabel('To').fill('2025-06-30');
+      // The "To" field defaults to one month ahead, so its picker opens on
+      // that month; pick the 5th of it.
+      const now = new Date();
+      const toDate = new Date(now.getFullYear(), now.getMonth() + 1, 5);
+      const to = `${toDate.getFullYear()}-${String(toDate.getMonth() + 1).padStart(2, '0')}-05`;
+      await pickDate(page, 'To', to);
 
-      const expectedEnd = new Date('2025-06-30T23:59:59').toISOString().slice(0, 19);
+      const expectedEnd = new Date(`${to}T23:59:59`).toISOString().slice(0, 19);
       await expect
         .poll(
           () =>

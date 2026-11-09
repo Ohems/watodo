@@ -1,4 +1,4 @@
-import { Badge, Select, TextInput } from '@mantine/core';
+import { Badge, Select } from '@mantine/core';
 import { skipToken } from '@reduxjs/toolkit/query/react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -11,7 +11,9 @@ import {
   useGetTeamsQuery,
 } from '../../api/index.js';
 import DataTable, { type DataTableColumn } from '../../components/DataTable/DataTable.js';
+import DateField from '../../components/DateField/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
+import { useFormatters } from '../../hooks/use-formatters.js';
 import { selectActiveOrganizationId } from '../../store/organization-slice.js';
 import type { EventSeriesManagement } from '../../types/index.js';
 
@@ -23,6 +25,8 @@ function EventManagementPage() {
   const canWrite =
     currentUser?.permissions?.includes('admin') === true ||
     currentUser?.permissions?.includes('events:write') === true;
+
+  const { formatDateTime } = useFormatters();
 
   const [page, setPage] = useState(0);
   const [limit, setLimit] = useState(50);
@@ -83,7 +87,7 @@ function EventManagementPage() {
     {
       key: 'start',
       label: t('events.start'),
-      render: item => new Date(item.start).toLocaleString(),
+      render: item => formatDateTime(item.start),
     },
     {
       key: 'location',
@@ -132,20 +136,18 @@ function EventManagementPage() {
       onRowClick={item => navigate(`/events/${item.id}`)}
       extraFilters={
         <>
-          <TextInput
+          <DateField
             size="sm"
-            type="date"
             placeholder={t('events.filterDateFrom')}
             value={dateFrom}
-            onChange={e => setDateFrom(e.target.value)}
+            onChange={setDateFrom}
             style={{ minWidth: 150 }}
           />
-          <TextInput
+          <DateField
             size="sm"
-            type="date"
             placeholder={t('events.filterDateTo')}
             value={dateTo}
-            onChange={e => setDateTo(e.target.value)}
+            onChange={setDateTo}
             style={{ minWidth: 150 }}
           />
           <Select

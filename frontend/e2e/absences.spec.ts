@@ -4,6 +4,7 @@ import {
   createOrganization,
   interceptMutation,
   mockCommonApis,
+  pickDate,
   regularUser,
 } from './helpers.js';
 
@@ -92,17 +93,37 @@ test.describe('Absences page', () => {
   });
 
   test.describe('editing', () => {
+    test('the date picker starts the week on Monday when the user configured it', async ({
+      page,
+    }) => {
+      await mockCommonApis(page, adminUser({ weekStart: 'monday' }), [testOrg]);
+      await mockAbsences(page, []);
+      await page.goto('/absences');
+
+      await page.getByRole('button', { name: 'Add absence' }).click();
+      await page.getByLabel('Start date').click();
+
+      const weekdays = page.locator('[data-dates-dropdown]:visible thead th');
+      await expect(weekdays).toHaveCount(7);
+      await expect(weekdays.first()).toHaveText('Mo');
+      await expect(weekdays.nth(6)).toHaveText('Su');
+    });
+
     test('adding an absence calls POST /api/v1/users/@me/absences with the form body', async ({
       page,
     }) => {
       await mockCommonApis(page, adminUser(), [testOrg]);
       await mockAbsences(page);
+      // Dates in the current month so the picker's calendar shows them directly.
+      const now = new Date();
+      const start = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-10`;
+      const end = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-12`;
       const created = await interceptMutation(page, '**/api/v1/users/@me/absences', 'POST', {
         ...absences[0],
         id: 3,
         type: 'other',
-        startDate: '2026-11-01',
-        endDate: '2026-11-02',
+        startDate: start,
+        endDate: end,
       });
       await page.goto('/absences');
 
@@ -110,9 +131,8 @@ test.describe('Absences page', () => {
       const dialog = page.getByRole('dialog');
       await expect(dialog).toBeVisible();
 
-      const dateInputs = dialog.locator('input[type="date"]');
-      await dateInputs.nth(0).fill('2026-11-01');
-      await dateInputs.nth(1).fill('2026-11-02');
+      await pickDate(page, 'Start date', start);
+      await pickDate(page, 'End date', end);
       await dialog.locator('textarea').fill('Moved house');
       await dialog.getByRole('combobox').click();
       await page.getByRole('option', { name: 'Other' }).click();
@@ -123,8 +143,8 @@ test.describe('Absences page', () => {
       expect(created[0].body).toEqual({
         type: 'other',
         description: 'Moved house',
-        startDate: '2026-11-01',
-        endDate: '2026-11-02',
+        startDate: start,
+        endDate: end,
       });
     });
 
@@ -168,10 +188,17 @@ test.describe('Home quick actions', () => {
   }) => {
     await mockCommonApis(page, adminUser(), [testOrg]);
     await mockAbsences(page, []);
+    // Dates in the current month so the picker's calendar shows them directly.
+    const now = new Date();
+    const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const start = `${monthPrefix}-10`;
+    const end = `${monthPrefix}-12`;
     const created = await interceptMutation(page, '**/api/v1/users/@me/absences', 'POST', {
       ...absences[0],
       id: 5,
       type: 'sick',
+      startDate: start,
+      endDate: end,
     });
     await page.goto('/');
 
@@ -179,9 +206,8 @@ test.describe('Home quick actions', () => {
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
 
-    const dateInputs = dialog.locator('input[type="date"]');
-    await dateInputs.nth(0).fill('2026-12-01');
-    await dateInputs.nth(1).fill('2026-12-03');
+    await pickDate(page, 'Start date', start);
+    await pickDate(page, 'End date', end);
     await dialog.getByRole('combobox').click();
     await page.getByRole('option', { name: 'Sick' }).click();
     await dialog.getByRole('button', { name: 'Save' }).click();
@@ -189,8 +215,8 @@ test.describe('Home quick actions', () => {
     await expect.poll(() => created.length).toBe(1);
     expect(created[0].body).toMatchObject({
       type: 'sick',
-      startDate: '2026-12-01',
-      endDate: '2026-12-03',
+      startDate: start,
+      endDate: end,
     });
   });
 });

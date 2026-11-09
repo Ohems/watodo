@@ -1,4 +1,4 @@
-import { Alert, Button, Group, Modal, Select, Textarea, TextInput } from '@mantine/core';
+import { Alert, Button, Group, Modal, Select, Textarea } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -7,6 +7,7 @@ import {
   useUpdateAbsenceMutation,
 } from '../../api/index.js';
 import type { Absence, AbsenceType } from '../../types/index.js';
+import DateField from '../DateField/index.js';
 
 interface AbsenceDialogProps {
   opened: boolean;
@@ -97,20 +98,17 @@ function AbsenceDialog({ opened, onClose, absence }: AbsenceDialogProps) {
         mb="md"
       />
       <Group grow mb="md">
-        <TextInput
-          type="date"
+        <DateField
           label={t('absences.startDate')}
           value={startDate}
-          onChange={e => setStartDate(e.currentTarget.value)}
+          onChange={value => {
+            setStartDate(value);
+            // Default the end date to the start date while it is still unset.
+            if (endDate === '') setEndDate(value);
+          }}
           required
         />
-        <TextInput
-          type="date"
-          label={t('absences.endDate')}
-          value={endDate}
-          onChange={e => setEndDate(e.currentTarget.value)}
-          required
-        />
+        <DateField label={t('absences.endDate')} value={endDate} onChange={setEndDate} required />
       </Group>
       {startDate !== '' && endDate !== '' && endDate < startDate && (
         <Alert color="red" variant="light" mb="md">

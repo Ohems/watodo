@@ -13,17 +13,31 @@ import {
 } from '../../api/index.js';
 import EditField from '../../components/EditField/EditField.js';
 import { useAppDispatch } from '../../hooks/redux.js';
+import { useFormatters } from '../../hooks/use-formatters.js';
 import { LANGUAGE_LABELS, type Language, SUPPORTED_LANGUAGES } from '../../i18n/index.js';
 import { deleteCurrentUser } from '../../store/session.js';
-import type { FieldErrors, UserSelfUpdate, WeekStart } from '../../types/index.js';
+import type {
+  DateFormat,
+  FieldErrors,
+  TimeFormat,
+  UserSelfUpdate,
+  WeekStart,
+} from '../../types/index.js';
 import { validateUserSelfUpdate } from '../../validation.js';
 
 /** Week start options offered in the preferences. */
 const WEEK_START_OPTIONS: WeekStart[] = ['sunday', 'monday'];
 
+/** Date format options offered in the preferences. */
+const DATE_FORMAT_OPTIONS: DateFormat[] = ['ymd', 'mdy', 'dmy'];
+
+/** Time format options offered in the preferences. */
+const TIME_FORMAT_OPTIONS: TimeFormat[] = ['24h', '12h'];
+
 function AccountPage() {
   const { t, i18n } = useTranslation();
   const dispatch = useAppDispatch();
+  const { formatDate } = useFormatters();
   const { data: currentUser } = useGetCurrentUserQuery();
   const { data: authAccounts = [] } = useGetAuthAccountsQuery();
   const { data: providersData, isError: providersError } = useGetAuthProvidersQuery();
@@ -43,6 +57,8 @@ function AccountPage() {
   const [deleting, setDeleting] = useState(false);
   const [languageError, setLanguageError] = useState<string | null>(null);
   const [weekStartError, setWeekStartError] = useState<string | null>(null);
+  const [dateFormatError, setDateFormatError] = useState<string | null>(null);
+  const [timeFormatError, setTimeFormatError] = useState<string | null>(null);
 
   // No hardcoded fallback: the provider list always comes from the API (the
   // E2E tests mock it; on error an empty list is shown).
@@ -162,6 +178,26 @@ function AccountPage() {
       await updateCurrentUser({ weekStart }).unwrap();
     } catch (error) {
       setWeekStartError(getApiErrorMessage(error) || t('account.weekStartUpdateFailed'));
+    }
+  };
+
+  // The date and time formats are saved immediately (not part of the edit
+  // form) so displayed dates and times switch right away.
+  const handleDateFormatChange = async (dateFormat: DateFormat) => {
+    setDateFormatError(null);
+    try {
+      await updateCurrentUser({ dateFormat }).unwrap();
+    } catch (error) {
+      setDateFormatError(getApiErrorMessage(error) || t('account.dateFormatUpdateFailed'));
+    }
+  };
+
+  const handleTimeFormatChange = async (timeFormat: TimeFormat) => {
+    setTimeFormatError(null);
+    try {
+      await updateCurrentUser({ timeFormat }).unwrap();
+    } catch (error) {
+      setTimeFormatError(getApiErrorMessage(error) || t('account.timeFormatUpdateFailed'));
     }
   };
 
@@ -317,6 +353,48 @@ function AccountPage() {
               if (value) void handleWeekStartChange(value as WeekStart);
             }}
           />
+          {dateFormatError && (
+            <Alert
+              color="red"
+              variant="light"
+              withCloseButton
+              onClose={() => setDateFormatError(null)}
+            >
+              {dateFormatError}
+            </Alert>
+          )}
+          <Select
+            label={t('account.dateFormat')}
+            data={DATE_FORMAT_OPTIONS.map(option => ({
+              value: option,
+              label: t(`account.dateFormat_${option}`),
+            }))}
+            value={currentUser.dateFormat}
+            onChange={value => {
+              if (value) void handleDateFormatChange(value as DateFormat);
+            }}
+          />
+          {timeFormatError && (
+            <Alert
+              color="red"
+              variant="light"
+              withCloseButton
+              onClose={() => setTimeFormatError(null)}
+            >
+              {timeFormatError}
+            </Alert>
+          )}
+          <Select
+            label={t('account.timeFormat')}
+            data={TIME_FORMAT_OPTIONS.map(option => ({
+              value: option,
+              label: t(`account.timeFormat_${option}`),
+            }))}
+            value={currentUser.timeFormat}
+            onChange={value => {
+              if (value) void handleTimeFormatChange(value as TimeFormat);
+            }}
+          />
         </Stack>
       </Paper>
 
@@ -354,7 +432,7 @@ function AccountPage() {
                     {account && (
                       <Text size="xs" c="dimmed">
                         {t('account.connectedAt', {
-                          date: new Date(account.createdAt).toLocaleDateString(),
+                          date: formatDate(account.createdAt),
                         })}
                       </Text>
                     )}

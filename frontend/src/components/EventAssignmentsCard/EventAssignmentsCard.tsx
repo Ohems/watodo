@@ -8,7 +8,6 @@ import {
   Paper,
   Stack,
   Text,
-  TextInput,
   Title,
 } from '@mantine/core';
 import { skipToken } from '@reduxjs/toolkit/query/react';
@@ -16,12 +15,14 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { useGetCurrentUserQuery, useGetUserEventAssignmentsQuery } from '../../api/index.js';
+import { useFormatters } from '../../hooks/use-formatters.js';
 import { occurrenceRef, type UserEventAssignment } from '../../types/index.js';
+import DateField from '../DateField/index.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const PAGE_SIZE = 5;
 
-/** Formats a Date as the yyyy-mm-dd value of an <input type="date">. */
+/** Formats a Date as a yyyy-mm-dd date field value. */
 function toDateInputValue(d: Date): string {
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -29,7 +30,7 @@ function toDateInputValue(d: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-/** Parses an <input type="date"> value into a Date at local midnight. */
+/** Parses a yyyy-mm-dd date field value into a Date at local midnight. */
 function fromDateInputValue(value: string): Date | null {
   if (!value) return null;
   const parsed = new Date(`${value}T00:00:00`);
@@ -105,17 +106,15 @@ function EventAssignmentsCard({
       </Title>
 
       <Group align="flex-end" mb="md" gap="sm">
-        <TextInput
-          type="date"
+        <DateField
           label={t('orgUsers.fromDate')}
           value={toDateInputValue(range.start)}
-          onChange={e => setRangeStart(e.currentTarget.value)}
+          onChange={setRangeStart}
         />
-        <TextInput
-          type="date"
+        <DateField
           label={t('orgUsers.toDate')}
           value={toDateInputValue(range.end)}
-          onChange={e => setRangeEnd(e.currentTarget.value)}
+          onChange={setRangeEnd}
         />
       </Group>
 
@@ -175,6 +174,7 @@ function EventAssignmentRow({
   onClick: () => void;
 }) {
   const { t } = useTranslation();
+  const { formatDateTime } = useFormatters();
   return (
     <Group
       justify="space-between"
@@ -192,7 +192,7 @@ function EventAssignmentRow({
           {assignment.title}
         </Text>
         <Text size="xs" c="dimmed">
-          {new Date(assignment.start).toLocaleString()}
+          {formatDateTime(assignment.start)}
         </Text>
       </Box>
       <Group gap="xs" wrap="wrap">

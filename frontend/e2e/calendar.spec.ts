@@ -1,5 +1,15 @@
 import { expect, type Page, test } from '@playwright/test';
-import moment from 'moment';
+import {
+  addDays,
+  addMonths,
+  addWeeks,
+  endOfWeek,
+  format,
+  isSameMonth,
+  startOfWeek,
+  subMonths,
+  subWeeks,
+} from 'date-fns';
 import { mockAuthProviders } from './helpers.js';
 
 const ORG_ID = 'org-1';
@@ -12,6 +22,8 @@ const mockUser = {
   phoneNumber: null,
   language: 'en-GB',
   weekStart: 'sunday',
+  dateFormat: 'ymd',
+  timeFormat: '24h',
   permissions: ['admin'],
   state: 'active',
   isEmployed: true,
@@ -55,20 +67,20 @@ async function mockApi(page: Page, user: typeof mockUser = mockUser) {
   await page.route('**/api/v1/event-series/occurrences?*', route => route.fulfill({ json: [] }));
 }
 
-/** Label formats mirror the react-big-calendar moment localizer defaults. */
+/** Label formats mirror the react-big-calendar date-fns localizer defaults. */
 function monthLabel(date: Date): string {
-  return moment(date).format('MMMM YYYY');
+  return format(date, 'MMMM yyyy');
 }
 
 function weekLabel(date: Date): string {
-  const start = moment(date).startOf('week');
-  const end = moment(date).endOf('week');
-  const endText = start.isSame(end, 'month') ? end.format('DD') : end.format('MMMM DD');
-  return `${start.format('MMMM DD')} – ${endText}`;
+  const start = startOfWeek(date, { weekStartsOn: 0 });
+  const end = endOfWeek(date, { weekStartsOn: 0 });
+  const endText = isSameMonth(start, end) ? format(end, 'dd') : format(end, 'MMMM dd');
+  return `${format(start, 'MMMM dd')} – ${endText}`;
 }
 
 function dayLabel(date: Date): string {
-  return moment(date).format('dddd MMM DD');
+  return format(date, 'cccc MMM dd');
 }
 
 function toolbar(page: Page) {
@@ -105,15 +117,13 @@ test.describe('Calendar page navigation', () => {
     const now = new Date();
 
     await clickNavigate(page, 'Next');
-    await expect(toolbarLabel(page)).toHaveText(monthLabel(moment(now).add(1, 'month').toDate()));
+    await expect(toolbarLabel(page)).toHaveText(monthLabel(addMonths(now, 1)));
 
     await clickNavigate(page, 'Back');
     await expect(toolbarLabel(page)).toHaveText(monthLabel(now));
 
     await clickNavigate(page, 'Back');
-    await expect(toolbarLabel(page)).toHaveText(
-      monthLabel(moment(now).subtract(1, 'month').toDate()),
-    );
+    await expect(toolbarLabel(page)).toHaveText(monthLabel(subMonths(now, 1)));
   });
 
   test('rapid Back presses move one month at a time without getting stuck or skipping', async ({
@@ -125,9 +135,7 @@ test.describe('Calendar page navigation', () => {
     for (let i = 0; i < 3; i++) {
       await clickNavigate(page, 'Back');
     }
-    await expect(toolbarLabel(page)).toHaveText(
-      monthLabel(moment(now).subtract(3, 'month').toDate()),
-    );
+    await expect(toolbarLabel(page)).toHaveText(monthLabel(subMonths(now, 3)));
 
     for (let i = 0; i < 3; i++) {
       await clickNavigate(page, 'Next');
@@ -143,13 +151,11 @@ test.describe('Calendar page navigation', () => {
     await expect(toolbarLabel(page)).toHaveText(weekLabel(now));
 
     await clickNavigate(page, 'Next');
-    await expect(toolbarLabel(page)).toHaveText(weekLabel(moment(now).add(1, 'week').toDate()));
+    await expect(toolbarLabel(page)).toHaveText(weekLabel(addWeeks(now, 1)));
 
     await clickNavigate(page, 'Back');
     await clickNavigate(page, 'Back');
-    await expect(toolbarLabel(page)).toHaveText(
-      weekLabel(moment(now).subtract(1, 'week').toDate()),
-    );
+    await expect(toolbarLabel(page)).toHaveText(weekLabel(subWeeks(now, 1)));
   });
 
   test('navigates between days in day view', async ({ page }) => {
@@ -160,7 +166,7 @@ test.describe('Calendar page navigation', () => {
     await expect(toolbarLabel(page)).toHaveText(dayLabel(now));
 
     await clickNavigate(page, 'Next');
-    await expect(toolbarLabel(page)).toHaveText(dayLabel(moment(now).add(1, 'day').toDate()));
+    await expect(toolbarLabel(page)).toHaveText(dayLabel(addDays(now, 1)));
 
     await clickNavigate(page, 'Back');
     await expect(toolbarLabel(page)).toHaveText(dayLabel(now));
@@ -172,7 +178,7 @@ test.describe('Calendar page navigation', () => {
 
     await clickNavigate(page, 'Next');
     await clickNavigate(page, 'Next');
-    await expect(toolbarLabel(page)).toHaveText(monthLabel(moment(now).add(2, 'month').toDate()));
+    await expect(toolbarLabel(page)).toHaveText(monthLabel(addMonths(now, 2)));
 
     await clickNavigate(page, 'Today');
     await expect(toolbarLabel(page)).toHaveText(monthLabel(now));
@@ -200,10 +206,10 @@ test.describe('Calendar week start', () => {
 
     await switchView(page, 'Week');
     // With Monday as the first day, the week's label starts on the Monday of
-    // the current week (the test's moment still uses Sunday-based weeks).
-    const start = moment(now).startOf('isoWeek');
-    const end = moment(now).endOf('isoWeek');
-    const endText = start.isSame(end, 'month') ? end.format('DD') : end.format('MMMM DD');
-    await expect(toolbarLabel(page)).toHaveText(`${start.format('MMMM DD')} – ${endText}`);
+    // the current week (date-fns weeks are Sunday-based unless weekStartsOn says otherwise).
+    const start = startOfWeek(now, { weekStartsOn: 1 });
+    const end = endOfWeek(now, { weekStartsOn: 1 });
+    const endText = isSameMonth(start, end) ? format(end, 'dd') : format(end, 'MMMM dd');
+    await expect(toolbarLabel(page)).toHaveText(`${format(start, 'MMMM dd')} – ${endText}`);
   });
 });
