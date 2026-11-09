@@ -31,6 +31,7 @@ import {
 } from '../../api/index.js';
 import DateField from '../../components/DateField/index.js';
 import { EventAssignmentsCard } from '../../components/EventAssignmentsCard/index.js';
+import { QueryError } from '../../components/QueryState/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
 import { selectActiveOrganizationId } from '../../store/organization-slice.js';
 
@@ -39,14 +40,14 @@ function ProfilePage() {
   const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
   const { data: currentUser } = useGetCurrentUserQuery();
 
-  const { data: myRoles, isLoading: loadingRoles } = useGetMyWorkRolesQuery(
+  const myRolesQuery = useGetMyWorkRolesQuery(activeOrganizationId ?? skipToken);
+  const myCertsQuery = useGetMyCertificationsQuery(activeOrganizationId ?? skipToken);
+  const { data: allRoles, isError: allRolesError } = useGetAllWorkRolesQuery(
     activeOrganizationId ?? skipToken,
   );
-  const { data: myCerts, isLoading: loadingCerts } = useGetMyCertificationsQuery(
+  const { data: allCerts, isError: allCertsError } = useGetAllCertificationsQuery(
     activeOrganizationId ?? skipToken,
   );
-  const { data: allRoles } = useGetAllWorkRolesQuery(activeOrganizationId ?? skipToken);
-  const { data: allCerts } = useGetAllCertificationsQuery(activeOrganizationId ?? skipToken);
 
   const [addWorkRole] = useAddMyWorkRoleMutation();
   const [removeWorkRole] = useRemoveMyWorkRoleMutation();
@@ -83,7 +84,7 @@ function ProfilePage() {
     );
   }
 
-  if (loadingRoles || loadingCerts) {
+  if (myRolesQuery.isLoading || myCertsQuery.isLoading) {
     return (
       <Center p="xl">
         <Loader />
@@ -91,12 +92,12 @@ function ProfilePage() {
     );
   }
 
-  const assignedRoleIds = new Set((myRoles ?? []).map(r => String(r.workRoleId)));
+  const assignedRoleIds = new Set((myRolesQuery.data ?? []).map(r => String(r.workRoleId)));
   const roleOptions = (allRoles ?? [])
     .filter(r => !assignedRoleIds.has(String(r.id)))
     .map(r => ({ value: String(r.id), label: r.name }));
 
-  const assignedCertIds = new Set((myCerts ?? []).map(c => String(c.certificationId)));
+  const assignedCertIds = new Set((myCertsQuery.data ?? []).map(c => String(c.certificationId)));
   const certOptions = (allCerts ?? [])
     .filter(c => !assignedCertIds.has(String(c.id)))
     .map(c => ({ value: String(c.id), label: c.name }));
@@ -241,50 +242,56 @@ function ProfilePage() {
         <Title order={4} mb="md">
           {t('profile.myWorkRoles')}
         </Title>
-        <Text size="sm" c="dimmed" mb="md">
-          {t('profile.selectRolesHint')}
-        </Text>
-        <MultiSelect
-          data={roleOptions}
-          value={selectedRoleIds}
-          onChange={handleAddRoles}
-          placeholder={t('profile.addRole')}
-          searchable
-          clearable
-          mb="md"
-        />
-        {(myRoles ?? []).length === 0 ? (
-          <Text c="dimmed">{t('profile.noRoles')}</Text>
+        {myRolesQuery.isError || allRolesError ? (
+          <QueryError />
         ) : (
-          <Stack gap="xs">
-            {(myRoles ?? []).map(r => (
-              <Group key={r.id} justify="space-between">
-                <Box>
-                  <Text fw={500}>{r.workRoleName}</Text>
-                  {r.workRoleDescription && (
-                    <Text size="sm" c="dimmed">
-                      {r.workRoleDescription}
-                    </Text>
-                  )}
-                </Box>
-                <Group gap="xs">
-                  {r.isQualified && (
-                    <Badge color="green" variant="light">
-                      {t('profile.qualified')}
-                    </Badge>
-                  )}
-                  <Button
-                    variant="subtle"
-                    color="red"
-                    size="xs"
-                    onClick={() => handleRemoveRole(r.id)}
-                  >
-                    {t('common.delete')}
-                  </Button>
-                </Group>
-              </Group>
-            ))}
-          </Stack>
+          <>
+            <Text size="sm" c="dimmed" mb="md">
+              {t('profile.selectRolesHint')}
+            </Text>
+            <MultiSelect
+              data={roleOptions}
+              value={selectedRoleIds}
+              onChange={handleAddRoles}
+              placeholder={t('profile.addRole')}
+              searchable
+              clearable
+              mb="md"
+            />
+            {(myRolesQuery.data ?? []).length === 0 ? (
+              <Text c="dimmed">{t('profile.noRoles')}</Text>
+            ) : (
+              <Stack gap="xs">
+                {(myRolesQuery.data ?? []).map(r => (
+                  <Group key={r.id} justify="space-between">
+                    <Box>
+                      <Text fw={500}>{r.workRoleName}</Text>
+                      {r.workRoleDescription && (
+                        <Text size="sm" c="dimmed">
+                          {r.workRoleDescription}
+                        </Text>
+                      )}
+                    </Box>
+                    <Group gap="xs">
+                      {r.isQualified && (
+                        <Badge color="green" variant="light">
+                          {t('profile.qualified')}
+                        </Badge>
+                      )}
+                      <Button
+                        variant="subtle"
+                        color="red"
+                        size="xs"
+                        onClick={() => handleRemoveRole(r.id)}
+                      >
+                        {t('common.delete')}
+                      </Button>
+                    </Group>
+                  </Group>
+                ))}
+              </Stack>
+            )}
+          </>
         )}
       </Paper>
 
@@ -292,113 +299,124 @@ function ProfilePage() {
         <Title order={4} mb="md">
           {t('profile.myCertifications')}
         </Title>
-        <Text size="sm" c="dimmed" mb="md">
-          {t('profile.addCertificationHint')}
-        </Text>
-
-        <Group align="flex-end" mb="md">
-          <Select
-            data={certOptions}
-            value={newCertId}
-            onChange={setNewCertId}
-            placeholder={t('profile.selectCertification')}
-            searchable
-            clearable
-            style={{ flex: 1 }}
-          />
-          <DateField
-            label={t('profile.certificationDate')}
-            value={newCertDate}
-            onChange={setNewCertDate}
-          />
-          <DateField
-            label={t('profile.validUntilDate')}
-            value={newValidUntil}
-            onChange={setNewValidUntil}
-          />
-          <Button onClick={handleAddCert} disabled={!newCertId}>
-            {t('profile.addCertificationButton')}
-          </Button>
-        </Group>
-
-        {(myCerts ?? []).length === 0 ? (
-          <Text c="dimmed">{t('profile.noCertifications')}</Text>
+        {myCertsQuery.isError || allCertsError ? (
+          <QueryError />
         ) : (
-          <Stack gap="md">
-            {(myCerts ?? []).map(c => {
-              const isEditing = c.id in editingCertDates;
-              const editDates = editingCertDates[c.id];
-              return (
-                <Box key={c.id}>
-                  <Group justify="space-between">
-                    <Box>
-                      <Text fw={500}>{c.certificationName}</Text>
-                      {!isEditing && (
-                        <Text size="sm" c="dimmed">
-                          {c.certificationDate &&
-                            `${t('profile.certified')}: ${c.certificationDate}`}
-                          {c.certificationDate && c.validUntilDate && ' | '}
-                          {c.validUntilDate && `${t('profile.validUntil')}: ${c.validUntilDate}`}
-                          {!c.certificationDate && !c.validUntilDate && '-'}
-                        </Text>
+          <>
+            <Text size="sm" c="dimmed" mb="md">
+              {t('profile.addCertificationHint')}
+            </Text>
+
+            <Group align="flex-end" mb="md">
+              <Select
+                data={certOptions}
+                value={newCertId}
+                onChange={setNewCertId}
+                placeholder={t('profile.selectCertification')}
+                searchable
+                clearable
+                style={{ flex: 1 }}
+              />
+              <DateField
+                label={t('profile.certificationDate')}
+                value={newCertDate}
+                onChange={setNewCertDate}
+              />
+              <DateField
+                label={t('profile.validUntilDate')}
+                value={newValidUntil}
+                onChange={setNewValidUntil}
+              />
+              <Button onClick={handleAddCert} disabled={!newCertId}>
+                {t('profile.addCertificationButton')}
+              </Button>
+            </Group>
+
+            {(myCertsQuery.data ?? []).length === 0 ? (
+              <Text c="dimmed">{t('profile.noCertifications')}</Text>
+            ) : (
+              <Stack gap="md">
+                {(myCertsQuery.data ?? []).map(c => {
+                  const isEditing = c.id in editingCertDates;
+                  const editDates = editingCertDates[c.id];
+                  return (
+                    <Box key={c.id}>
+                      <Group justify="space-between">
+                        <Box>
+                          <Text fw={500}>{c.certificationName}</Text>
+                          {!isEditing && (
+                            <Text size="sm" c="dimmed">
+                              {c.certificationDate &&
+                                `${t('profile.certified')}: ${c.certificationDate}`}
+                              {c.certificationDate && c.validUntilDate && ' | '}
+                              {c.validUntilDate &&
+                                `${t('profile.validUntil')}: ${c.validUntilDate}`}
+                              {!c.certificationDate && !c.validUntilDate && '-'}
+                            </Text>
+                          )}
+                        </Box>
+                        <Group gap="xs">
+                          {!isEditing && (
+                            <Button
+                              variant="subtle"
+                              size="xs"
+                              onClick={() =>
+                                startEditCertDates(c.id, c.certificationDate, c.validUntilDate)
+                              }
+                            >
+                              {t('common.edit')}
+                            </Button>
+                          )}
+                          <Button
+                            variant="subtle"
+                            color="red"
+                            size="xs"
+                            onClick={() => handleRemoveCert(c.id)}
+                          >
+                            {t('common.delete')}
+                          </Button>
+                        </Group>
+                      </Group>
+                      {isEditing && editDates && (
+                        <Group align="flex-end" mt="xs">
+                          <DateField
+                            label={t('profile.certificationDate')}
+                            value={editDates.certificationDate}
+                            onChange={value =>
+                              setEditingCertDates(prev => ({
+                                ...prev,
+                                [c.id]: { ...prev[c.id], certificationDate: value },
+                              }))
+                            }
+                          />
+                          <DateField
+                            label={t('profile.validUntilDate')}
+                            value={editDates.validUntilDate}
+                            onChange={value =>
+                              setEditingCertDates(prev => ({
+                                ...prev,
+                                [c.id]: { ...prev[c.id], validUntilDate: value },
+                              }))
+                            }
+                          />
+                          <Button size="xs" onClick={() => saveCertDates(c.id)}>
+                            {t('profile.saveDates')}
+                          </Button>
+                          <Button
+                            size="xs"
+                            variant="default"
+                            onClick={() => cancelEditCertDates(c.id)}
+                          >
+                            {t('common.cancel')}
+                          </Button>
+                        </Group>
                       )}
                     </Box>
-                    <Group gap="xs">
-                      {!isEditing && (
-                        <Button
-                          variant="subtle"
-                          size="xs"
-                          onClick={() =>
-                            startEditCertDates(c.id, c.certificationDate, c.validUntilDate)
-                          }
-                        >
-                          {t('common.edit')}
-                        </Button>
-                      )}
-                      <Button
-                        variant="subtle"
-                        color="red"
-                        size="xs"
-                        onClick={() => handleRemoveCert(c.id)}
-                      >
-                        {t('common.delete')}
-                      </Button>
-                    </Group>
-                  </Group>
-                  {isEditing && editDates && (
-                    <Group align="flex-end" mt="xs">
-                      <DateField
-                        label={t('profile.certificationDate')}
-                        value={editDates.certificationDate}
-                        onChange={value =>
-                          setEditingCertDates(prev => ({
-                            ...prev,
-                            [c.id]: { ...prev[c.id], certificationDate: value },
-                          }))
-                        }
-                      />
-                      <DateField
-                        label={t('profile.validUntilDate')}
-                        value={editDates.validUntilDate}
-                        onChange={value =>
-                          setEditingCertDates(prev => ({
-                            ...prev,
-                            [c.id]: { ...prev[c.id], validUntilDate: value },
-                          }))
-                        }
-                      />
-                      <Button size="xs" onClick={() => saveCertDates(c.id)}>
-                        {t('profile.saveDates')}
-                      </Button>
-                      <Button size="xs" variant="default" onClick={() => cancelEditCertDates(c.id)}>
-                        {t('common.cancel')}
-                      </Button>
-                    </Group>
-                  )}
-                </Box>
-              );
-            })}
-          </Stack>
+                  );
+                })}
+              </Stack>
+            )}
+          </>
         )}
       </Paper>
 

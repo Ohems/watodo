@@ -22,6 +22,7 @@ import {
 } from '../../api/index.js';
 import { AbsenceDialog } from '../../components/AbsenceDialog/index.js';
 import Calendar, { type CalendarEvent } from '../../components/Calendar/Calendar.js';
+import { QueryError } from '../../components/QueryState/index.js';
 import type { Absence, AbsenceType } from '../../types/index.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -39,7 +40,7 @@ const TYPE_COLORS: Record<AbsenceType, string> = {
  */
 function AbsencesPage() {
   const { t } = useTranslation();
-  const { data: absences, isLoading } = useGetMyAbsencesQuery(undefined);
+  const { data: absences, isLoading, isError } = useGetMyAbsencesQuery(undefined);
   const { data: currentUser } = useGetCurrentUserQuery();
   const [deleteAbsence] = useDeleteAbsenceMutation();
 
@@ -75,6 +76,15 @@ function AbsencesPage() {
       <Center p="xl">
         <Loader />
       </Center>
+    );
+  }
+
+  // A failed query must not render as an empty calendar/list.
+  if (isError) {
+    return (
+      <Box p="md" maw={900} mx="auto">
+        <QueryError />
+      </Box>
     );
   }
 

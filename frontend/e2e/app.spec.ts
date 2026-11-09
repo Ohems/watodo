@@ -40,4 +40,25 @@ test.describe('Watodo App', () => {
     await page.goto('/nonexistent-route');
     await expect(page.getByText('Sign in to continue')).toBeVisible();
   });
+
+  test('shows the no-providers message when the server responds with an empty provider list', async ({
+    page,
+  }) => {
+    // Later route registrations win over the beforeEach mock.
+    await page.route('**/api/v1/auth/providers', route =>
+      route.fulfill({ json: { providers: [] } }),
+    );
+    await page.goto('/');
+    await expect(page.getByText('No login methods are configured on this server.')).toBeVisible();
+  });
+
+  test('shows a service-unavailable message when the backend is unreachable', async ({ page }) => {
+    // Later route registrations win over the beforeEach mock; aborting the
+    // request simulates the backend being down.
+    await page.route('**/api/v1/auth/providers', route => route.abort());
+    await page.goto('/');
+    await expect(page.getByText(/The service is currently unavailable/)).toBeVisible();
+    await expect(page.getByText('No login methods are configured on this server.')).toHaveCount(0);
+    await expect(page.getByRole('link', { name: /Sign in with/ })).toHaveCount(0);
+  });
 });

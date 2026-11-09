@@ -1,4 +1,4 @@
-import { Box, Group, Loader, Select, Title } from '@mantine/core';
+import { Alert, Box, Center, Group, Loader, Select, Title } from '@mantine/core';
 import { skipToken } from '@reduxjs/toolkit/query/react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -11,8 +11,13 @@ import {
   useGetTeamsQuery,
 } from '../../api/index.js';
 import Calendar, { type CalendarEvent } from '../../components/Calendar/Calendar.js';
+import { QueryError, QueryState } from '../../components/QueryState/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
-import { selectActiveOrganizationId } from '../../store/organization-slice.js';
+import {
+  selectActiveOrganizationId,
+  selectIsOrganizationLoaded,
+  selectOrganizationsError,
+} from '../../store/organization-slice.js';
 import type { EventOccurrence } from '../../types/index.js';
 import { occurrenceRef } from '../../types/index.js';
 
@@ -28,6 +33,8 @@ function CalendarPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
+  const organizationsLoaded = useAppSelector(selectIsOrganizationLoaded);
+  const organizationsError = useAppSelector(selectOrganizationsError);
   const { data: currentUser } = useGetCurrentUserQuery();
 
   const now = new Date();
@@ -42,19 +49,24 @@ function CalendarPage() {
   const [roomId, setRoomId] = useState<string | null>(null);
   const [teamId, setTeamId] = useState<string | null>(null);
 
-  const { data: sites = [] } = useGetAllSitesQuery(activeOrganizationId ?? skipToken);
-  const { data: rooms = [] } = useGetAllRoomsQuery(activeOrganizationId ?? skipToken);
-  const { data: teamsData } = useGetTeamsQuery(
+  const { data: sites = [], isError: sitesError } = useGetAllSitesQuery(
+    activeOrganizationId ?? skipToken,
+  );
+  const { data: rooms = [], isError: roomsError } = useGetAllRoomsQuery(
+    activeOrganizationId ?? skipToken,
+  );
+  const { data: teamsData, isError: teamsError } = useGetTeamsQuery(
     activeOrganizationId
       ? { organizationId: activeOrganizationId, query: { limit: 200 } }
       : skipToken,
   );
   const teams = teamsData?.items ?? [];
+  const filtersError = organizationsError || sitesError || roomsError || teamsError;
 
   // The API is called with a padded range so occurrences just outside the
   // visible month are included. The calendar only shows the active
   // organization's events (the Home page aggregates all organizations).
-  const { data: occurrencesData, isFetching: loading } = useGetOccurrencesQuery(
+  const occurrencesQuery = useGetOccurrencesQuery(
     activeOrganizationId
       ? {
           start: new Date(range.start.getTime() - DAY_MS).toISOString(),
@@ -69,7 +81,8 @@ function CalendarPage() {
         }
       : skipToken,
   );
-  const occurrences = occurrencesData ?? [];
+  const { isFetching } = occurrencesQuery;
+  const occurrences = occurrencesQuery.data ?? [];
 
   // The API returns cancelled occurrences with a flag; they are hidden here.
   const events: CalendarEvent[] = occurrences
@@ -91,11 +104,35 @@ function CalendarPage() {
     }
   };
 
+  // Without an active organization the occurrences query is skipped; show the
+  // reason explicitly instead of an empty calendar.
+  if (!activeOrganizationId) {
+    if (organizationsError) {
+      return (
+        <Box p="md">
+          <QueryError />
+        </Box>
+      );
+    }
+    if (organizationsLoaded) {
+      return (
+        <Box p="md">
+          <Alert color="yellow">{t('noOrganization.message')}</Alert>
+        </Box>
+      );
+    }
+    return (
+      <Center p="xl">
+        <Loader />
+      </Center>
+    );
+  }
+
   return (
     <Box p="md">
       <Group gap="md" mb="sm" wrap="wrap">
         <Title order={2}>{t('nav.eventsCalendar')}</Title>
-        {loading && <Loader size="sm" />}
+        {isFetching && <Loader size="sm" />}
         <Select
           size="sm"
           value={scope}
@@ -140,12 +177,17 @@ function CalendarPage() {
           style={{ minWidth: 180 }}
         />
       </Group>
-      <Calendar
-        events={events}
-        onRangeChange={newRange => setRange(newRange)}
-        onSelectEvent={handleEventClick}
-        weekStart={currentUser?.weekStart ?? 'sunday'}
-      />
+      {filtersError && <QueryError />}
+      <QueryState query={occurrencesQuery}>
+        {() => (
+          <Calendar
+            events={events}
+            onRangeChange={newRange => setRange(newRange)}
+            onSelectEvent={handleEventClick}
+            weekStart={currentUser?.weekStart ?? 'sunday'}
+          />
+        )}
+      </QueryState>
     </Box>
   );
 }

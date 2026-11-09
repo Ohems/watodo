@@ -342,6 +342,26 @@ test.describe('Home page', () => {
     });
   });
 
+  test.describe('backend unavailable', () => {
+    test('shows error messages instead of empty cards when the API requests fail', async ({
+      page,
+    }) => {
+      await mockCommonApis(page, adminUser());
+      // Later route registrations win: abort the data endpoints to simulate
+      // the backend being down.
+      await page.route('**/api/v1/notifications*', route => route.abort());
+      await page.route('**/api/v1/event-series/occurrences*', route => route.abort());
+      await page.goto('/');
+
+      await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible();
+      // Both cards communicate that their data could not be loaded.
+      await expect(page.getByText(/could not be loaded/).first()).toBeVisible();
+      await expect(page.getByText(/could not be loaded/)).toHaveCount(2);
+      await expect(page.getByText('No notifications')).toHaveCount(0);
+      await expect(page.getByText('No upcoming events')).toHaveCount(0);
+    });
+  });
+
   test.describe('permission levels', () => {
     test('regular user (no permissions) sees the same home page data', async ({ page }) => {
       const notifications = [

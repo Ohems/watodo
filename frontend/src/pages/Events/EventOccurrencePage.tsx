@@ -36,6 +36,7 @@ import {
   useUnassignUserFromOccurrenceWorkRoleMutation,
   useUpdateOccurrenceWorkRoleMutation,
 } from '../../api/index.js';
+import { QueryError } from '../../components/QueryState/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
 import { useFormatters } from '../../hooks/use-formatters.js';
 import { selectActiveOrganizationId } from '../../store/organization-slice.js';
@@ -71,13 +72,13 @@ function EventOccurrencePage() {
   } = useGetOccurrenceDetailByRefQuery(valid ? (occurrenceRef as string) : skipToken);
   // The user list is fetched with the occurrence's time range so users with
   // an overlapping absence are marked (hasAbsence) and sorted last below.
-  const { data: userList = [] } = useGetUserListQuery(
+  const { data: userList = [], isError: userListError } = useGetUserListQuery(
     detail ? { start: detail.occurrence.start, end: detail.occurrence.end } : skipToken,
   );
   // Work roles are organization-scoped: always offer the ones of the
   // organization that owns this event, not of the currently active one.
   const eventOrganizationId = detail?.occurrence.organizationId ?? activeOrganizationId;
-  const { data: workRoles = [] } = useGetAllWorkRolesQuery(
+  const { data: workRoles = [], isError: workRolesError } = useGetAllWorkRolesQuery(
     valid && eventOrganizationId ? eventOrganizationId : skipToken,
   );
 
@@ -318,6 +319,12 @@ function EventOccurrencePage() {
           <Text size="xs" c="dimmed" mb="sm">
             {t('events.instanceWorkRoles')}
           </Text>
+
+          {(userListError || workRolesError) && (
+            <Box mb="sm">
+              <QueryError />
+            </Box>
+          )}
 
           {/* Import notice: parent has slots not yet on this occurrence */}
           {detail.missingParentWorkRoles.length > 0 && (

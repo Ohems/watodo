@@ -1,4 +1,5 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
+import i18n from '../i18n/index.js';
 
 const TOKEN_KEY = 'watodo_token';
 
@@ -37,6 +38,12 @@ export function withQuery<T extends object>(path: string, params: T): string {
 /** Extracts a displayable message from an RTK Query error. */
 export function getApiErrorMessage(error: unknown): string {
   if (error && typeof error === 'object') {
+    // fetchBaseQuery reports a failed request (backend down, offline, CORS,
+    // timeout, unparseable response) with a non-numeric status instead of an
+    // HTTP status code; show a clear message instead of "[object Object]".
+    if ('status' in error && typeof (error as { status?: unknown }).status === 'string') {
+      return i18n.t('common.serverUnreachable');
+    }
     if ('data' in error) {
       const data = (error as { data?: unknown }).data;
       if (data && typeof data === 'object' && 'error' in data) {

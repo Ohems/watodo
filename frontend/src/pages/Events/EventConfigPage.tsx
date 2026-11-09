@@ -27,6 +27,7 @@ import {
   useGetTeamsQuery,
   useUpdateEventSeriesConfigMutation,
 } from '../../api/index.js';
+import { QueryError } from '../../components/QueryState/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
 import { useFormatters } from '../../hooks/use-formatters.js';
 import { selectActiveOrganizationId } from '../../store/organization-slice.js';
@@ -50,14 +51,19 @@ function EventConfigPage() {
     isLoading: loading,
     error: seriesError,
   } = useGetEventSeriesManagementQuery(validId ? seriesId : skipToken);
-  const { data: sites = [] } = useGetAllSitesQuery(activeOrganizationId ?? skipToken);
-  const { data: rooms = [] } = useGetAllRoomsQuery(activeOrganizationId ?? skipToken);
-  const { data: teamsData } = useGetTeamsQuery(
+  const { data: sites = [], isError: sitesError } = useGetAllSitesQuery(
+    activeOrganizationId ?? skipToken,
+  );
+  const { data: rooms = [], isError: roomsError } = useGetAllRoomsQuery(
+    activeOrganizationId ?? skipToken,
+  );
+  const { data: teamsData, isError: teamsError } = useGetTeamsQuery(
     activeOrganizationId
       ? { organizationId: activeOrganizationId, query: { limit: 200 } }
       : skipToken,
   );
   const teams = teamsData?.items ?? [];
+  const filtersError = sitesError || roomsError || teamsError;
   const [updateConfig, { isLoading: saving }] = useUpdateEventSeriesConfigMutation();
 
   const [actionError, setActionError] = useState<string | null>(null);
@@ -148,6 +154,12 @@ function EventConfigPage() {
           <Alert color="red" variant="light" mb="md">
             {error}
           </Alert>
+        )}
+
+        {filtersError && (
+          <Box mb="md">
+            <QueryError />
+          </Box>
         )}
 
         <Stack gap="md">

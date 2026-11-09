@@ -380,6 +380,15 @@ frontend/src/
   the auth token from localStorage and sends it as the `x-token` header. Use
   `skipToken` as the hook argument to skip a query conditionally, and
   `getApiErrorMessage(error)` to display a mutation/query error.
+- **Loading and error states**: Every page or component that displays data fetched from the
+  backend must render all three query states explicitly instead of showing empty data. While a
+  request is still pending (`isLoading` with no data yet) show a loading indicator (e.g. a
+  Mantine `Loader` or `Skeleton`), not an empty list or an empty calendar. When the request
+  fails (`isError`, e.g. connection lost or backend down) show a clear error message (e.g. a
+  Mantine `Alert` stating that the data is unavailable because the server could not be reached)
+  instead of silently rendering empty data. Only a successful response renders the data, and a
+  genuinely empty result gets its own explicit empty-state message. Never collapse an error
+  into an empty array (e.g. `data?.items ?? (isError ? [] : null)`).
 - **Authentication gate**: `App.tsx` fetches the current user via
   `useGetCurrentUserQuery`. While the check is pending a spinner is shown;
   unauthenticated users are greeted with the `Login` page (provider buttons

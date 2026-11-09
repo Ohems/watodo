@@ -1,4 +1,17 @@
-import { Alert, Box, Button, Group, Modal, Paper, Select, Stack, Text, Title } from '@mantine/core';
+import {
+  Alert,
+  Box,
+  Button,
+  Center,
+  Group,
+  Loader,
+  Modal,
+  Paper,
+  Select,
+  Stack,
+  Text,
+  Title,
+} from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
@@ -12,6 +25,7 @@ import {
   useUpdateCurrentUserMutation,
 } from '../../api/index.js';
 import EditField from '../../components/EditField/EditField.js';
+import { QueryError } from '../../components/QueryState/index.js';
 import { useAppDispatch } from '../../hooks/redux.js';
 import { useFormatters } from '../../hooks/use-formatters.js';
 import { LANGUAGE_LABELS, type Language, SUPPORTED_LANGUAGES } from '../../i18n/index.js';
@@ -39,7 +53,7 @@ function AccountPage() {
   const dispatch = useAppDispatch();
   const { formatDate } = useFormatters();
   const { data: currentUser } = useGetCurrentUserQuery();
-  const { data: authAccounts = [] } = useGetAuthAccountsQuery();
+  const { data: authAccounts = [], isError: authAccountsError } = useGetAuthAccountsQuery();
   const { data: providersData, isError: providersError } = useGetAuthProvidersQuery();
   const [updateCurrentUser, { isLoading: saving }] = useUpdateCurrentUserMutation();
   const [startLink] = useStartLinkMutation();
@@ -61,8 +75,9 @@ function AccountPage() {
   const [timeFormatError, setTimeFormatError] = useState<string | null>(null);
 
   // No hardcoded fallback: the provider list always comes from the API (the
-  // E2E tests mock it; on error an empty list is shown).
-  const providers = providersData?.providers ?? (providersError ? [] : null);
+  // E2E tests mock it). A failed request is shown as an error below, not as
+  // an empty list.
+  const providers = providersData?.providers ?? null;
 
   // The backend redirects back here with ?linkError=... when connecting a
   // login method fails.
@@ -415,7 +430,13 @@ function AccountPage() {
           </Alert>
         )}
 
-        {configuredProviders.length === 0 ? (
+        {providersError || authAccountsError ? (
+          <QueryError />
+        ) : providers === null ? (
+          <Center p="md">
+            <Loader size="sm" />
+          </Center>
+        ) : configuredProviders.length === 0 ? (
           <Text size="sm" c="dimmed">
             {t('account.noProviders')}
           </Text>

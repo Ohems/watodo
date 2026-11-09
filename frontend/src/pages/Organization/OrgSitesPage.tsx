@@ -10,13 +10,19 @@ import {
 } from '../../api/index.js';
 import DataTable, { type DataTableColumn } from '../../components/DataTable/DataTable.js';
 import { useAppSelector } from '../../hooks/redux.js';
-import { selectActiveOrganizationId } from '../../store/organization-slice.js';
+import {
+  selectActiveOrganizationId,
+  selectIsOrganizationLoaded,
+  selectOrganizationsError,
+} from '../../store/organization-slice.js';
 import type { Site } from '../../types/index.js';
 
 function OrgSitesPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
+  const organizationsLoaded = useAppSelector(selectIsOrganizationLoaded);
+  const organizationsError = useAppSelector(selectOrganizationsError);
   const { data: currentUser } = useGetCurrentUserQuery();
   const canWrite =
     currentUser?.permissions?.includes('admin') === true ||
@@ -31,7 +37,11 @@ function OrgSitesPage() {
   const [newDescription, setNewDescription] = useState('');
   const [newAddress, setNewAddress] = useState('');
 
-  const { data, isLoading: loading } = useGetSitesQuery(
+  const {
+    data,
+    isLoading: loading,
+    isError,
+  } = useGetSitesQuery(
     activeOrganizationId
       ? {
           organizationId: activeOrganizationId,
@@ -89,7 +99,8 @@ function OrgSitesPage() {
         total={data?.total ?? 0}
         page={page}
         limit={limit}
-        loading={loading}
+        loading={loading || (!activeOrganizationId && !organizationsLoaded)}
+        error={isError || organizationsError}
         canAdd={canWrite}
         onAdd={() => setAddModalOpen(true)}
         onPageChange={setPage}

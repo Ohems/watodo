@@ -1,15 +1,4 @@
-import {
-  Badge,
-  Box,
-  Button,
-  Center,
-  Group,
-  Loader,
-  Paper,
-  Stack,
-  Text,
-  Title,
-} from '@mantine/core';
+import { Badge, Box, Button, Group, Paper, Stack, Text, Title } from '@mantine/core';
 import { skipToken } from '@reduxjs/toolkit/query/react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -18,6 +7,7 @@ import { useGetCurrentUserQuery, useGetUserEventAssignmentsQuery } from '../../a
 import { useFormatters } from '../../hooks/use-formatters.js';
 import { occurrenceRef, type UserEventAssignment } from '../../types/index.js';
 import DateField from '../DateField/index.js';
+import { QueryState } from '../QueryState/index.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const PAGE_SIZE = 5;
@@ -66,7 +56,7 @@ function EventAssignmentsCard({
     };
   });
   const [page, setPage] = useState(0);
-  const { data, isLoading } = useGetUserEventAssignmentsQuery(
+  const query = useGetUserEventAssignmentsQuery(
     canReadEvents
       ? {
           organizationId,
@@ -80,8 +70,7 @@ function EventAssignmentsCard({
         }
       : skipToken,
   );
-  const assignments = data?.items ?? [];
-  const total = data?.total ?? 0;
+  const total = query.data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   if (!canReadEvents) return null;
@@ -118,25 +107,25 @@ function EventAssignmentsCard({
         />
       </Group>
 
-      {isLoading ? (
-        <Center p="md">
-          <Loader size="sm" />
-        </Center>
-      ) : assignments.length === 0 ? (
-        <Text c="dimmed">{t('orgUsers.noEventAssignments')}</Text>
-      ) : (
-        <Stack gap="xs">
-          {assignments.map(a => (
-            <EventAssignmentRow
-              key={`${a.seriesId}-${a.occurrenceStart}`}
-              assignment={a}
-              onClick={() =>
-                navigate(`/events/occurrences/${encodeURIComponent(occurrenceRef(a))}`)
-              }
-            />
-          ))}
-        </Stack>
-      )}
+      <QueryState query={query}>
+        {data =>
+          data.items.length === 0 ? (
+            <Text c="dimmed">{t('orgUsers.noEventAssignments')}</Text>
+          ) : (
+            <Stack gap="xs">
+              {data.items.map(a => (
+                <EventAssignmentRow
+                  key={`${a.seriesId}-${a.occurrenceStart}`}
+                  assignment={a}
+                  onClick={() =>
+                    navigate(`/events/occurrences/${encodeURIComponent(occurrenceRef(a))}`)
+                  }
+                />
+              ))}
+            </Stack>
+          )
+        }
+      </QueryState>
 
       {total > PAGE_SIZE && (
         <Group justify="space-between" mt="md">

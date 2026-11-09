@@ -1,4 +1,4 @@
-import { Box, Button, Center, Loader, Paper, Stack, Text } from '@mantine/core';
+import { Alert, Box, Button, Center, Loader, Paper, Stack, Text } from '@mantine/core';
 import { useTranslation } from 'react-i18next';
 import { getLoginUrl, useGetAuthProvidersQuery } from '../../api/index.js';
 
@@ -6,8 +6,10 @@ function LoginPage() {
   const { t } = useTranslation();
   const { data, isError } = useGetAuthProvidersQuery();
   // No hardcoded fallback: the provider list always comes from the API (the
-  // E2E tests mock it; on error an empty list is shown).
-  const providers = data?.providers ?? (isError ? [] : null);
+  // E2E tests mock it). A failed request means the endpoint did not respond
+  // successfully (backend down or erroring), shown as a service-down message;
+  // an empty list means the server is up but has no login methods configured.
+  const providers = data?.providers ?? null;
 
   // The backend redirects back here after the provider callback.
   const returnUrl = window.location.href;
@@ -33,7 +35,11 @@ function LoginPage() {
         </Box>
         <Stack align="center" gap="md" p="xl">
           <Text c="dimmed">{t('login.signInToContinue')}</Text>
-          {providers === null ? (
+          {isError ? (
+            <Alert color="red" variant="light">
+              {t('login.serviceUnavailable')}
+            </Alert>
+          ) : providers === null ? (
             <Loader />
           ) : providers.length === 0 ? (
             <Text c="dimmed" size="sm">

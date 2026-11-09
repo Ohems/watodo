@@ -105,4 +105,13 @@ describe('api', () => {
     expect(getApiErrorMessage(new Error('Network down'))).toBe('Network down');
     expect(getApiErrorMessage('plain failure')).toBe('plain failure');
   });
+
+  it('returns a clear message when the request never reached the server', () => {
+    expect(getApiErrorMessage({ status: 'FETCH_ERROR', error: 'TypeError: fetch failed' })).toBe(
+      'The server could not be reached. Check your connection and try again later.',
+    );
+    expect(getApiErrorMessage({ status: 'TIMEOUT_ERROR' })).toBe(
+      'The server could not be reached. Check your connection and try again later.',
+    );
+  });
 });

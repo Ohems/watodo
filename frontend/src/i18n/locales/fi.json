@@ -17,6 +17,8 @@
     "actions": "Toiminnot",
     "loading": "Ladataan...",
     "noResults": "Ei tuloksia",
+    "dataUnavailable": "Tietoja ei voitu ladata. Palvelin voi olla tavoittamattomissa tai alhaalla. Yritä myöhemmin uudelleen.",
+    "serverUnreachable": "Palvelimeen ei saatu yhteyttä. Tarkista yhteys ja yritä uudelleen.",
     "perPage": "Sivulla",
     "page": "Sivu",
     "of": "/",
@@ -65,7 +67,8 @@
     "signInToContinue": "Jatka kirjautumalla sisään",
     "signInWith": "Kirjaudu sisään: {{provider}}",
     "logoAlt": "Watodo",
-    "noProviders": "Kirjautumistapoja ei ole määritetty tälle palvelimelle."
+    "noProviders": "Kirjautumistapoja ei ole määritetty tälle palvelimelle.",
+    "serviceUnavailable": "Palvelu ei ole tällä hetkellä käytettävissä. Palvelimeen ei saatu yhteyttä. Yritä myöhemmin uudelleen."
   },
   "error": {
     "oops": "Hups!",

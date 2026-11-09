@@ -17,6 +17,8 @@
     "actions": "Actions",
     "loading": "Loading...",
     "noResults": "No results found",
+    "dataUnavailable": "The data could not be loaded. The server may be unreachable or down. Please try again later.",
+    "serverUnreachable": "The server could not be reached. Check your connection and try again later.",
     "perPage": "Per page",
     "page": "Page",
     "of": "of",
@@ -65,7 +67,8 @@
     "signInToContinue": "Sign in to continue",
     "signInWith": "Sign in with {{provider}}",
     "logoAlt": "Watodo",
-    "noProviders": "No login methods are configured on this server."
+    "noProviders": "No login methods are configured on this server.",
+    "serviceUnavailable": "The service is currently unavailable. The server could not be reached. Please try again later."
   },
   "error": {
     "oops": "Oops!",

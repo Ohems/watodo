@@ -38,6 +38,7 @@ import {
   useUpdateTeamMemberMutation,
   useUpdateTeamMutation,
 } from '../../api/index.js';
+import { QueryError } from '../../components/QueryState/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
 import { selectActiveOrganizationId } from '../../store/organization-slice.js';
 import type { FieldErrors, TeamMember } from '../../types/index.js';
@@ -56,19 +57,24 @@ function TeamManagementPage() {
   const teamArg =
     activeOrganizationId && teamId ? { organizationId: activeOrganizationId, teamId } : skipToken;
   const { data: team, isLoading: loading, error: teamError } = useGetTeamQuery(teamArg);
-  const { data: members = [] } = useGetTeamMembersQuery(teamArg);
-  const { data: allUsers = [] } = useGetUserListQuery(undefined);
-  const { data: workRoles = [] } = useGetAllWorkRolesQuery(activeOrganizationId ?? skipToken);
-  const { data: seriesData } = useGetEventSeriesManagementListQuery(
+  const { data: members = [], isError: membersError } = useGetTeamMembersQuery(teamArg);
+  const { data: allUsers = [], isError: userListError } = useGetUserListQuery(undefined);
+  const { data: workRoles = [], isError: workRolesError } = useGetAllWorkRolesQuery(
+    activeOrganizationId ?? skipToken,
+  );
+  const { data: seriesData, isError: seriesError } = useGetEventSeriesManagementListQuery(
     activeOrganizationId
       ? { organizationId: activeOrganizationId, page: 0, limit: 200 }
       : skipToken,
   );
-  const { data: orgUsersData } = useGetOrganizationUsersQuery(
+  const { data: orgUsersData, isError: orgUsersError } = useGetOrganizationUsersQuery(
     activeOrganizationId
       ? { organizationId: activeOrganizationId, query: { page: 0, limit: 200 } }
       : skipToken,
   );
+  // Any of the secondary queries failing must not render as empty selects or
+  // an empty member list.
+  const auxError = membersError || userListError || workRolesError || seriesError || orgUsersError;
   const [updateTeam] = useUpdateTeamMutation();
   const [addMember] = useAddTeamMemberMutation();
   const [updateTeamMember] = useUpdateTeamMemberMutation();
@@ -245,6 +251,12 @@ function TeamManagementPage() {
           <Alert color="red" variant="light" mb="md">
             {error}
           </Alert>
+        )}
+
+        {auxError && (
+          <Box mb="md">
+            <QueryError />
+          </Box>
         )}
 
         <Stack gap="md" mb="lg">
@@ -430,7 +442,7 @@ function TeamManagementPage() {
                   )}
                 </Table.Tr>
               ))}
-              {members.length === 0 && (
+              {members.length === 0 && !membersError && (
                 <Table.Tr>
                   <Table.Td colSpan={canManageTeam ? 4 : 3} style={{ textAlign: 'center' }}>
                     <Text c="dimmed">{t('teams.noMembers')}</Text>

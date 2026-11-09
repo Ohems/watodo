@@ -1,4 +1,5 @@
 import {
+  Alert,
   Box,
   Button,
   Group,
@@ -29,6 +30,8 @@ interface DataTableProps<T> {
   page: number;
   limit: number;
   loading?: boolean;
+  /** True when the query behind the table failed: an error row is shown instead of an empty table. */
+  error?: boolean;
   searchPlaceholder?: string;
   canAdd?: boolean;
   onAdd?: () => void;
@@ -47,6 +50,7 @@ function DataTable<T extends { id: string | number }>({
   page,
   limit,
   loading = false,
+  error = false,
   searchPlaceholder,
   canAdd = false,
   onAdd,
@@ -114,7 +118,16 @@ function DataTable<T extends { id: string | number }>({
                 ))}
               </Table.Tr>
             ))}
-            {!loading && data.length === 0 && (
+            {error && (
+              <Table.Tr>
+                <Table.Td colSpan={columns.length} style={{ textAlign: 'center' }}>
+                  <Alert color="red" variant="light" role="alert">
+                    {t('common.dataUnavailable')}
+                  </Alert>
+                </Table.Td>
+              </Table.Tr>
+            )}
+            {!error && !loading && data.length === 0 && (
               <Table.Tr>
                 <Table.Td colSpan={columns.length} style={{ textAlign: 'center' }}>
                   <Text c="dimmed">{t('common.noResults')}</Text>

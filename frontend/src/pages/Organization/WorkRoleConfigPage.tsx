@@ -27,6 +27,7 @@ import {
   useRemoveCertificationFromWorkRoleMutation,
   useUpdateWorkRoleMutation,
 } from '../../api/index.js';
+import { QueryError } from '../../components/QueryState/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
 import { selectActiveOrganizationId } from '../../store/organization-slice.js';
 
@@ -46,7 +47,9 @@ function WorkRoleConfigPage() {
       ? { organizationId: activeOrganizationId, workRoleId: parsedId }
       : skipToken;
   const { data: role, isLoading: loading, error: roleError } = useGetWorkRoleQuery(roleArg);
-  const { data: allCerts } = useGetAllCertificationsQuery(activeOrganizationId ?? skipToken);
+  const { data: allCerts, isError: certsError } = useGetAllCertificationsQuery(
+    activeOrganizationId ?? skipToken,
+  );
   const [updateWorkRole, { isLoading: saving }] = useUpdateWorkRoleMutation();
   const [addCert] = useAddCertificationToWorkRoleMutation();
   const [removeCert] = useRemoveCertificationFromWorkRoleMutation();
@@ -194,7 +197,9 @@ function WorkRoleConfigPage() {
             <Text size="sm" fw={500} c="dimmed" mb={4}>
               {t('workRoles.requiredCertifications')}
             </Text>
-            {canWrite ? (
+            {certsError ? (
+              <QueryError />
+            ) : canWrite ? (
               <MultiSelect
                 data={certOptions}
                 value={selectedCerts}

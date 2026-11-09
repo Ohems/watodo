@@ -6,19 +6,29 @@ import { useNavigate } from 'react-router-dom';
 import { useGetOrganizationUsersQuery } from '../../api/index.js';
 import DataTable, { type DataTableColumn } from '../../components/DataTable/DataTable.js';
 import { useAppSelector } from '../../hooks/redux.js';
-import { selectActiveOrganizationId } from '../../store/organization-slice.js';
+import {
+  selectActiveOrganizationId,
+  selectIsOrganizationLoaded,
+  selectOrganizationsError,
+} from '../../store/organization-slice.js';
 import type { OrganizationUser } from '../../types/index.js';
 
 function OrgUsersPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
+  const organizationsLoaded = useAppSelector(selectIsOrganizationLoaded);
+  const organizationsError = useAppSelector(selectOrganizationsError);
 
   const [page, setPage] = useState(0);
   const [limit, setLimit] = useState(50);
   const [search, setSearch] = useState('');
 
-  const { data, isLoading: loading } = useGetOrganizationUsersQuery(
+  const {
+    data,
+    isLoading: loading,
+    isError,
+  } = useGetOrganizationUsersQuery(
     activeOrganizationId
       ? {
           organizationId: activeOrganizationId,
@@ -54,7 +64,8 @@ function OrgUsersPage() {
       total={total}
       page={page}
       limit={limit}
-      loading={loading}
+      loading={loading || (!activeOrganizationId && !organizationsLoaded)}
+      error={isError || organizationsError}
       onPageChange={setPage}
       onLimitChange={setLimit}
       onSearch={setSearch}

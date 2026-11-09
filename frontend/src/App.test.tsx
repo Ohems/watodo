@@ -187,6 +187,33 @@ describe('App', () => {
     ).toBeInTheDocument();
   });
 
+  it('shows a service-unavailable message when the providers endpoint returns an error', async () => {
+    mock.on('GET', '/api/v1/users/@me', { error: 'Unauthorized' }, 401);
+    mock.on('GET', '/api/v1/auth/providers', { error: 'Internal Server Error' }, 500);
+
+    renderApp();
+
+    expect(await screen.findByText(/The service is currently unavailable/)).toBeInTheDocument();
+    expect(
+      screen.queryByText('No login methods are configured on this server.'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows a service-unavailable message when the backend is unreachable', async () => {
+    mock.on('GET', '/api/v1/users/@me', { error: 'Unauthorized' }, 401);
+    // A rejecting fetch simulates the backend being down (FETCH_ERROR).
+    mock.on('GET', '/api/v1/auth/providers', () => {
+      throw new Error('connection refused');
+    });
+
+    renderApp();
+
+    expect(await screen.findByText(/The service is currently unavailable/)).toBeInTheDocument();
+    expect(
+      screen.queryByText('No login methods are configured on this server.'),
+    ).not.toBeInTheDocument();
+  });
+
   it('renders the app shell once the user is authenticated', async () => {
     mockShellRoutes(mock);
 
@@ -318,6 +345,33 @@ describe('Home', () => {
     const url = lastCallUrl(mock, '/api/v1/event-series/occurrences');
     expect(url).toBeDefined();
     expect(new URL(url as string).searchParams.has('organizationId')).toBe(false);
+  });
+
+  it('shows an error message instead of empty cards when the backend is unreachable', async () => {
+    mockShellRoutes(mock);
+    // Later registrations win over the shell mocks; a rejecting fetch
+    // simulates the backend being down (FETCH_ERROR).
+    mock.on('GET', '/api/v1/notifications', () => {
+      throw new Error('connection refused');
+    });
+    mock.on('GET', '/api/v1/event-series/occurrences', () => {
+      throw new Error('connection refused');
+    });
+
+    renderApp('/');
+
+    // Both Home cards communicate that their data is unavailable.
+    expect((await screen.findAllByText(/could not be loaded/)).length).toBe(2);
+    expect(screen.queryByText('No notifications')).not.toBeInTheDocument();
+  });
+
+  it('shows an error message instead of an empty list when the backend returns an error', async () => {
+    mockShellRoutes(mock);
+    mock.on('GET', '/api/v1/notifications', { error: 'Internal Server Error' }, 500);
+
+    renderApp('/');
+
+    expect(await screen.findByText(/could not be loaded/)).toBeInTheDocument();
   });
 });
 

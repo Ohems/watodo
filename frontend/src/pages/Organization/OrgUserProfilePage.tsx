@@ -34,6 +34,7 @@ import {
 } from '../../api/index.js';
 import DateField from '../../components/DateField/index.js';
 import { EventAssignmentsCard } from '../../components/EventAssignmentsCard/index.js';
+import { QueryError } from '../../components/QueryState/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
 import {
   selectActiveOrganizationId,
@@ -61,16 +62,20 @@ function OrgUserProfilePage() {
   );
 
   // Work roles for this user (admin view)
-  const { data: userWorkRoles } = useGetUserWorkRolesQuery(
+  const { data: userWorkRoles, isError: userWorkRolesError } = useGetUserWorkRolesQuery(
     activeOrganizationId && userId ? { organizationId: activeOrganizationId, userId } : skipToken,
   );
-  const { data: allRoles } = useGetAllWorkRolesQuery(activeOrganizationId ?? skipToken);
+  const { data: allRoles, isError: allRolesError } = useGetAllWorkRolesQuery(
+    activeOrganizationId ?? skipToken,
+  );
 
   // Certifications for this user (admin view)
-  const { data: userCerts } = useGetUserCertificationsQuery(
+  const { data: userCerts, isError: userCertsError } = useGetUserCertificationsQuery(
     activeOrganizationId && userId ? { organizationId: activeOrganizationId, userId } : skipToken,
   );
-  const { data: allCerts } = useGetAllCertificationsQuery(activeOrganizationId ?? skipToken);
+  const { data: allCerts, isError: allCertsError } = useGetAllCertificationsQuery(
+    activeOrganizationId ?? skipToken,
+  );
 
   const [addUserRole] = useAddUserWorkRoleMutation();
   const [removeUserRole] = useRemoveUserWorkRoleMutation();
@@ -281,78 +286,84 @@ function OrgUserProfilePage() {
           {t('orgUsers.workRoles')}
         </Title>
 
-        {canManage && (
-          <Group align="flex-end" mb="md">
-            <Select
-              data={roleOptions}
-              value={newRoleId}
-              onChange={setNewRoleId}
-              placeholder={t('orgUsers.selectRole')}
-              searchable
-              clearable
-              style={{ flex: 1 }}
-            />
-            <Button onClick={handleAddRole} disabled={!newRoleId}>
-              {t('common.add')}
-            </Button>
-          </Group>
-        )}
-
-        {(userWorkRoles ?? []).length === 0 ? (
-          <Text c="dimmed">{t('orgUsers.noRoles')}</Text>
+        {userWorkRolesError || allRolesError ? (
+          <QueryError />
         ) : (
-          <Stack gap="xs">
-            {(userWorkRoles ?? []).map(r => (
-              <Group key={r.id} justify="space-between">
-                <Box>
-                  <Text fw={500}>{r.workRoleName}</Text>
-                  {r.workRoleDescription && (
-                    <Text size="sm" c="dimmed">
-                      {r.workRoleDescription}
-                    </Text>
-                  )}
-                </Box>
-                <Group gap="xs">
-                  {canManage ? (
-                    <Button
-                      variant="light"
-                      color={r.isQualified ? 'green' : 'gray'}
-                      size="xs"
-                      onClick={() => handleToggleQualified(r.id, r.isQualified)}
-                      leftSection={
-                        <Box
-                          w={8}
-                          h={8}
-                          style={{
-                            borderRadius: '50%',
-                            backgroundColor: r.isQualified ? '#40c057' : '#adb5bd',
-                          }}
-                        />
-                      }
-                    >
-                      {r.isQualified ? t('orgUsers.qualified') : t('orgUsers.notQualified')}
-                    </Button>
-                  ) : (
-                    r.isQualified && (
-                      <Badge color="green" variant="light">
-                        {t('orgUsers.qualified')}
-                      </Badge>
-                    )
-                  )}
-                  {canManage && (
-                    <Button
-                      variant="subtle"
-                      color="red"
-                      size="xs"
-                      onClick={() => handleRemoveRole(r.id)}
-                    >
-                      {t('common.delete')}
-                    </Button>
-                  )}
-                </Group>
+          <>
+            {canManage && (
+              <Group align="flex-end" mb="md">
+                <Select
+                  data={roleOptions}
+                  value={newRoleId}
+                  onChange={setNewRoleId}
+                  placeholder={t('orgUsers.selectRole')}
+                  searchable
+                  clearable
+                  style={{ flex: 1 }}
+                />
+                <Button onClick={handleAddRole} disabled={!newRoleId}>
+                  {t('common.add')}
+                </Button>
               </Group>
-            ))}
-          </Stack>
+            )}
+
+            {(userWorkRoles ?? []).length === 0 ? (
+              <Text c="dimmed">{t('orgUsers.noRoles')}</Text>
+            ) : (
+              <Stack gap="xs">
+                {(userWorkRoles ?? []).map(r => (
+                  <Group key={r.id} justify="space-between">
+                    <Box>
+                      <Text fw={500}>{r.workRoleName}</Text>
+                      {r.workRoleDescription && (
+                        <Text size="sm" c="dimmed">
+                          {r.workRoleDescription}
+                        </Text>
+                      )}
+                    </Box>
+                    <Group gap="xs">
+                      {canManage ? (
+                        <Button
+                          variant="light"
+                          color={r.isQualified ? 'green' : 'gray'}
+                          size="xs"
+                          onClick={() => handleToggleQualified(r.id, r.isQualified)}
+                          leftSection={
+                            <Box
+                              w={8}
+                              h={8}
+                              style={{
+                                borderRadius: '50%',
+                                backgroundColor: r.isQualified ? '#40c057' : '#adb5bd',
+                              }}
+                            />
+                          }
+                        >
+                          {r.isQualified ? t('orgUsers.qualified') : t('orgUsers.notQualified')}
+                        </Button>
+                      ) : (
+                        r.isQualified && (
+                          <Badge color="green" variant="light">
+                            {t('orgUsers.qualified')}
+                          </Badge>
+                        )
+                      )}
+                      {canManage && (
+                        <Button
+                          variant="subtle"
+                          color="red"
+                          size="xs"
+                          onClick={() => handleRemoveRole(r.id)}
+                        >
+                          {t('common.delete')}
+                        </Button>
+                      )}
+                    </Group>
+                  </Group>
+                ))}
+              </Stack>
+            )}
+          </>
         )}
       </Paper>
 
@@ -362,113 +373,124 @@ function OrgUserProfilePage() {
           {t('orgUsers.certifications')}
         </Title>
 
-        {canManage && (
-          <Group align="flex-end" mb="md">
-            <Select
-              data={certOptions}
-              value={newCertId}
-              onChange={setNewCertId}
-              placeholder={t('orgUsers.selectCertification')}
-              searchable
-              clearable
-              style={{ flex: 1 }}
-            />
-            <DateField
-              label={t('orgUsers.certificationDate')}
-              value={newCertDate}
-              onChange={setNewCertDate}
-            />
-            <DateField
-              label={t('orgUsers.validUntilDate')}
-              value={newValidUntil}
-              onChange={setNewValidUntil}
-            />
-            <Button onClick={handleAddCert} disabled={!newCertId}>
-              {t('orgUsers.addCertificationButton')}
-            </Button>
-          </Group>
-        )}
-
-        {(userCerts ?? []).length === 0 ? (
-          <Text c="dimmed">{t('orgUsers.noCertifications')}</Text>
+        {userCertsError || allCertsError ? (
+          <QueryError />
         ) : (
-          <Stack gap="md">
-            {(userCerts ?? []).map(c => {
-              const isEditing = c.id in editingCertDates;
-              const editDates = editingCertDates[c.id];
-              return (
-                <Box key={c.id}>
-                  <Group justify="space-between">
-                    <Box>
-                      <Text fw={500}>{c.certificationName}</Text>
-                      {!isEditing && (
-                        <Text size="sm" c="dimmed">
-                          {c.certificationDate &&
-                            `${t('profile.certified')}: ${c.certificationDate}`}
-                          {c.certificationDate && c.validUntilDate && ' | '}
-                          {c.validUntilDate && `${t('profile.validUntil')}: ${c.validUntilDate}`}
-                          {!c.certificationDate && !c.validUntilDate && '-'}
-                        </Text>
+          <>
+            {canManage && (
+              <Group align="flex-end" mb="md">
+                <Select
+                  data={certOptions}
+                  value={newCertId}
+                  onChange={setNewCertId}
+                  placeholder={t('orgUsers.selectCertification')}
+                  searchable
+                  clearable
+                  style={{ flex: 1 }}
+                />
+                <DateField
+                  label={t('orgUsers.certificationDate')}
+                  value={newCertDate}
+                  onChange={setNewCertDate}
+                />
+                <DateField
+                  label={t('orgUsers.validUntilDate')}
+                  value={newValidUntil}
+                  onChange={setNewValidUntil}
+                />
+                <Button onClick={handleAddCert} disabled={!newCertId}>
+                  {t('orgUsers.addCertificationButton')}
+                </Button>
+              </Group>
+            )}
+
+            {(userCerts ?? []).length === 0 ? (
+              <Text c="dimmed">{t('orgUsers.noCertifications')}</Text>
+            ) : (
+              <Stack gap="md">
+                {(userCerts ?? []).map(c => {
+                  const isEditing = c.id in editingCertDates;
+                  const editDates = editingCertDates[c.id];
+                  return (
+                    <Box key={c.id}>
+                      <Group justify="space-between">
+                        <Box>
+                          <Text fw={500}>{c.certificationName}</Text>
+                          {!isEditing && (
+                            <Text size="sm" c="dimmed">
+                              {c.certificationDate &&
+                                `${t('profile.certified')}: ${c.certificationDate}`}
+                              {c.certificationDate && c.validUntilDate && ' | '}
+                              {c.validUntilDate &&
+                                `${t('profile.validUntil')}: ${c.validUntilDate}`}
+                              {!c.certificationDate && !c.validUntilDate && '-'}
+                            </Text>
+                          )}
+                        </Box>
+                        <Group gap="xs">
+                          {canManage && !isEditing && (
+                            <Button
+                              variant="subtle"
+                              size="xs"
+                              onClick={() =>
+                                startEditCertDates(c.id, c.certificationDate, c.validUntilDate)
+                              }
+                            >
+                              {t('common.edit')}
+                            </Button>
+                          )}
+                          {canManage && (
+                            <Button
+                              variant="subtle"
+                              color="red"
+                              size="xs"
+                              onClick={() => handleRemoveCert(c.id)}
+                            >
+                              {t('common.delete')}
+                            </Button>
+                          )}
+                        </Group>
+                      </Group>
+                      {canManage && isEditing && editDates && (
+                        <Group align="flex-end" mt="xs">
+                          <DateField
+                            label={t('orgUsers.certificationDate')}
+                            value={editDates.certificationDate}
+                            onChange={value =>
+                              setEditingCertDates(prev => ({
+                                ...prev,
+                                [c.id]: { ...prev[c.id], certificationDate: value },
+                              }))
+                            }
+                          />
+                          <DateField
+                            label={t('orgUsers.validUntilDate')}
+                            value={editDates.validUntilDate}
+                            onChange={value =>
+                              setEditingCertDates(prev => ({
+                                ...prev,
+                                [c.id]: { ...prev[c.id], validUntilDate: value },
+                              }))
+                            }
+                          />
+                          <Button size="xs" onClick={() => saveCertDates(c.id)}>
+                            {t('orgUsers.saveDates')}
+                          </Button>
+                          <Button
+                            size="xs"
+                            variant="default"
+                            onClick={() => cancelEditCertDates(c.id)}
+                          >
+                            {t('common.cancel')}
+                          </Button>
+                        </Group>
                       )}
                     </Box>
-                    <Group gap="xs">
-                      {canManage && !isEditing && (
-                        <Button
-                          variant="subtle"
-                          size="xs"
-                          onClick={() =>
-                            startEditCertDates(c.id, c.certificationDate, c.validUntilDate)
-                          }
-                        >
-                          {t('common.edit')}
-                        </Button>
-                      )}
-                      {canManage && (
-                        <Button
-                          variant="subtle"
-                          color="red"
-                          size="xs"
-                          onClick={() => handleRemoveCert(c.id)}
-                        >
-                          {t('common.delete')}
-                        </Button>
-                      )}
-                    </Group>
-                  </Group>
-                  {canManage && isEditing && editDates && (
-                    <Group align="flex-end" mt="xs">
-                      <DateField
-                        label={t('orgUsers.certificationDate')}
-                        value={editDates.certificationDate}
-                        onChange={value =>
-                          setEditingCertDates(prev => ({
-                            ...prev,
-                            [c.id]: { ...prev[c.id], certificationDate: value },
-                          }))
-                        }
-                      />
-                      <DateField
-                        label={t('orgUsers.validUntilDate')}
-                        value={editDates.validUntilDate}
-                        onChange={value =>
-                          setEditingCertDates(prev => ({
-                            ...prev,
-                            [c.id]: { ...prev[c.id], validUntilDate: value },
-                          }))
-                        }
-                      />
-                      <Button size="xs" onClick={() => saveCertDates(c.id)}>
-                        {t('orgUsers.saveDates')}
-                      </Button>
-                      <Button size="xs" variant="default" onClick={() => cancelEditCertDates(c.id)}>
-                        {t('common.cancel')}
-                      </Button>
-                    </Group>
-                  )}
-                </Box>
-              );
-            })}
-          </Stack>
+                  );
+                })}
+              </Stack>
+            )}
+          </>
         )}
       </Paper>
 

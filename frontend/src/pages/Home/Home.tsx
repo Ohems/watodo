@@ -1,16 +1,4 @@
-import {
-  ActionIcon,
-  Badge,
-  Box,
-  Button,
-  Card,
-  Center,
-  Group,
-  Loader,
-  Stack,
-  Text,
-  Title,
-} from '@mantine/core';
+import { ActionIcon, Badge, Box, Button, Card, Group, Stack, Text, Title } from '@mantine/core';
 import {
   IconBell,
   IconCalendarEvent,
@@ -28,6 +16,7 @@ import {
   useMarkNotificationReadMutation,
 } from '../../api/index.js';
 import { AbsenceDialog } from '../../components/AbsenceDialog/index.js';
+import { QueryState } from '../../components/QueryState/index.js';
 import { useFormatters } from '../../hooks/use-formatters.js';
 import type { EventOccurrence, Notification, OccurrenceSlotStatus } from '../../types/index.js';
 import { occurrenceRef } from '../../types/index.js';
@@ -67,14 +56,14 @@ function Home() {
     };
   });
 
-  const { data: notificationsData, isLoading: loadingNotifications } = useGetNotificationsQuery({
+  const notificationsQuery = useGetNotificationsQuery({
     page: 0,
     limit: 10,
   });
   // Only show occurrences the current user is involved in: either assigned to
   // a work role slot (participant) or managing the series via a connected
   // team (manager).
-  const { data: occurrencesData, isLoading: loadingEvents } = useGetOccurrencesQuery({
+  const occurrencesQuery = useGetOccurrencesQuery({
     ...range,
     filter: { scope: 'involved' },
   });
@@ -100,15 +89,14 @@ function Home() {
     },
   ];
 
-  const notifications = notificationsData?.items ?? [];
-  const unreadCount = notificationsData?.unreadCount ?? 0;
+  const unreadCount = notificationsQuery.data?.unreadCount ?? 0;
   const upcomingEvents = useMemo(
     () =>
-      (occurrencesData ?? [])
+      (occurrencesQuery.data ?? [])
         .filter(occ => !occ.isCancelled)
         .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
         .slice(0, 10),
-    [occurrencesData],
+    [occurrencesQuery.data],
   );
 
   const handleMarkAllRead = async () => {
@@ -171,77 +159,77 @@ function Home() {
               </Button>
             )}
           </Group>
-          {loadingNotifications ? (
-            <Center p="md">
-              <Loader size="sm" />
-            </Center>
-          ) : notifications.length === 0 ? (
-            <Text c="dimmed" size="sm">
-              {t('home.noNotifications')}
-            </Text>
-          ) : (
-            <Stack gap="xs">
-              {notifications.map(notification => {
-                // The message is stored as a catalog key + params and rendered
-                // here in the current UI language (backend bundle under
-                // `notifications.*`).
-                const title = t(
-                  `notifications.${notification.messageKey}.title`,
-                  notification.params,
-                );
-                const body = t(
-                  `notifications.${notification.messageKey}.body`,
-                  notification.params,
-                );
-                return (
-                  <Group
-                    key={notification.id}
-                    justify="space-between"
-                    wrap="nowrap"
-                    style={{
-                      padding: '8px 12px',
-                      borderRadius: 4,
-                      backgroundColor: notification.isRead
-                        ? 'transparent'
-                        : 'var(--mantine-color-blue-0)',
-                      cursor: 'pointer',
-                    }}
-                    onClick={() => handleMarkRead(notification)}
-                  >
-                    <Box style={{ flex: 1 }}>
-                      <Text size="sm" fw={notification.isRead ? 400 : 600}>
-                        {title}
-                      </Text>
-                      {body && (
-                        <Text size="xs" c="dimmed">
-                          {body}
-                        </Text>
-                      )}
-                      <Group gap="xs" wrap="nowrap">
-                        <Text size="xs" c="dimmed">
-                          {formatDateTime(notification.createdAt)}
-                        </Text>
-                        {notification.organizationName && (
-                          <Badge size="xs" variant="light" color="gray">
-                            {notification.organizationName}
-                          </Badge>
-                        )}
-                      </Group>
-                    </Box>
-                    {!notification.isRead && (
-                      <ActionIcon
-                        variant="subtle"
-                        size="sm"
+          <QueryState query={notificationsQuery}>
+            {data =>
+              data.items.length === 0 ? (
+                <Text c="dimmed" size="sm">
+                  {t('home.noNotifications')}
+                </Text>
+              ) : (
+                <Stack gap="xs">
+                  {data.items.map(notification => {
+                    // The message is stored as a catalog key + params and rendered
+                    // here in the current UI language (backend bundle under
+                    // `notifications.*`).
+                    const title = t(
+                      `notifications.${notification.messageKey}.title`,
+                      notification.params,
+                    );
+                    const body = t(
+                      `notifications.${notification.messageKey}.body`,
+                      notification.params,
+                    );
+                    return (
+                      <Group
+                        key={notification.id}
+                        justify="space-between"
+                        wrap="nowrap"
+                        style={{
+                          padding: '8px 12px',
+                          borderRadius: 4,
+                          backgroundColor: notification.isRead
+                            ? 'transparent'
+                            : 'var(--mantine-color-blue-0)',
+                          cursor: 'pointer',
+                        }}
                         onClick={() => handleMarkRead(notification)}
                       >
-                        <IconCheck size={14} />
-                      </ActionIcon>
-                    )}
-                  </Group>
-                );
-              })}
-            </Stack>
-          )}
+                        <Box style={{ flex: 1 }}>
+                          <Text size="sm" fw={notification.isRead ? 400 : 600}>
+                            {title}
+                          </Text>
+                          {body && (
+                            <Text size="xs" c="dimmed">
+                              {body}
+                            </Text>
+                          )}
+                          <Group gap="xs" wrap="nowrap">
+                            <Text size="xs" c="dimmed">
+                              {formatDateTime(notification.createdAt)}
+                            </Text>
+                            {notification.organizationName && (
+                              <Badge size="xs" variant="light" color="gray">
+                                {notification.organizationName}
+                              </Badge>
+                            )}
+                          </Group>
+                        </Box>
+                        {!notification.isRead && (
+                          <ActionIcon
+                            variant="subtle"
+                            size="sm"
+                            onClick={() => handleMarkRead(notification)}
+                          >
+                            <IconCheck size={14} />
+                          </ActionIcon>
+                        )}
+                      </Group>
+                    );
+                  })}
+                </Stack>
+              )
+            }
+          </QueryState>
         </Card>
 
         {/* Upcoming events card */}
@@ -250,73 +238,75 @@ function Home() {
             <IconCalendarEvent size={20} />
             <Title order={4}>{t('home.upcomingEvents')}</Title>
           </Group>
-          {loadingEvents ? (
-            <Center p="md">
-              <Loader size="sm" />
-            </Center>
-          ) : upcomingEvents.length === 0 ? (
-            <Text c="dimmed" size="sm">
-              {t('home.noUpcomingEvents')}
-            </Text>
-          ) : (
-            <Stack gap="xs">
-              {upcomingEvents.map(occ => (
-                <Group
-                  key={`${occ.seriesId}-${occ.occurrenceStart}`}
-                  justify="space-between"
-                  wrap="nowrap"
-                  style={{
-                    padding: '8px 12px',
-                    borderRadius: 4,
-                    cursor: 'pointer',
-                    border: '1px solid var(--mantine-color-gray-2)',
-                  }}
-                  onClick={() => handleEventClick(occ)}
-                >
-                  <Box>
-                    <Text size="sm" fw={500}>
-                      {occ.title}
-                    </Text>
-                    <Text size="xs" c="dimmed">
-                      {occ.isAllDay ? formatDate(occ.start) : formatDateTime(occ.start)}
-                    </Text>
-                  </Box>
-                  <Group
-                    gap="xs"
-                    wrap="wrap"
-                    style={{ flex: '0 1 auto', maxWidth: '60%', justifyContent: 'flex-end' }}
-                  >
-                    {occ.managedUnfilledCriticalSlots.length > 0 && (
-                      <Badge size="sm" variant="filled" color="red">
-                        {t('home.missingManagedCritical', {
-                          slots: occ.managedUnfilledCriticalSlots.join(', '),
-                        })}
-                      </Badge>
-                    )}
-                    {occ.workRoleSlots.length > 0 && <SlotStatusBadge slots={occ.workRoleSlots} />}
-                    {occ.isParticipant && (
-                      <Badge size="sm" variant="light" color="green">
-                        {t('home.participant')}
-                      </Badge>
-                    )}
-                    {occ.isManager && (
-                      <Badge size="sm" variant="light" color="violet">
-                        {t('home.manager')}
-                      </Badge>
-                    )}
-                    {occ.isRescheduled && (
-                      <Badge size="sm" variant="light" color="orange">
-                        {t('events.rescheduled')}
-                      </Badge>
-                    )}
-                    <Badge size="sm" variant="light" color="blue">
-                      {occ.organizationName}
-                    </Badge>
-                  </Group>
-                </Group>
-              ))}
-            </Stack>
-          )}
+          <QueryState query={occurrencesQuery}>
+            {() =>
+              upcomingEvents.length === 0 ? (
+                <Text c="dimmed" size="sm">
+                  {t('home.noUpcomingEvents')}
+                </Text>
+              ) : (
+                <Stack gap="xs">
+                  {upcomingEvents.map(occ => (
+                    <Group
+                      key={`${occ.seriesId}-${occ.occurrenceStart}`}
+                      justify="space-between"
+                      wrap="nowrap"
+                      style={{
+                        padding: '8px 12px',
+                        borderRadius: 4,
+                        cursor: 'pointer',
+                        border: '1px solid var(--mantine-color-gray-2)',
+                      }}
+                      onClick={() => handleEventClick(occ)}
+                    >
+                      <Box>
+                        <Text size="sm" fw={500}>
+                          {occ.title}
+                        </Text>
+                        <Text size="xs" c="dimmed">
+                          {occ.isAllDay ? formatDate(occ.start) : formatDateTime(occ.start)}
+                        </Text>
+                      </Box>
+                      <Group
+                        gap="xs"
+                        wrap="wrap"
+                        style={{ flex: '0 1 auto', maxWidth: '60%', justifyContent: 'flex-end' }}
+                      >
+                        {occ.managedUnfilledCriticalSlots.length > 0 && (
+                          <Badge size="sm" variant="filled" color="red">
+                            {t('home.missingManagedCritical', {
+                              slots: occ.managedUnfilledCriticalSlots.join(', '),
+                            })}
+                          </Badge>
+                        )}
+                        {occ.workRoleSlots.length > 0 && (
+                          <SlotStatusBadge slots={occ.workRoleSlots} />
+                        )}
+                        {occ.isParticipant && (
+                          <Badge size="sm" variant="light" color="green">
+                            {t('home.participant')}
+                          </Badge>
+                        )}
+                        {occ.isManager && (
+                          <Badge size="sm" variant="light" color="violet">
+                            {t('home.manager')}
+                          </Badge>
+                        )}
+                        {occ.isRescheduled && (
+                          <Badge size="sm" variant="light" color="orange">
+                            {t('events.rescheduled')}
+                          </Badge>
+                        )}
+                        <Badge size="sm" variant="light" color="blue">
+                          {occ.organizationName}
+                        </Badge>
+                      </Group>
+                    </Group>
+                  ))}
+                </Stack>
+              )
+            }
+          </QueryState>
         </Card>
       </Stack>
 

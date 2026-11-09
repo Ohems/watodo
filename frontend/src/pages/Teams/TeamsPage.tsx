@@ -11,8 +11,13 @@ import {
   useGetTeamsQuery,
 } from '../../api/index.js';
 import DataTable, { type DataTableColumn } from '../../components/DataTable/DataTable.js';
+import { QueryError } from '../../components/QueryState/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
-import { selectActiveOrganizationId } from '../../store/organization-slice.js';
+import {
+  selectActiveOrganizationId,
+  selectIsOrganizationLoaded,
+  selectOrganizationsError,
+} from '../../store/organization-slice.js';
 import type { FieldErrors, Team } from '../../types/index.js';
 import { validateTeamUpdate } from '../../validation.js';
 
@@ -20,6 +25,8 @@ function TeamsPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
+  const organizationsLoaded = useAppSelector(selectIsOrganizationLoaded);
+  const organizationsError = useAppSelector(selectOrganizationsError);
   const { data: currentUser } = useGetCurrentUserQuery();
   const canWrite =
     currentUser?.permissions?.includes('admin') === true ||
@@ -36,7 +43,11 @@ function TeamsPage() {
   const [newEventSeriesIds, setNewEventSeriesIds] = useState<string[]>([]);
   const [newTeamErrors, setNewTeamErrors] = useState<FieldErrors>({});
 
-  const { data, isLoading: loading } = useGetTeamsQuery(
+  const {
+    data,
+    isLoading: loading,
+    isError,
+  } = useGetTeamsQuery(
     activeOrganizationId
       ? {
           organizationId: activeOrganizationId,
@@ -45,10 +56,10 @@ function TeamsPage() {
       : skipToken,
   );
   // The link selectors are only needed while the create modal is open.
-  const { data: workRoles = [] } = useGetAllWorkRolesQuery(
+  const { data: workRoles = [], isError: workRolesError } = useGetAllWorkRolesQuery(
     addModalOpen && activeOrganizationId ? activeOrganizationId : skipToken,
   );
-  const { data: seriesData } = useGetEventSeriesManagementListQuery(
+  const { data: seriesData, isError: seriesError } = useGetEventSeriesManagementListQuery(
     addModalOpen && activeOrganizationId
       ? { organizationId: activeOrganizationId, page: 0, limit: 200 }
       : skipToken,
@@ -143,7 +154,8 @@ function TeamsPage() {
         total={data?.total ?? 0}
         page={page}
         limit={limit}
-        loading={loading}
+        loading={loading || (!activeOrganizationId && !organizationsLoaded)}
+        error={isError || organizationsError}
         canAdd={canWrite}
         onAdd={() => setAddModalOpen(true)}
         onPageChange={setPage}
@@ -156,6 +168,7 @@ function TeamsPage() {
         onClose={() => setAddModalOpen(false)}
         title={t('teams.newTeam')}
       >
+        {(workRolesError || seriesError) && <QueryError />}
         <TextInput
           label={t('common.name')}
           value={newTeamName}

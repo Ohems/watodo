@@ -77,5 +77,15 @@ export function selectIsOrganizationLoaded(state: RootState): boolean {
   return !isLoading && data !== undefined;
 }
 
+/**
+ * True when the organization list query failed (backend down or erroring).
+ * Org-scoped queries are skipped in that case, so pages use this to show an
+ * error instead of an empty list.
+ */
+export function selectOrganizationsError(state: RootState): boolean {
+  const { isError } = organizationsApi.endpoints.getMyOrganizations.select()(state);
+  return isError;
+}
+
 export const { setActiveOrganization } = organizationSlice.actions;
 export default organizationSlice.reducer;

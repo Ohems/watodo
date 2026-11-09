@@ -452,7 +452,10 @@ export async function interceptMutation(
   await page.route(urlPattern, async (route: Route) => {
     const request = route.request();
     if (request.method() !== method) {
-      return route.continue();
+      // Fall back to an earlier registered handler (e.g. the GET mock for
+      // the same URL) instead of continuing to the network: route.continue()
+      // does not fall through to earlier page.route handlers.
+      return route.fallback();
     }
     let body: unknown = null;
     const postData = request.postData();
