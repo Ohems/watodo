@@ -40,7 +40,8 @@ import {
 } from '../../api/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
 import { selectActiveOrganizationId } from '../../store/organization-slice.js';
-import type { TeamMember } from '../../types/index.js';
+import type { FieldErrors, TeamMember } from '../../types/index.js';
+import { validateTeamUpdate } from '../../validation.js';
 
 function TeamManagementPage() {
   const { t } = useTranslation();
@@ -87,6 +88,7 @@ function TeamManagementPage() {
   const [editLeaderId, setEditLeaderId] = useState<string | null>(null);
   const [editWorkRoleIds, setEditWorkRoleIds] = useState<string[]>([]);
   const [editEventSeriesIds, setEditEventSeriesIds] = useState<string[]>([]);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
@@ -106,6 +108,11 @@ function TeamManagementPage() {
   const handleSave = async () => {
     if (!activeOrganizationId || !teamId) return;
     setActionError(null);
+    const validationErrors = validateTeamUpdate({ name: editName }, t);
+    if (Object.keys(validationErrors).length > 0) {
+      setFieldErrors(validationErrors);
+      return;
+    }
     try {
       await updateTeam({
         organizationId: activeOrganizationId,
@@ -119,6 +126,7 @@ function TeamManagementPage() {
         },
       }).unwrap();
       setEditing(false);
+      setFieldErrors({});
     } catch (err) {
       setActionError(getApiErrorMessage(err));
     }
@@ -199,7 +207,13 @@ function TeamManagementPage() {
           {canManageTeam && (
             <Group>
               {!editing ? (
-                <Button variant="filled" onClick={() => setEditing(true)}>
+                <Button
+                  variant="filled"
+                  onClick={() => {
+                    setFieldErrors({});
+                    setEditing(true);
+                  }}
+                >
                   {t('common.edit')}
                 </Button>
               ) : (
@@ -208,6 +222,7 @@ function TeamManagementPage() {
                     variant="default"
                     onClick={() => {
                       setEditing(false);
+                      setFieldErrors({});
                       setEditName(team.name);
                       setEditDescription(team.description);
                       setEditLeaderId(team.teamLeaderId);
@@ -234,11 +249,24 @@ function TeamManagementPage() {
 
         <Stack gap="md" mb="lg">
           <Box>
-            <Text size="sm" fw={500} c="dimmed" mb={4}>
+            <Text size="sm" fw={500} c={fieldErrors.name ? 'red' : 'dimmed'} mb={4}>
               {t('common.name')}
             </Text>
             {editing ? (
-              <TextInput value={editName} onChange={e => setEditName(e.target.value)} />
+              <TextInput
+                value={editName}
+                onChange={e => {
+                  setEditName(e.target.value);
+                  setFieldErrors(prev => {
+                    if (!('name' in prev)) return prev;
+                    const next = { ...prev };
+                    delete next.name;
+                    return next;
+                  });
+                }}
+                error={fieldErrors.name}
+                required
+              />
             ) : (
               <Text>{team.name}</Text>
             )}

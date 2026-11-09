@@ -19,6 +19,8 @@ interface DateTimeFieldProps {
   /** Placeholder shown when empty; defaults to the user's date/time format as a hint. */
   placeholder?: string;
   description?: string;
+  /** Validation error: turns the input outline red and shows the message below it. */
+  error?: string;
   size?: MantineSize;
   style?: CSSProperties;
 }
@@ -48,6 +50,7 @@ function DateTimeField({
   required,
   placeholder,
   description,
+  error,
   size,
   style,
 }: DateTimeFieldProps) {
@@ -65,6 +68,7 @@ function DateTimeField({
       firstDayOfWeek={firstDayOfWeek}
       required={required}
       description={description}
+      error={error}
       size={size}
       style={style}
       clearable

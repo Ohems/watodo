@@ -13,7 +13,8 @@ import {
 import DataTable, { type DataTableColumn } from '../../components/DataTable/DataTable.js';
 import { useAppSelector } from '../../hooks/redux.js';
 import { selectActiveOrganizationId } from '../../store/organization-slice.js';
-import type { Team } from '../../types/index.js';
+import type { FieldErrors, Team } from '../../types/index.js';
+import { validateTeamUpdate } from '../../validation.js';
 
 function TeamsPage() {
   const { t } = useTranslation();
@@ -33,6 +34,7 @@ function TeamsPage() {
   const [newTeamDescription, setNewTeamDescription] = useState('');
   const [newWorkRoleIds, setNewWorkRoleIds] = useState<string[]>([]);
   const [newEventSeriesIds, setNewEventSeriesIds] = useState<string[]>([]);
+  const [newTeamErrors, setNewTeamErrors] = useState<FieldErrors>({});
 
   const { data, isLoading: loading } = useGetTeamsQuery(
     activeOrganizationId
@@ -54,7 +56,12 @@ function TeamsPage() {
   const [createTeam] = useCreateTeamMutation();
 
   const handleAdd = async () => {
-    if (!activeOrganizationId || !newTeamName.trim()) return;
+    if (!activeOrganizationId) return;
+    const validationErrors = validateTeamUpdate({ name: newTeamName }, t);
+    if (Object.keys(validationErrors).length > 0) {
+      setNewTeamErrors(validationErrors);
+      return;
+    }
     try {
       await createTeam({
         organizationId: activeOrganizationId,
@@ -71,6 +78,7 @@ function TeamsPage() {
       setNewTeamDescription('');
       setNewWorkRoleIds([]);
       setNewEventSeriesIds([]);
+      setNewTeamErrors({});
     } catch {
       // Ignore
     }
@@ -151,7 +159,17 @@ function TeamsPage() {
         <TextInput
           label={t('common.name')}
           value={newTeamName}
-          onChange={e => setNewTeamName(e.target.value)}
+          onChange={e => {
+            setNewTeamName(e.target.value);
+            setNewTeamErrors(prev => {
+              if (!('name' in prev)) return prev;
+              const next = { ...prev };
+              delete next.name;
+              return next;
+            });
+          }}
+          error={newTeamErrors.name}
+          required
           mb="sm"
         />
         <TextInput
@@ -182,7 +200,7 @@ function TeamsPage() {
           <Button variant="default" onClick={() => setAddModalOpen(false)}>
             {t('common.cancel')}
           </Button>
-          <Button variant="filled" onClick={handleAdd} disabled={!newTeamName.trim()}>
+          <Button variant="filled" onClick={handleAdd}>
             {t('common.save')}
           </Button>
         </Group>

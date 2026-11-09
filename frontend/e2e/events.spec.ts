@@ -286,3 +286,103 @@ test.describe('Event Config page', () => {
     });
   });
 });
+
+test.describe('New event page', () => {
+  const mockCalendars = [
+    {
+      id: 'cal-1',
+      name: 'Main Calendar',
+      organizationId: ORG_ID,
+      defaultTimezone: 'UTC',
+      createdAt: '2025-01-01T00:00:00.000Z',
+      updatedAt: '2025-01-01T00:00:00.000Z',
+    },
+  ];
+
+  async function setupNewEvent(page: import('@playwright/test').Page, user = adminUser()) {
+    await mockCommonApis(page, user, [testOrg]);
+    await page.route(
+      url =>
+        url.pathname === '/api/v1/calendars' && url.searchParams.get('organizationId') === ORG_ID,
+      route => route.fulfill({ json: mockCalendars }),
+    );
+  }
+
+  test.describe('data display', () => {
+    test('shows the new event series dialog', async ({ page }) => {
+      await setupNewEvent(page);
+      await page.goto('/events/new');
+
+      const dialog = page.getByRole('dialog');
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByText('New event series')).toBeVisible();
+      await expect(dialog.getByRole('textbox', { name: 'Title' })).toBeVisible();
+      // The first calendar of the active organization is preselected (combobox value is hidden text)
+      await expect(dialog.getByRole('combobox', { name: 'Calendar' })).toHaveValue('Main Calendar');
+    });
+  });
+
+  test.describe('permission-based UI', () => {
+    test('user with events:write sees the Save button', async ({ page }) => {
+      await setupNewEvent(page, userWithPermissions(['events:write']));
+      await page.goto('/events/new');
+
+      await expect(page.getByRole('dialog').getByRole('button', { name: 'Save' })).toBeVisible();
+    });
+
+    test('regular user gets an insufficient-rights error when saving', async ({ page }) => {
+      await setupNewEvent(page, regularUser());
+      await page.route('**/api/v1/event-series', route => {
+        if (route.request().method() === 'POST') {
+          return route.fulfill({ status: 403, json: { error: 'Insufficient rights!' } });
+        }
+        return route.continue();
+      });
+      await page.goto('/events/new');
+
+      // Wait until the calendars have loaded and the default is selected
+      await expect(page.getByRole('combobox', { name: 'Calendar' })).toHaveValue('Main Calendar');
+      await page.getByRole('textbox', { name: 'Title' }).fill('Created Event');
+      await page.getByRole('button', { name: 'Save' }).click();
+
+      await expect(page.getByText('Insufficient rights!')).toBeVisible();
+    });
+  });
+
+  test.describe('editing', () => {
+    test('saving creates the event series via POST and returns to management', async ({ page }) => {
+      await setupNewEvent(page, adminUser());
+      const captured = await interceptMutation(page, '**/api/v1/event-series', 'POST', {
+        ...mockEventSeries[0],
+        id: 3,
+        title: 'Created Event',
+      });
+      await page.goto('/events/new');
+
+      // Wait until the calendars have loaded and the default is selected
+      await expect(page.getByRole('combobox', { name: 'Calendar' })).toHaveValue('Main Calendar');
+      await page.getByRole('textbox', { name: 'Title' }).fill('Created Event');
+      await page.getByRole('button', { name: 'Save' }).click();
+
+      await expect
+        .poll(() => captured.length, { message: 'POST /event-series was called' })
+        .toBe(1);
+      expect(captured[0].body).toMatchObject({ title: 'Created Event', calendarId: 'cal-1' });
+      await expect(page).toHaveURL('/events/management');
+    });
+
+    test('empty title shows a field error below the input and does not POST', async ({ page }) => {
+      await setupNewEvent(page, adminUser());
+      const captured = await interceptMutation(page, '**/api/v1/event-series', 'POST', {});
+      await page.goto('/events/new');
+
+      await expect(page.getByRole('combobox', { name: 'Calendar' })).toHaveValue('Main Calendar');
+      await page.getByRole('button', { name: 'Save' }).click();
+
+      const titleInput = page.getByRole('textbox', { name: 'Title' });
+      await expect(page.getByText('Title is required')).toBeVisible();
+      await expect(titleInput).toHaveAttribute('aria-invalid', 'true');
+      expect(captured).toHaveLength(0);
+    });
+  });
+});

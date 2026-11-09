@@ -119,6 +119,14 @@ Run from `frontend/`:
 - Do not use the em dash character in code comments or markdown files. Use the basic hyphen (`-`) instead.
 - Prefer `const` over `let`. Use template literals over string concatenation.
 - Handle errors explicitly. Do not silently swallow exceptions.
+- **Field-level validation errors.** When a validation error can be attributed to a single
+  input, display it below that input via the input's `error` prop (Mantine turns the input
+  outline red and renders the message underneath; the label also turns red) and, where the
+  page renders its own label `Text`, colour it red (`c={fieldErrors.x ? 'red' : 'dimmed'}`),
+  as in `OrgGeneralPage` and `Account`. Use a generic `Alert` only for backend errors or
+  other errors that cannot be attributed to a single field. Client-side validators live in
+  `frontend/src/validation.ts` as `validate*` functions taking the form data and `t`, and
+  returning a `FieldErrors` map keyed by field name.
 - When a comment describes the following variable or function, use a JSDoc comment
   (`/** ... */`) instead of a standard `//` comment. Only add tags like `@param` or
   `@returns` when the function is not trivial.

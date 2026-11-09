@@ -372,6 +372,39 @@ test.describe('Team Management page', () => {
         teamLeaderId: 'user-1',
       });
     });
+
+    test('empty team name shows a field error below the input and does not PATCH', async ({
+      page,
+    }) => {
+      await mockCommonApis(page, adminUser(), [testOrg]);
+      await mockOrgApis(page, ORG_ID, {
+        teams: mockTeams,
+        workRoles: mockWorkRoles,
+        orgUsers: mockOrgUsers,
+      });
+      await mockEventSeriesManagement(page, mockEventSeries);
+      await mockUserList(page, mockAllUsers);
+      await page.route(`**/api/v1/organizations/${ORG_ID}/teams/team-1/members`, route =>
+        route.fulfill({ json: mockMembers }),
+      );
+      let patchCalled = false;
+      // Single route handling both GET and PATCH on the same URL
+      await page.route(`**/api/v1/organizations/${ORG_ID}/teams/team-1`, route => {
+        if (route.request().method() === 'PATCH') patchCalled = true;
+        return route.fulfill({ json: mockTeamDetail });
+      });
+
+      await page.goto('/teams/team-1');
+
+      await page.getByRole('button', { name: 'Edit' }).click();
+      const nameInput = page.getByRole('textbox').first();
+      await nameInput.fill('');
+      await page.getByRole('button', { name: 'Save' }).click();
+
+      await expect(page.getByText('Name is required')).toBeVisible();
+      await expect(nameInput).toHaveAttribute('aria-invalid', 'true');
+      expect(patchCalled).toBe(false);
+    });
   });
 
   test.describe('member management', () => {

@@ -21,10 +21,12 @@ import type {
   Calendar,
   EventSeries,
   EventSeriesPush,
+  FieldErrors,
   Organization,
   RecurrenceFreq,
   RecurrenceInput,
 } from '../../types/index.js';
+import { validateEventSeriesForm } from '../../validation.js';
 import DateField from '../DateField/index.js';
 import DateTimeField from '../DateTimeField/index.js';
 
@@ -58,7 +60,10 @@ function EventSeriesDialog({
   onSaved,
 }: EventSeriesDialogProps) {
   const { t } = useTranslation();
+  // Backend error (not attributable to a single field); shown as a generic Alert.
   const [error, setError] = useState<string | null>(null);
+  // Field-level validation errors; shown below the offending input.
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [splitEventSeries, { isLoading: savingSplit }] = useSplitEventSeriesMutation();
   const [updateEventSeries, { isLoading: savingUpdate }] = useUpdateEventSeriesMutation();
   const [createEventSeries, { isLoading: savingCreate }] = useCreateEventSeriesMutation();
@@ -84,6 +89,7 @@ function EventSeriesDialog({
   useEffect(() => {
     if (!open) return;
     setError(null);
+    setFieldErrors({});
     if (series) {
       setTitle(series.title);
       setDescription(series.description ?? '');
@@ -104,7 +110,7 @@ function EventSeriesDialog({
     } else {
       setTitle('');
       setDescription('');
-      setCalendarId(calendars[0]?.id ?? '');
+      setCalendarId('');
       setStart(toLocalInputValue(new Date().toISOString()));
       setDurationMinutes('60');
       setIsAllDay(false);
@@ -118,7 +124,15 @@ function EventSeriesDialog({
       setUntil('');
       setCount('');
     }
-  }, [open, series, calendars]);
+  }, [open, series]);
+
+  // In create mode, default to the first calendar once the calendars have
+  // loaded. This must not reset the rest of the form (e.g. a typed title).
+  useEffect(() => {
+    if (open && !series && !calendarId && calendars.length > 0) {
+      setCalendarId(calendars[0].id);
+    }
+  }, [open, series, calendarId, calendars]);
 
   const selectedCalendar = calendars.find(calendar => calendar.id === calendarId);
   const calendarOrganization = organizations.find(
@@ -143,25 +157,27 @@ function EventSeriesDialog({
     return recurrence;
   };
 
+  // Clears the error of a field once the user edits it.
+  const clearFieldError = (field: string) => {
+    setFieldErrors(prev => {
+      if (!(field in prev)) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+
   const handleSave = async () => {
     setError(null);
-    if (!title.trim()) {
-      setError(t('events.titleRequired'));
-      return;
-    }
-    if (!calendarId) {
-      setError(t('events.calendarRequired'));
-      return;
-    }
-    if (!start) {
-      setError(t('events.startRequired'));
+    const validationErrors = validateEventSeriesForm(
+      { title, calendarId, start, durationMinutes },
+      t,
+    );
+    if (Object.keys(validationErrors).length > 0) {
+      setFieldErrors(validationErrors);
       return;
     }
     const duration = Number.parseInt(durationMinutes, 10);
-    if (Number.isNaN(duration) || duration < 1) {
-      setError(t('events.durationInvalid'));
-      return;
-    }
 
     const payload: EventSeriesPush = {
       title: title.trim(),
@@ -231,7 +247,11 @@ function EventSeriesDialog({
         <TextInput
           label={t('events.seriesTitle')}
           value={title}
-          onChange={event => setTitle(event.target.value)}
+          onChange={event => {
+            setTitle(event.target.value);
+            clearFieldError('title');
+          }}
+          error={fieldErrors.title}
           required
         />
         <Textarea
@@ -244,15 +264,32 @@ function EventSeriesDialog({
           label={t('events.calendar')}
           data={calendars.map(c => ({ value: c.id, label: c.name }))}
           value={calendarId || null}
-          onChange={value => setCalendarId(value ?? '')}
+          onChange={value => {
+            setCalendarId(value ?? '');
+            clearFieldError('calendarId');
+          }}
+          error={fieldErrors.calendarId}
           required
         />
-        <DateTimeField label={t('events.start')} value={start} onChange={setStart} required />
+        <DateTimeField
+          label={t('events.start')}
+          value={start}
+          onChange={value => {
+            setStart(value);
+            clearFieldError('start');
+          }}
+          error={fieldErrors.start}
+          required
+        />
         <TextInput
           label={t('events.durationMinutes')}
           type="number"
           value={durationMinutes}
-          onChange={event => setDurationMinutes(event.target.value)}
+          onChange={event => {
+            setDurationMinutes(event.target.value);
+            clearFieldError('durationMinutes');
+          }}
+          error={fieldErrors.durationMinutes}
         />
         <TextInput
           label={t('events.timezone')}

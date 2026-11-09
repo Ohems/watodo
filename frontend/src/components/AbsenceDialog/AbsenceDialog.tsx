@@ -7,6 +7,7 @@ import {
   useUpdateAbsenceMutation,
 } from '../../api/index.js';
 import type { Absence, AbsenceType } from '../../types/index.js';
+import { validateAbsenceForm } from '../../validation.js';
 import DateField from '../DateField/index.js';
 
 interface AbsenceDialogProps {
@@ -71,6 +72,9 @@ function AbsenceDialog({ opened, onClose, absence }: AbsenceDialogProps) {
   };
 
   const valid = type !== null && startDate !== '' && endDate !== '' && endDate >= startDate;
+  // Field-level validation error (end date before start date), shown below the
+  // end date input; backend errors are shown as a generic Alert instead.
+  const fieldErrors = validateAbsenceForm({ startDate, endDate }, t);
 
   return (
     <Modal
@@ -108,13 +112,14 @@ function AbsenceDialog({ opened, onClose, absence }: AbsenceDialogProps) {
           }}
           required
         />
-        <DateField label={t('absences.endDate')} value={endDate} onChange={setEndDate} required />
+        <DateField
+          label={t('absences.endDate')}
+          value={endDate}
+          onChange={setEndDate}
+          error={fieldErrors.endDate}
+          required
+        />
       </Group>
-      {startDate !== '' && endDate !== '' && endDate < startDate && (
-        <Alert color="red" variant="light" mb="md">
-          {t('absences.endBeforeStart')}
-        </Alert>
-      )}
       <Group justify="flex-end">
         <Button variant="default" onClick={onClose}>
           {t('common.cancel')}
