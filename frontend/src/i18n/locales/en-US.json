@@ -334,6 +334,8 @@
     "roomUnclear": "Room to be determined",
     "reserveWholeSite": "Reserve the whole site",
     "wholeSiteReserved": "Whole site reserved",
+    "bookingConflicts": "Booking conflicts",
+    "bookingConflictItem": "{{title}} ({{start}} - {{end}})",
     "filterBySite": "Filter by site",
     "filterByRoom": "Filter by room",
     "filterByTeam": "Filter by team",

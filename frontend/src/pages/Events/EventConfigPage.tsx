@@ -27,10 +27,12 @@ import {
   useGetTeamsQuery,
   useUpdateEventSeriesConfigMutation,
 } from '../../api/index.js';
+import { BookingConflictsAlert } from '../../components/BookingConflictsAlert/index.js';
 import { QueryError } from '../../components/QueryState/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
 import { useFormatters } from '../../hooks/use-formatters.js';
 import { selectActiveOrganizationId } from '../../store/organization-slice.js';
+import type { BookingConflict } from '../../types/index.js';
 
 function EventConfigPage() {
   const { t } = useTranslation();
@@ -67,6 +69,8 @@ function EventConfigPage() {
   const [updateConfig, { isLoading: saving }] = useUpdateEventSeriesConfigMutation();
 
   const [actionError, setActionError] = useState<string | null>(null);
+  // Booking conflicts reported by the last save; the save itself succeeded.
+  const [conflicts, setConflicts] = useState<BookingConflict[] | undefined>(undefined);
   const error = actionError ?? (seriesError ? getApiErrorMessage(seriesError) : null);
 
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
@@ -99,8 +103,9 @@ function EventConfigPage() {
   const handleSave = async () => {
     if (!series) return;
     setActionError(null);
+    setConflicts(undefined);
     try {
-      await updateConfig({
+      const result = await updateConfig({
         seriesId: series.id,
         data: {
           siteId: selectedSiteId,
@@ -109,6 +114,7 @@ function EventConfigPage() {
           teamIds: selectedTeamIds,
         },
       }).unwrap();
+      setConflicts(result.conflicts);
     } catch (err) {
       setActionError(getApiErrorMessage(err));
     }
@@ -155,6 +161,10 @@ function EventConfigPage() {
             {error}
           </Alert>
         )}
+
+        <Box mb="md">
+          <BookingConflictsAlert conflicts={conflicts} />
+        </Box>
 
         {filtersError && (
           <Box mb="md">

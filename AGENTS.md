@@ -227,11 +227,11 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 - `GET /api/v1/organizations/:organizationId` - Get organization details (members only)
 - `PATCH /api/v1/organizations/:organizationId` - Update organization details (`organization:write`)
 - `GET /api/v1/event-series` - List event series (`events:read`, requires `organizationId` query)
-- `POST /api/v1/event-series` - Create event series (`events:write`)
+- `POST /api/v1/event-series` - Create event series (`events:write`; body may include `siteId`/`roomId`/`reserveWholeSite`; the response carries a `conflicts` warning array listing overlapping bookings in the same room/site)
 - `GET /api/v1/event-series/management` - Paginated series list for the management view (`events:read`)
 - `GET /api/v1/event-series/occurrences` - Occurrences in a time range (used by calendars and the Home page; `events:read`). Each occurrence includes `isParticipant`, `isManager`, `workRoleSlots` (per-slot status indicators) and `managedUnfilledCriticalSlots` for the requesting user. The `scope` filter accepts `all`, `mine` (assigned to a slot), `team` (series linked to one of the user's teams) and `involved` (participant or manager; used by the Home page)
 - `GET /api/v1/event-occurrences/:occurrenceRef` - Single occurrence detail by ref (numeric ID or `tmp:{seriesId}:{isoStart}`; `events:read`)
-- `POST /api/v1/event-occurrences/:occurrenceRef/materialize` - Materialize a tmp ref into a stable numeric ID, inheriting parent slots (`events:write`)
+- `POST /api/v1/event-occurrences/:occurrenceRef/materialize` - Materialize a tmp ref into a stable numeric ID, inheriting parent slots (`events:write`). Returns `{ occurrenceId, conflicts }` where `conflicts` lists overlapping bookings of the occurrence's effective time range (`events:write`)
 - `POST /api/v1/event-occurrences/:occurrenceRef/import-slots` - Import parent series slots into a materialized occurrence (`events:write`)
 - `GET/POST /api/v1/event-occurrences/:eventOccurrenceId/work-roles` - List/create occurrence-level slots (numeric ID required; `events:read`/`events:write`)
 - `PATCH/DELETE /api/v1/event-occurrences/:eventOccurrenceId/work-roles/:workRoleId` - Update/delete occurrence slot (never touches parent slots)
@@ -241,14 +241,14 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 - `PATCH/DELETE /api/v1/event-occurrences/:eventOccurrenceId/comments/:commentId` - Update/delete occurrence comment (author only)
 - `GET /api/v1/event-series/:seriesId` - Get series (`events:read`)
 - `GET /api/v1/event-series/:seriesId/management` - Get series with site/room/teams (`events:read`)
-- `PATCH /api/v1/event-series/:seriesId` - Update series (`events:write`)
-- `PATCH /api/v1/event-series/:seriesId/config` - Update site/room/team assignments (`events:write`)
+- `PATCH /api/v1/event-series/:seriesId` - Update series (`events:write`; body may include `siteId`/`roomId`/`reserveWholeSite`; response carries `conflicts`)
+- `PATCH /api/v1/event-series/:seriesId/config` - Update site/room/team assignments (`events:write`; response carries `conflicts`)
 - `DELETE /api/v1/event-series/:seriesId` - Delete series (`events:write`)
 - `GET /api/v1/event-series/:seriesId/occurrences` - Occurrences of one series in a range (`events:read`)
 - `GET /api/v1/event-series/:seriesId/occurrences/:occurrenceStart` - Single occurrence detail (`events:read`)
 - `POST /api/v1/event-series/:seriesId/occurrences/:occurrenceStart/cancel` - Cancel occurrence (`events:write`)
-- `POST /api/v1/event-series/:seriesId/occurrences/:occurrenceStart/reschedule` - Reschedule occurrence (`events:write`)
-- `POST /api/v1/event-series/:seriesId/occurrences/:occurrenceStart/split` - Split series at occurrence (`events:write`)
+- `POST /api/v1/event-series/:seriesId/occurrences/:occurrenceStart/reschedule` - Reschedule occurrence (`events:write`; response carries `conflicts` for the rescheduled range)
+- `POST /api/v1/event-series/:seriesId/occurrences/:occurrenceStart/split` - Split series at occurrence (`events:write`; response carries `conflicts` of the new series)
 - `DELETE /api/v1/event-series/:seriesId/occurrences/:occurrenceStart/exception` - Restore occurrence (`events:write`)
 - `GET /api/v1/event-series/:seriesId/exceptions` - List cancelled/rescheduled occurrences (`events:read`)
 - `GET /api/v1/event-series/:seriesId/work-roles` - List work role slots (`events:read`, optional `occurrenceStart` query)
@@ -422,7 +422,12 @@ frontend/src/
   email/push delivery renders it server-side with `renderNotificationMessage`
   in the recipient's `users.language`.
   Events can be assigned to a site (optionally reserving the whole site)
-  and/or a specific room within a site.
+  and/or a specific room within a site. Booking conflict detection: every
+  write that can change a booking (series create/update, config update, split,
+  occurrence reschedule/materialize) expands the affected occurrences and
+  reports overlaps with other series of the same organization that share the
+  same room, or where either side reserves the whole site, as a `conflicts`
+  warning array on the response (the write itself is not rejected).
 - **Occurrence model**: `event_series` is expanded on the fly by the recurrence
   engine; individual instances are materialized into `event_occurrences` on
   first write (slot, comment, or cancel/reschedule). `event_occurrences` carries

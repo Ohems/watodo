@@ -517,13 +517,13 @@ function parseOccurrenceId(value: string): number {
   return Number.parseInt(value, 10);
 }
 
-/** Materializes a tmp occurrence ref and returns its stable numeric ID. */
+/** Materializes a tmp occurrence ref and returns its stable numeric ID plus booking conflicts. */
 export async function materializeOccurrenceHandler(
   request: FastifyRequest<OccurrenceRefParams>,
   reply: FastifyReply,
 ): Promise<void> {
-  const occurrenceId = await materializeOccurrenceByRef(request.params.occurrenceRef);
-  return reply.status(200).send({ occurrenceId });
+  const result = await materializeOccurrenceByRef(request.params.occurrenceRef);
+  return reply.status(200).send(result);
 }
 
 export async function listOccurrenceWorkRolesHandler(

@@ -274,6 +274,35 @@ test.describe('Event Config page', () => {
         roomId: 'room-1',
       });
     });
+
+    test('shows a booking conflict warning when the saved config overlaps another booking', async ({
+      page,
+    }) => {
+      await setupEventConfig(page, adminUser());
+
+      const withConflicts = {
+        ...mockSeriesDetail,
+        conflicts: [
+          {
+            seriesId: 2,
+            title: 'Winter Market',
+            occurrenceStart: '2025-12-01T08:00:00.000Z',
+            start: '2025-07-15T10:30:00.000Z',
+            end: '2025-07-15T11:30:00.000Z',
+            siteId: 'site-1',
+            roomId: 'room-1',
+            reserveWholeSite: false,
+          },
+        ],
+      };
+      await interceptMutation(page, '**/api/v1/event-series/1/config', 'PATCH', withConflicts);
+
+      await page.goto('/events/1');
+      await page.getByRole('button', { name: 'Save' }).click();
+
+      await expect(page.getByText('Booking conflicts')).toBeVisible();
+      await expect(page.getByText(/Winter Market/)).toBeVisible();
+    });
   });
 
   test.describe('navigation', () => {
@@ -383,6 +412,50 @@ test.describe('New event page', () => {
       await expect(page.getByText('Title is required')).toBeVisible();
       await expect(titleInput).toHaveAttribute('aria-invalid', 'true');
       expect(captured).toHaveLength(0);
+    });
+
+    test('shows a booking conflict warning and keeps the dialog open when the created series overlaps another booking', async ({
+      page,
+    }) => {
+      await setupNewEvent(page, adminUser());
+      const withConflicts = {
+        ...mockEventSeries[0],
+        id: 3,
+        title: 'Created Event',
+        conflicts: [
+          {
+            seriesId: 1,
+            title: 'Summer Festival',
+            occurrenceStart: '2025-07-15T10:00:00.000Z',
+            start: '2025-07-15T10:00:00.000Z',
+            end: '2025-07-15T18:00:00.000Z',
+            siteId: 'site-1',
+            roomId: 'room-1',
+            reserveWholeSite: false,
+          },
+        ],
+      };
+      const captured = await interceptMutation(
+        page,
+        '**/api/v1/event-series',
+        'POST',
+        withConflicts,
+      );
+      await page.goto('/events/new');
+
+      await expect(page.getByRole('combobox', { name: 'Calendar' })).toHaveValue('Main Calendar');
+      await page.getByRole('textbox', { name: 'Title' }).fill('Created Event');
+      await page.getByRole('button', { name: 'Save' }).click();
+
+      await expect
+        .poll(() => captured.length, { message: 'POST /event-series was called' })
+        .toBe(1);
+      // The save succeeded, but the dialog stays open and flags the conflict.
+      const dialog = page.getByRole('dialog');
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByText('Booking conflicts')).toBeVisible();
+      await expect(dialog.getByText(/Summer Festival/)).toBeVisible();
+      await expect(page).toHaveURL('/events/new');
     });
   });
 });

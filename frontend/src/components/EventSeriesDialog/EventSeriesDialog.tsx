@@ -18,6 +18,7 @@ import {
   useUpdateEventSeriesMutation,
 } from '../../api/index.js';
 import type {
+  BookingConflict,
   Calendar,
   EventSeries,
   EventSeriesPush,
@@ -27,6 +28,7 @@ import type {
   RecurrenceInput,
 } from '../../types/index.js';
 import { validateEventSeriesForm } from '../../validation.js';
+import { BookingConflictsAlert } from '../BookingConflictsAlert/index.js';
 import DateField from '../DateField/index.js';
 import DateTimeField from '../DateTimeField/index.js';
 
@@ -62,6 +64,8 @@ function EventSeriesDialog({
   const { t } = useTranslation();
   // Backend error (not attributable to a single field); shown as a generic Alert.
   const [error, setError] = useState<string | null>(null);
+  // Booking conflicts reported by the save; shown as a warning, the save succeeded.
+  const [conflicts, setConflicts] = useState<BookingConflict[] | undefined>(undefined);
   // Field-level validation errors; shown below the offending input.
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [splitEventSeries, { isLoading: savingSplit }] = useSplitEventSeriesMutation();
@@ -89,6 +93,7 @@ function EventSeriesDialog({
   useEffect(() => {
     if (!open) return;
     setError(null);
+    setConflicts(undefined);
     setFieldErrors({});
     if (series) {
       setTitle(series.title);
@@ -169,6 +174,7 @@ function EventSeriesDialog({
 
   const handleSave = async () => {
     setError(null);
+    setConflicts(undefined);
     const validationErrors = validateEventSeriesForm(
       { title, calendarId, start, durationMinutes },
       t,
@@ -192,19 +198,28 @@ function EventSeriesDialog({
     if (timezone.trim()) payload.timezone = timezone.trim();
 
     try {
+      let result: EventSeries | undefined;
       if (splitOccurrenceStart && series) {
-        await splitEventSeries({
+        result = await splitEventSeries({
           seriesId: series.id,
           occurrenceStart: splitOccurrenceStart,
           data: payload,
         }).unwrap();
       } else if (series) {
-        await updateEventSeries({ seriesId: series.id, data: payload }).unwrap();
+        result = await updateEventSeries({ seriesId: series.id, data: payload }).unwrap();
       } else {
-        await createEventSeries(payload).unwrap();
+        result = await createEventSeries(payload).unwrap();
       }
-      onSaved();
-      onClose();
+      if (result.conflicts && result.conflicts.length > 0) {
+        // The save succeeded, but the booking overlaps other events: keep the
+        // dialog open and flag the conflicts so the organizer can adjust.
+        // (onSaved/onClose are not called: callers navigate away on them, and
+        // the mutation's invalidated tags refresh the lists on return.)
+        setConflicts(result.conflicts);
+      } else {
+        onSaved();
+        onClose();
+      }
     } catch (err) {
       setError(getApiErrorMessage(err));
     }
@@ -244,6 +259,7 @@ function EventSeriesDialog({
             {error}
           </Alert>
         )}
+        <BookingConflictsAlert conflicts={conflicts} />
         <TextInput
           label={t('events.seriesTitle')}
           value={title}

@@ -32,6 +32,26 @@ const logger = createLogger('event-service');
 
 const DEFAULT_DURATION_MINUTES = 60;
 
+/**
+ * A booking conflict: an occurrence of another series in the same
+ * organization that overlaps the new/changed booking and shares the same
+ * room, or whose site is reserved (whole-site reservation on either side).
+ * Reported as a warning on write responses, not as an error.
+ */
+export interface BookingConflict {
+  seriesId: number;
+  title: string;
+  /** Original occurrence start of the conflicting occurrence. */
+  occurrenceStart: string;
+  /** Effective start of the conflicting occurrence (after reschedule overrides). */
+  start: string;
+  /** Effective end of the conflicting occurrence. */
+  end: string;
+  siteId: string | null;
+  roomId: string | null;
+  reserveWholeSite: boolean;
+}
+
 export interface EventSeriesResponse {
   id: number;
   title: string;
@@ -49,6 +69,8 @@ export interface EventSeriesResponse {
   recurrence: RecurrenceInput | null;
   createdAt: string;
   updatedAt: string;
+  /** Booking conflicts detected by this write; only set on write responses. */
+  conflicts?: BookingConflict[];
 }
 
 /** Status indicator for a single work role slot of an occurrence. */
@@ -99,6 +121,8 @@ export interface EventExceptionResponse {
   overrideEnd: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Booking conflicts of the rescheduled occurrence; only set on reschedule. */
+  conflicts?: BookingConflict[];
 }
 
 export interface EventWorkRoleAssignmentResponse {
@@ -191,7 +215,7 @@ function toExceptionRule(exception: EventOccurrenceRow): OccurrenceExceptionRule
   };
 }
 
-function serializeSeries(series: EventSeries): EventSeriesResponse {
+function serializeSeries(series: EventSeries, conflicts?: BookingConflict[]): EventSeriesResponse {
   return {
     id: series.id,
     title: series.title,
@@ -209,6 +233,7 @@ function serializeSeries(series: EventSeries): EventSeriesResponse {
     recurrence: series.rrule ? recurrenceFromRruleString(series, series.rrule) : null,
     createdAt: series.created_at.toISOString(),
     updatedAt: series.updated_at.toISOString(),
+    ...(conflicts !== undefined ? { conflicts } : {}),
   };
 }
 
@@ -537,6 +562,232 @@ async function fetchExceptionRules(
   return bySeries;
 }
 
+// --- Booking conflict detection ---
+
+/** The location-relevant part of a series' booking. */
+interface BookingRule {
+  siteId: string | null;
+  roomId: string | null;
+  reserveWholeSite: boolean;
+}
+
+/**
+ * Whether two bookings compete for the same space: they share a site and
+ * either both target the same room, or either one reserves the whole site.
+ * A booking without a site never conflicts.
+ */
+function bookingsConflict(a: BookingRule, b: BookingRule): boolean {
+  if (!a.siteId || !b.siteId || a.siteId !== b.siteId) return false;
+  if (a.reserveWholeSite || b.reserveWholeSite) return true;
+  return a.roomId !== null && a.roomId === b.roomId;
+}
+
+/** Maximum number of conflicts reported in one response. */
+const MAX_REPORTED_CONFLICTS = 100;
+
+/** An occupied time interval of the booking being created/changed. */
+interface ProposedInterval {
+  occurrenceStart: Date;
+  start: Date;
+  end: Date;
+}
+
+/**
+ * Finds the occurrences of other series in the same organization that
+ * overlap the proposed intervals and compete for the same room/site.
+ * Candidate series are pre-filtered by site/room in SQL, expanded over the
+ * proposed range with their exceptions applied, and matched against the
+ * proposed intervals with a two-pointer sweep (both sides sorted by start).
+ * @param organizationId - The organization the booking belongs to.
+ * @param booking - The proposed booking (site/room/reserve flag).
+ * @param intervals - The proposed occurrence intervals (sorted by start).
+ * @param excludeSeriesId - Series to skip entirely (the series being created/updated).
+ * @param excludeOccurrence - A single occurrence to skip (the one being rescheduled/materialized).
+ * @returns The conflicting occurrences, sorted by start, capped at MAX_REPORTED_CONFLICTS.
+ */
+async function findBookingConflicts(
+  organizationId: string,
+  booking: BookingRule,
+  intervals: ProposedInterval[],
+  excludeSeriesId: number | null,
+  excludeOccurrence?: { seriesId: number; occurrenceStart: Date },
+): Promise<BookingConflict[]> {
+  if (!booking.siteId || intervals.length === 0) return [];
+  const sorted = [...intervals].sort((a, b) => a.start.getTime() - b.start.getTime());
+  const rangeStart = sorted[0].start;
+  const rangeEnd = sorted.reduce((max, i) => (i.end > max ? i.end : max), sorted[0].end);
+
+  // Candidate series in the same organization sharing the site or room.
+  let candidateQuery = db
+    .selectFrom('event_series')
+    .innerJoin('calendars', 'calendars.id', 'event_series.calendar_id')
+    .selectAll('event_series')
+    .where('calendars.organization_id', '=', organizationId)
+    .where(eb =>
+      eb.or([
+        eb('event_series.site_id', '=', booking.siteId as string),
+        ...(booking.roomId !== null ? [eb('event_series.room_id', '=', booking.roomId)] : []),
+      ]),
+    );
+  if (excludeSeriesId !== null) {
+    candidateQuery = candidateQuery.where('event_series.id', '!=', excludeSeriesId);
+  }
+  const candidates = await candidateQuery.execute();
+  const matching = candidates.filter(candidate =>
+    bookingsConflict(booking, {
+      siteId: candidate.site_id,
+      roomId: candidate.room_id,
+      reserveWholeSite: candidate.reserve_whole_site,
+    }),
+  );
+  if (matching.length === 0) return [];
+
+  const exceptionsBySeries = await fetchExceptionRules(matching.map(c => c.id));
+
+  // Expand every candidate over the proposed range and collect the occupied
+  // intervals that actually overlap a proposed interval (two-pointer sweep).
+  const conflicting: BookingConflict[] = [];
+  const seen = new Set<string>();
+  for (const candidate of matching) {
+    const exceptions = exceptionsBySeries.get(candidate.id) ?? [];
+    const expanded = expandOccurrences(toRule(candidate), exceptions, rangeStart, rangeEnd);
+    let i = 0;
+    for (const occurrence of expanded) {
+      if (
+        excludeOccurrence &&
+        candidate.id === excludeOccurrence.seriesId &&
+        occurrence.occurrenceStart.getTime() === excludeOccurrence.occurrenceStart.getTime()
+      ) {
+        continue;
+      }
+      // Advance the proposed-interval pointer past intervals ending at/before
+      // the candidate occurrence's start.
+      while (i < sorted.length && sorted[i].end.getTime() <= occurrence.start.getTime()) i++;
+      if (i >= sorted.length) break;
+      if (sorted[i].start.getTime() < occurrence.end.getTime()) {
+        const key = `${candidate.id}:${occurrence.occurrenceStart.toISOString()}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          conflicting.push({
+            seriesId: candidate.id,
+            title: candidate.title,
+            occurrenceStart: occurrence.occurrenceStart.toISOString(),
+            start: occurrence.start.toISOString(),
+            end: occurrence.end.toISOString(),
+            siteId: candidate.site_id,
+            roomId: candidate.room_id,
+            reserveWholeSite: candidate.reserve_whole_site,
+          });
+        }
+      }
+    }
+  }
+  conflicting.sort((a, b) => a.start.localeCompare(b.start));
+  return conflicting.slice(0, MAX_REPORTED_CONFLICTS);
+}
+
+/**
+ * Expands a series over its whole (capped) lifetime and returns the booking
+ * conflicts of its occurrences against the other series of the organization.
+ * Used by the series-level write paths (create/update/config/split).
+ * @param organizationId - The organization the series belongs to.
+ * @param series - The series (already saved) to check.
+ * @param excludeSeriesId - The series itself to skip (pass series.id).
+ * @returns The conflicting occurrences, sorted by start.
+ */
+async function findSeriesBookingConflicts(
+  organizationId: string,
+  series: EventSeries,
+  excludeSeriesId: number,
+): Promise<BookingConflict[]> {
+  const booking: BookingRule = {
+    siteId: series.site_id,
+    roomId: series.room_id,
+    reserveWholeSite: series.reserve_whole_site,
+  };
+  if (!booking.siteId) return [];
+  const rangeStart = series.start;
+  const rangeEnd = new Date(series.start.getTime() + MAX_OCCURRENCE_RANGE_MS);
+  const exceptions = (await fetchExceptionRules([series.id])).get(series.id) ?? [];
+  const intervals = expandOccurrences(toRule(series), exceptions, rangeStart, rangeEnd);
+  return findBookingConflicts(organizationId, booking, intervals, excludeSeriesId);
+}
+
+/**
+ * Finds the booking conflicts of a single occurrence interval (used by
+ * reschedule and materialize). The occurrence's own series is included, so
+ * a reschedule into another occurrence of the same series is also reported;
+ * only the occurrence itself is excluded.
+ */
+async function findOccurrenceBookingConflicts(
+  organizationId: string,
+  series: EventSeries,
+  occurrenceStart: Date,
+  start: Date,
+  end: Date,
+): Promise<BookingConflict[]> {
+  const booking: BookingRule = {
+    siteId: series.site_id,
+    roomId: series.room_id,
+    reserveWholeSite: series.reserve_whole_site,
+  };
+  return findBookingConflicts(organizationId, booking, [{ occurrenceStart, start, end }], null, {
+    seriesId: series.id,
+    occurrenceStart,
+  });
+}
+
+/**
+ * Validates the site/room part of a series push/update and derives the site
+ * from the room when only a room is given. Returns the column updates to
+ * apply (only for the fields present in `data`).
+ */
+async function resolveBookingUpdates(data: {
+  siteId?: string | null;
+  roomId?: string | null;
+  reserveWholeSite?: boolean;
+}): Promise<{
+  site_id?: string | null;
+  room_id?: string | null;
+  reserve_whole_site?: boolean;
+}> {
+  const updates: {
+    site_id?: string | null;
+    room_id?: string | null;
+    reserve_whole_site?: boolean;
+  } = {};
+  if (data.siteId !== undefined && data.siteId !== null) {
+    const site = await db
+      .selectFrom('sites')
+      .select('id')
+      .where('id', '=', data.siteId)
+      .executeTakeFirst();
+    if (!site) {
+      throw notFound(`Site ${data.siteId} not found!`);
+    }
+  }
+  if (data.roomId !== undefined && data.roomId !== null) {
+    const room = await db
+      .selectFrom('rooms')
+      .select(['id', 'site_id'])
+      .where('id', '=', data.roomId)
+      .executeTakeFirst();
+    if (!room) {
+      throw notFound(`Room ${data.roomId} not found!`);
+    }
+    // Derive the site from the room when no explicit site is given.
+    if (data.siteId === undefined) {
+      updates.site_id = room.site_id;
+    }
+  }
+  if (data.siteId !== undefined) updates.site_id = data.siteId;
+  if (data.roomId !== undefined) updates.room_id = data.roomId;
+  if (data.reserveWholeSite !== undefined) updates.reserve_whole_site = data.reserveWholeSite;
+  // Clearing the room also clears a whole-site reservation.
+  if (data.roomId === null) updates.reserve_whole_site = false;
+  return updates;
+}
+
 async function attachAssignments(slots: EventWorkRole[]): Promise<EventWorkRoleResponse[]> {
   if (slots.length === 0) return [];
 
@@ -606,7 +857,7 @@ export async function listEventSeries(
     query = query.where('calendar_id', '=', calendarId);
   }
   const rows = await query.execute();
-  return rows.map(serializeSeries);
+  return rows.map(row => serializeSeries(row));
 }
 
 export async function getEventSeries(seriesId: number): Promise<EventSeriesResponse> {
@@ -619,6 +870,7 @@ export async function createEventSeries(data: EventSeriesPush): Promise<EventSer
   const timezone = await resolveTimezone(data.calendarId, data.timezone);
   const start = new Date(data.start);
   const rrule = data.recurrence ? buildRruleString({ start, timezone }, data.recurrence) : null;
+  const booking = await resolveBookingUpdates(data);
 
   const series = await db
     .insertInto('event_series')
@@ -632,11 +884,22 @@ export async function createEventSeries(data: EventSeriesPush): Promise<EventSer
       rrule,
       timezone,
       is_visible: data.isVisible ?? true,
+      ...(booking.site_id !== undefined ? { site_id: booking.site_id } : {}),
+      ...(booking.room_id !== undefined ? { room_id: booking.room_id } : {}),
+      ...(booking.reserve_whole_site !== undefined
+        ? { reserve_whole_site: booking.reserve_whole_site }
+        : {}),
     })
     .returningAll()
     .executeTakeFirstOrThrow();
 
-  return serializeSeries(series);
+  const organization = await getCalendarOrganizationOrThrow(series.calendar_id);
+  const conflicts = await findSeriesBookingConflicts(
+    organization.organizationId,
+    series,
+    series.id,
+  );
+  return serializeSeries(series, conflicts);
 }
 
 export async function updateEventSeries(
@@ -671,6 +934,8 @@ export async function updateEventSeries(
         : null
       : existing.rrule;
 
+  const booking = await resolveBookingUpdates(data);
+
   // Exceptions are keyed by occurrence start; changing the recurrence (start,
   // rule or timezone) invalidates them.
   const recurrenceChanged =
@@ -678,7 +943,7 @@ export async function updateEventSeries(
     timezone !== existing.timezone ||
     rrule !== existing.rrule;
 
-  return db.transaction().execute(async tx => {
+  const updated = await db.transaction().execute(async tx => {
     if (recurrenceChanged) {
       // Clear cancel/reschedule flags on materialized occurrences; the
       // occurrence_start keys no longer match the new recurrence.
@@ -694,7 +959,7 @@ export async function updateEventSeries(
         .execute();
     }
 
-    const updated = await tx
+    return tx
       .updateTable('event_series')
       .set({
         ...(data.title !== undefined ? { title: data.title } : {}),
@@ -706,14 +971,23 @@ export async function updateEventSeries(
         rrule,
         timezone,
         ...(data.isVisible !== undefined ? { is_visible: data.isVisible } : {}),
+        ...booking,
         updated_at: new Date(),
       })
       .where('id', '=', seriesId)
       .returningAll()
       .executeTakeFirstOrThrow();
-
-    return serializeSeries(updated);
   });
+
+  // Conflict check runs outside the transaction (single-connection databases
+  // like PGlite deadlock when db is used inside the transaction callback).
+  const organization = await getCalendarOrganizationOrThrow(updated.calendar_id);
+  const conflicts = await findSeriesBookingConflicts(
+    organization.organizationId,
+    updated,
+    seriesId,
+  );
+  return serializeSeries(updated, conflicts);
 }
 
 export async function deleteEventSeries(seriesId: number): Promise<void> {
@@ -809,7 +1083,7 @@ export async function splitEventSeries(
   );
   const isFirstOccurrence = earlierOccurrences.length === 0;
 
-  return db.transaction().execute(async tx => {
+  const result = await db.transaction().execute(async tx => {
     if (isFirstOccurrence) {
       const updated = await tx
         .updateTable('event_series')
@@ -842,7 +1116,7 @@ export async function splitEventSeries(
         .where('event_series_id', '=', seriesId)
         .where('occurrence_start', '>=', occurrenceStart)
         .execute();
-      return serializeSeries(updated);
+      return updated;
     }
 
     // Truncate the original series so it ends just before the split
@@ -885,8 +1159,16 @@ export async function splitEventSeries(
       })
       .returningAll()
       .executeTakeFirstOrThrow();
-    return serializeSeries(created);
+    return created;
   });
+
+  const organization = await getCalendarOrganizationOrThrow(result.calendar_id);
+  const conflicts = await findSeriesBookingConflicts(
+    organization.organizationId,
+    result,
+    result.id,
+  );
+  return serializeSeries(result, conflicts);
 }
 
 // --- Occurrences ---
@@ -1624,17 +1906,48 @@ export async function getOccurrenceDetailByRef(
   return getOccurrenceDetail(seriesId, occurrenceStart);
 }
 
+/** Result of materializing an occurrence: its stable ID plus booking conflicts. */
+export interface MaterializeOccurrenceResult {
+  occurrenceId: number;
+  conflicts: BookingConflict[];
+}
+
 /**
  * Materializes an occurrence referenced by ref (numeric ID or tmp key) and
- * returns its stable ID. On first creation, parent slots and their
- * assignments are inherited.
+ * returns its stable ID together with the booking conflicts of the
+ * occurrence's effective time range. On first creation, parent slots and
+ * their assignments are inherited.
  * @param ref - The occurrence reference.
- * @returns The stable occurrence ID.
+ * @returns The stable occurrence ID and the booking conflicts.
  */
-export async function materializeOccurrenceByRef(ref: string): Promise<number> {
+export async function materializeOccurrenceByRef(
+  ref: string,
+): Promise<MaterializeOccurrenceResult> {
   logger.trace('eventService.materializeOccurrenceByRef');
   const { seriesId, occurrenceStart } = await resolveOccurrenceRef(ref);
-  return ensureOccurrenceMaterialized(seriesId, occurrenceStart);
+  const occurrenceId = await ensureOccurrenceMaterialized(seriesId, occurrenceStart);
+
+  const series = await getSeriesRowOrThrow(seriesId);
+  assertOccurrence(series, occurrenceStart);
+  const organization = await getCalendarOrganizationOrThrow(series.calendar_id);
+  const exceptions = (await fetchExceptionRules([seriesId])).get(seriesId) ?? [];
+  const exception = exceptions.find(
+    entry => entry.occurrenceStart.getTime() === occurrenceStart.getTime(),
+  );
+  let start = occurrenceStart;
+  let end = new Date(occurrenceStart.getTime() + series.duration_minutes * 60 * 1000);
+  if (exception?.overrideStart) {
+    start = exception.overrideStart;
+    end = exception.overrideEnd ?? new Date(start.getTime() + series.duration_minutes * 60 * 1000);
+  }
+  const conflicts = await findOccurrenceBookingConflicts(
+    organization.organizationId,
+    series,
+    occurrenceStart,
+    start,
+    end,
+  );
+  return { occurrenceId, conflicts };
 }
 
 /**
@@ -1911,7 +2224,15 @@ export async function rescheduleOccurrence(
     .returningAll()
     .executeTakeFirstOrThrow();
 
-  return serializeException(exception);
+  const organization = await getCalendarOrganizationOrThrow(series.calendar_id);
+  const conflicts = await findOccurrenceBookingConflicts(
+    organization.organizationId,
+    series,
+    occurrenceStart,
+    start,
+    end,
+  );
+  return { ...serializeException(exception), conflicts };
 }
 
 export async function deleteException(seriesId: number, occurrenceStart: Date): Promise<void> {
@@ -2626,9 +2947,10 @@ function serializeSeriesManagement(
   siteName: string | null,
   roomName: string | null,
   teams: EventSeriesTeamResponse[],
+  conflicts?: BookingConflict[],
 ): EventSeriesManagementResponse {
   return {
-    ...serializeSeries(series),
+    ...serializeSeries(series, conflicts),
     organizationId: organization.organizationId,
     organizationName: organization.organizationName,
     siteName,
@@ -2910,11 +3232,17 @@ export async function updateEventSeriesConfig(
     ? ((await getRoomNames([updated.room_id])).get(updated.room_id) ?? null)
     : null;
   const teamsMap = await getSeriesTeamsMap([seriesId]);
+  const conflicts = await findSeriesBookingConflicts(
+    organization.organizationId,
+    updated,
+    seriesId,
+  );
   return serializeSeriesManagement(
     updated,
     organization,
     siteName,
     roomName,
     teamsMap.get(seriesId) ?? [],
+    conflicts,
   );
 }

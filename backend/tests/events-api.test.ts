@@ -148,6 +148,9 @@ interface EventSeriesResponse {
   recurrence: { freq: string } | null;
   start: string;
   durationMinutes: number;
+  siteId?: string | null;
+  roomId?: string | null;
+  conflicts?: BookingConflictResponse[];
 }
 
 interface OccurrenceResponse {
@@ -177,6 +180,42 @@ interface ExceptionResponse {
   isCancelled: boolean;
   overrideStart: string | null;
   overrideEnd: string | null;
+  conflicts?: BookingConflictResponse[];
+}
+
+interface BookingConflictResponse {
+  seriesId: number;
+  title: string;
+  occurrenceStart: string;
+  start: string;
+  end: string;
+  siteId: string | null;
+  roomId: string | null;
+  reserveWholeSite: boolean;
+}
+
+/** Inserts a site with one room into the organization and returns both IDs. */
+async function createSiteAndRoom(
+  organizationId: string,
+  suffix: string,
+): Promise<{ siteId: string; roomId: string }> {
+  const siteId = randomUUID();
+  const roomId = randomUUID();
+  await db
+    .insertInto('sites')
+    .values({ id: siteId, name: `Site ${suffix}`, organization_id: organizationId })
+    .execute();
+  await db
+    .insertInto('rooms')
+    .values({
+      id: roomId,
+      name: `Room ${suffix}`,
+      description: '',
+      site_id: siteId,
+      organization_id: organizationId,
+    })
+    .execute();
+  return { siteId, roomId };
 }
 
 interface OccurrenceWithOrganization {
@@ -420,6 +459,250 @@ describe('Events API', () => {
         },
       });
       expect(response.statusCode).toBe(404);
+    });
+
+    it('reports a booking conflict when the new series overlaps another series in the same room', async () => {
+      const seed = await createEventsFixture();
+      const { roomId } = await createSiteAndRoom(seed.organizationId, randomUUID());
+      await createSeries(seed, {
+        title: 'Existing booking',
+        start: '2026-10-21T10:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId,
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/event-series',
+        headers: auth(seed.adminToken),
+        payload: {
+          title: 'Overlapping booking',
+          calendarId: seed.calendarId,
+          start: '2026-10-21T10:30:00.000Z',
+          durationMinutes: 60,
+          timezone: 'UTC',
+          roomId,
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as EventSeriesResponse;
+      expect(body.conflicts).toHaveLength(1);
+      expect(body.conflicts?.[0].title).toBe('Existing booking');
+      expect(body.conflicts?.[0].start).toBe('2026-10-21T10:00:00.000Z');
+      expect(body.conflicts?.[0].end).toBe('2026-10-21T11:00:00.000Z');
+      expect(body.conflicts?.[0].roomId).toBe(roomId);
+    });
+
+    it('reports no conflict for the same time in a different room, and back-to-back bookings do not conflict', async () => {
+      const seed = await createEventsFixture();
+      const suffix = randomUUID();
+      const { roomId: roomAId } = await createSiteAndRoom(seed.organizationId, `${suffix}-a`);
+      const { roomId: roomBId } = await createSiteAndRoom(seed.organizationId, `${suffix}-b`);
+      await createSeries(seed, {
+        title: 'Room A booking',
+        start: '2026-10-21T10:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId: roomAId,
+      });
+
+      // Different room, same time: no conflict.
+      const otherRoom = await app.inject({
+        method: 'POST',
+        url: '/api/v1/event-series',
+        headers: auth(seed.adminToken),
+        payload: {
+          title: 'Room B booking',
+          calendarId: seed.calendarId,
+          start: '2026-10-21T10:00:00.000Z',
+          durationMinutes: 60,
+          timezone: 'UTC',
+          roomId: roomBId,
+        },
+      });
+      expect((otherRoom.json() as EventSeriesResponse).conflicts).toEqual([]);
+
+      // Same room, starting exactly when the other ends: no conflict.
+      const backToBack = await app.inject({
+        method: 'POST',
+        url: '/api/v1/event-series',
+        headers: auth(seed.adminToken),
+        payload: {
+          title: 'Back-to-back booking',
+          calendarId: seed.calendarId,
+          start: '2026-10-21T11:00:00.000Z',
+          durationMinutes: 60,
+          timezone: 'UTC',
+          roomId: roomAId,
+        },
+      });
+      expect((backToBack.json() as EventSeriesResponse).conflicts).toEqual([]);
+    });
+
+    it('reports a conflict when either side reserves the whole site', async () => {
+      const seed = await createEventsFixture();
+      const { siteId, roomId } = await createSiteAndRoom(seed.organizationId, randomUUID());
+      // Series A reserves the whole site (site only, no room).
+      await createSeries(seed, {
+        title: 'Whole site event',
+        start: '2026-10-21T10:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        siteId,
+        reserveWholeSite: true,
+      });
+
+      // A series targeting any room in the same site conflicts.
+      const inRoom = await app.inject({
+        method: 'POST',
+        url: '/api/v1/event-series',
+        headers: auth(seed.adminToken),
+        payload: {
+          title: 'Room booking',
+          calendarId: seed.calendarId,
+          start: '2026-10-21T10:30:00.000Z',
+          durationMinutes: 30,
+          timezone: 'UTC',
+          roomId,
+        },
+      });
+      const inRoomBody = inRoom.json() as EventSeriesResponse;
+      expect(inRoomBody.conflicts).toHaveLength(1);
+      expect(inRoomBody.conflicts?.[0].reserveWholeSite).toBe(true);
+
+      // And the reverse: a new whole-site reservation conflicts with a room booking.
+      await createSeries(seed, {
+        title: 'Another room booking',
+        start: '2026-10-22T10:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId,
+      });
+      const reserve = await app.inject({
+        method: 'POST',
+        url: '/api/v1/event-series',
+        headers: auth(seed.adminToken),
+        payload: {
+          title: 'New whole site event',
+          calendarId: seed.calendarId,
+          start: '2026-10-22T10:30:00.000Z',
+          durationMinutes: 30,
+          timezone: 'UTC',
+          siteId,
+          reserveWholeSite: true,
+        },
+      });
+      const reserveBody = reserve.json() as EventSeriesResponse;
+      expect(reserveBody.conflicts?.map(c => c.title)).toContain('Another room booking');
+    });
+
+    it('reports conflicts against individual occurrences of a recurring series only where they overlap', async () => {
+      const seed = await createEventsFixture();
+      const { roomId } = await createSiteAndRoom(seed.organizationId, randomUUID());
+      // Daily 10:00-11:00 in the room.
+      await createSeries(seed, {
+        title: 'Daily booking',
+        start: '2026-10-21T10:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId,
+        recurrence: { freq: 'DAILY' },
+      });
+
+      // One-off on a day when the daily booking exists: exactly one conflict.
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/event-series',
+        headers: auth(seed.adminToken),
+        payload: {
+          title: 'One-off',
+          calendarId: seed.calendarId,
+          start: '2026-10-23T10:30:00.000Z',
+          durationMinutes: 30,
+          timezone: 'UTC',
+          roomId,
+        },
+      });
+      const body = response.json() as EventSeriesResponse;
+      expect(body.conflicts).toHaveLength(1);
+      expect(body.conflicts?.[0].occurrenceStart).toBe('2026-10-23T10:00:00.000Z');
+    });
+
+    it('caps the reported conflicts for identical open-ended recurrences instead of looping forever', async () => {
+      const seed = await createEventsFixture();
+      const { roomId } = await createSiteAndRoom(seed.organizationId, randomUUID());
+      await createSeries(seed, {
+        title: 'Daily forever',
+        start: '2026-10-21T10:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId,
+        recurrence: { freq: 'DAILY' },
+      });
+
+      // Same time, same room, same open-ended recurrence: every occurrence
+      // overlaps. The 10-year expansion window yields ~3700 overlapping
+      // occurrences; the response must stay capped and the request finite.
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/event-series',
+        headers: auth(seed.adminToken),
+        payload: {
+          title: 'Daily forever copy',
+          calendarId: seed.calendarId,
+          start: '2026-10-21T10:00:00.000Z',
+          durationMinutes: 60,
+          timezone: 'UTC',
+          roomId,
+          recurrence: { freq: 'DAILY' },
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as EventSeriesResponse;
+      expect(body.conflicts).toHaveLength(100);
+      expect(body.conflicts?.[0].title).toBe('Daily forever');
+      expect(body.conflicts?.[0].occurrenceStart).toBe('2026-10-21T10:00:00.000Z');
+      // All entries are deduplicated occurrences of the one existing series.
+      const keys = new Set(body.conflicts?.map(c => `${c.seriesId}:${c.occurrenceStart}`));
+      expect(keys.size).toBe(100);
+    });
+
+    it('does not report conflicts across organizations', async () => {
+      const seed = await createEventsFixture();
+      const otherOrgId = await createOrganization(`Other Org ${randomUUID()}`, {
+        defaultTimezone: 'UTC',
+      });
+      const otherCalendarId = await createCalendar(otherOrgId, 'Other Calendar');
+      const { roomId: roomAId } = await createSiteAndRoom(seed.organizationId, randomUUID());
+      const { siteId: otherSiteId, roomId: otherRoomId } = await createSiteAndRoom(
+        otherOrgId,
+        randomUUID(),
+      );
+      await createSeries(seed, {
+        title: 'Org A booking',
+        start: '2026-10-21T10:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId: roomAId,
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/event-series',
+        headers: auth(seed.adminToken),
+        payload: {
+          title: 'Org B booking',
+          calendarId: otherCalendarId,
+          start: '2026-10-21T10:30:00.000Z',
+          durationMinutes: 60,
+          timezone: 'UTC',
+          siteId: otherSiteId,
+          roomId: otherRoomId,
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      expect((response.json() as EventSeriesResponse).conflicts).toEqual([]);
     });
   });
 
@@ -1184,6 +1467,144 @@ describe('Events API', () => {
       expect(moved?.isRescheduled).toBe(true);
       expect(weekly.some(o => o.start === '2026-11-02T17:00:00.000Z')).toBe(false);
     });
+
+    it('reports booking conflicts when the occurrence is rescheduled into another booking in the same room', async () => {
+      const seed = await createEventsFixture();
+      const { roomId } = await createSiteAndRoom(seed.organizationId, randomUUID());
+      const series = await createSeries(seed, {
+        ...weeklyPayload,
+        timezone: 'UTC',
+        start: '2026-10-21T10:00:00.000Z',
+        roomId,
+      });
+      await createSeries(seed, {
+        title: 'Other booking',
+        start: '2026-11-03T10:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId,
+      });
+
+      // 2026-11-02T10:00:00Z is a Monday occurrence of the weekly series.
+      const occurrenceStart = encodeURIComponent('2026-11-02T10:00:00.000Z');
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/occurrences/${occurrenceStart}/reschedule`,
+        headers: auth(seed.adminToken),
+        payload: { start: '2026-11-03T10:30:00.000Z' },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as ExceptionResponse;
+      expect(body.conflicts).toHaveLength(1);
+      expect(body.conflicts?.[0].title).toBe('Other booking');
+      expect(body.conflicts?.[0].start).toBe('2026-11-03T10:00:00.000Z');
+    });
+
+    it('reports a conflict with another occurrence of the same series when rescheduled onto it, but not with cancelled occurrences of other series', async () => {
+      const seed = await createEventsFixture();
+      const { roomId } = await createSiteAndRoom(seed.organizationId, randomUUID());
+      const series = await createSeries(seed, {
+        ...weeklyPayload,
+        timezone: 'UTC',
+        start: '2026-10-21T10:00:00.000Z', // Wednesday
+        roomId,
+      });
+      const other = await createSeries(seed, {
+        title: 'Cancelled other',
+        start: '2026-11-05T10:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId,
+      });
+      // Cancel the other series' only occurrence.
+      await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${other.id}/occurrences/${encodeURIComponent('2026-11-05T10:00:00.000Z')}/cancel`,
+        headers: auth(seed.adminToken),
+      });
+
+      // Reschedule the Wednesday 2026-11-04 occurrence onto Monday 2026-11-02T10:00
+      // (another occurrence of the same series): conflict with the same series.
+      const ontoSelf = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/occurrences/${encodeURIComponent('2026-11-04T10:00:00.000Z')}/reschedule`,
+        headers: auth(seed.adminToken),
+        payload: { start: '2026-11-02T10:00:00.000Z' },
+      });
+      expect(ontoSelf.statusCode).toBe(200);
+      const selfBody = ontoSelf.json() as ExceptionResponse;
+      expect(selfBody.conflicts).toHaveLength(1);
+      expect(selfBody.conflicts?.[0].seriesId).toBe(series.id);
+      expect(selfBody.conflicts?.[0].occurrenceStart).toBe('2026-11-02T10:00:00.000Z');
+
+      // Rescheduling onto the cancelled occurrence of the other series: no conflict.
+      const ontoCancelled = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/occurrences/${encodeURIComponent('2026-11-04T10:00:00.000Z')}/reschedule`,
+        headers: auth(seed.adminToken),
+        payload: { start: '2026-11-05T10:00:00.000Z' },
+      });
+      expect((ontoCancelled.json() as ExceptionResponse).conflicts).toEqual([]);
+    });
+  });
+
+  describe('POST /api/v1/event-occurrences/:occurrenceRef/materialize', () => {
+    it('returns the stable ID and the booking conflicts of the occurrence', async () => {
+      const seed = await createEventsFixture();
+      const { roomId } = await createSiteAndRoom(seed.organizationId, randomUUID());
+      const series = await createSeries(seed, {
+        ...weeklyPayload,
+        timezone: 'UTC',
+        start: '2026-10-21T10:00:00.000Z',
+        roomId,
+      });
+      await createSeries(seed, {
+        title: 'Other booking',
+        start: '2026-10-21T10:30:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId,
+      });
+
+      const ref = encodeURIComponent(`tmp:${series.id}:2026-10-21T10:00:00.000Z`);
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${ref}/materialize`,
+        headers: auth(seed.adminToken),
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as {
+        occurrenceId: number;
+        conflicts: BookingConflictResponse[];
+      };
+      expect(typeof body.occurrenceId).toBe('number');
+      expect(body.conflicts).toHaveLength(1);
+      expect(body.conflicts[0].title).toBe('Other booking');
+    });
+
+    it('reports no conflicts for an occurrence without overlapping bookings', async () => {
+      const seed = await createEventsFixture();
+      const { roomId } = await createSiteAndRoom(seed.organizationId, randomUUID());
+      const series = await createSeries(seed, {
+        ...weeklyPayload,
+        timezone: 'UTC',
+        start: '2026-10-21T10:00:00.000Z',
+        roomId,
+      });
+
+      const ref = encodeURIComponent(`tmp:${series.id}:2026-10-28T10:00:00.000Z`);
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${ref}/materialize`,
+        headers: auth(seed.adminToken),
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as {
+        occurrenceId: number;
+        conflicts: BookingConflictResponse[];
+      };
+      expect(body.conflicts).toEqual([]);
+    });
   });
 
   describe('DELETE /api/v1/event-series/:seriesId/occurrences/:occurrenceStart/exception', () => {
@@ -1742,6 +2163,141 @@ describe('Events API', () => {
 
       expect(await exceptionsOf(seed, series.id)).toEqual([]);
     });
+
+    it('reports booking conflicts when the series time is moved into an overlapping booking', async () => {
+      const seed = await createEventsFixture();
+      const { roomId } = await createSiteAndRoom(seed.organizationId, randomUUID());
+      await createSeries(seed, {
+        title: 'Existing booking',
+        start: '2026-10-21T10:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId,
+      });
+      const series = await createSeries(seed, {
+        title: 'Movable booking',
+        start: '2026-10-21T14:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId,
+      });
+
+      // Moving into the existing booking's time reports the conflict.
+      const moved = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-series/${series.id}`,
+        headers: auth(seed.adminToken),
+        payload: { start: '2026-10-21T10:30:00.000Z' },
+      });
+      expect(moved.statusCode).toBe(200);
+      const movedBody = moved.json() as EventSeriesResponse;
+      expect(movedBody.conflicts).toHaveLength(1);
+      expect(movedBody.conflicts?.[0].title).toBe('Existing booking');
+
+      // Moving away again reports no conflicts.
+      const movedAway = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-series/${series.id}`,
+        headers: auth(seed.adminToken),
+        payload: { start: '2026-10-21T14:00:00.000Z' },
+      });
+      expect((movedAway.json() as EventSeriesResponse).conflicts).toEqual([]);
+    });
+
+    it('reports booking conflicts when the room is changed via the update endpoint', async () => {
+      const seed = await createEventsFixture();
+      const suffix = randomUUID();
+      const { roomId: roomAId } = await createSiteAndRoom(seed.organizationId, `${suffix}-a`);
+      const { roomId: roomBId } = await createSiteAndRoom(seed.organizationId, `${suffix}-b`);
+      await createSeries(seed, {
+        title: 'Room A booking',
+        start: '2026-10-21T10:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId: roomAId,
+      });
+      const series = await createSeries(seed, {
+        title: 'Room B booking',
+        start: '2026-10-21T10:30:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId: roomBId,
+      });
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-series/${series.id}`,
+        headers: auth(seed.adminToken),
+        payload: { roomId: roomAId },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as EventSeriesResponse;
+      expect(body.roomId).toBe(roomAId);
+      expect(body.conflicts?.map(c => c.title)).toContain('Room A booking');
+    });
+  });
+
+  describe('PATCH /api/v1/event-series/:seriesId/config', () => {
+    it('reports booking conflicts when a room is assigned to a series that overlaps another series in it', async () => {
+      const seed = await createEventsFixture();
+      const { roomId } = await createSiteAndRoom(seed.organizationId, randomUUID());
+      await createSeries(seed, {
+        title: 'Existing booking',
+        start: '2026-10-21T10:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId,
+      });
+      const series = await createSeries(seed, {
+        title: 'Unlocated booking',
+        start: '2026-10-21T10:30:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+      });
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-series/${series.id}/config`,
+        headers: auth(seed.adminToken),
+        payload: { roomId },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as EventSeriesResponse;
+      expect(body.roomId).toBe(roomId);
+      expect(body.conflicts).toHaveLength(1);
+      expect(body.conflicts?.[0].title).toBe('Existing booking');
+    });
+
+    it('reports no conflicts when the location is cleared', async () => {
+      const seed = await createEventsFixture();
+      const { roomId } = await createSiteAndRoom(seed.organizationId, randomUUID());
+      await createSeries(seed, {
+        title: 'Existing booking',
+        start: '2026-10-21T10:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId,
+      });
+      const series = await createSeries(seed, {
+        title: 'Located booking',
+        start: '2026-10-21T10:30:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId,
+      });
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-series/${series.id}/config`,
+        headers: auth(seed.adminToken),
+        payload: { siteId: null, roomId: null },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as EventSeriesResponse;
+      expect(body.siteId).toBeNull();
+      expect(body.roomId).toBeNull();
+      expect(body.conflicts).toEqual([]);
+    });
   });
 
   describe('DELETE /api/v1/event-series/:seriesId', () => {
@@ -1990,6 +2546,30 @@ describe('Events API', () => {
       expect(body.rrule).toBeNull();
       expect(body.durationMinutes).toBe(90);
       expect(body.start).toBe('2026-12-01T10:00:00.000Z');
+    });
+
+    it('reports booking conflicts of the new series created by the split', async () => {
+      const seed = await createEventsFixture();
+      const { roomId } = await createSiteAndRoom(seed.organizationId, randomUUID());
+      const weekly = await createSeries(seed, { ...splitWeeklyPayload, roomId });
+      // Another booking in the same room overlapping an occurrence after the split point.
+      await createSeries(seed, {
+        title: 'Other booking',
+        start: '2026-11-04T10:30:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId,
+      });
+
+      const response = await split(seed, weekly.id, '2026-11-04T10:00:00.000Z', {
+        title: 'Weekly sync (split)',
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as EventSeriesResponse;
+      expect(body.id).not.toBe(weekly.id);
+      expect(body.conflicts).toHaveLength(1);
+      expect(body.conflicts?.[0].title).toBe('Other booking');
+      expect(body.conflicts?.[0].occurrenceStart).toBe('2026-11-04T10:30:00.000Z');
     });
 
     it('re-anchors an inherited recurrence so the new start is an occurrence', async () => {

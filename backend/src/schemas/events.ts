@@ -48,6 +48,9 @@ export const eventSeriesPushSchema = z.object({
   timezone: z.string().min(1).max(64).optional(),
   isVisible: z.boolean().optional(),
   recurrence: recurrenceSchema.optional(),
+  siteId: z.uuid().nullable().optional(),
+  roomId: z.uuid().nullable().optional(),
+  reserveWholeSite: z.boolean().optional(),
 });
 
 export const eventSeriesUpdateSchema = eventSeriesPushSchema.partial();

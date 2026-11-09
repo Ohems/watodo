@@ -118,6 +118,25 @@ export interface RecurrenceInput {
   count?: number;
 }
 
+/**
+ * A booking conflict reported by a write: an occurrence of another series in
+ * the same organization that overlaps the saved booking and shares the same
+ * room, or whose site is reserved (whole-site reservation on either side).
+ */
+export interface BookingConflict {
+  seriesId: number;
+  title: string;
+  /** Original occurrence start of the conflicting occurrence. */
+  occurrenceStart: string;
+  /** Effective start of the conflicting occurrence (after reschedule overrides). */
+  start: string;
+  /** Effective end of the conflicting occurrence. */
+  end: string;
+  siteId: string | null;
+  roomId: string | null;
+  reserveWholeSite: boolean;
+}
+
 export interface EventSeries {
   id: number;
   title: string;
@@ -135,6 +154,8 @@ export interface EventSeries {
   recurrence: RecurrenceInput | null;
   createdAt: string;
   updatedAt: string;
+  /** Booking conflicts detected by the write that returned this series. */
+  conflicts?: BookingConflict[];
 }
 
 export interface EventSeriesPush {
@@ -147,6 +168,9 @@ export interface EventSeriesPush {
   timezone?: string;
   isVisible?: boolean;
   recurrence?: RecurrenceInput | null;
+  siteId?: string | null;
+  roomId?: string | null;
+  reserveWholeSite?: boolean;
 }
 
 export type EventSeriesUpdate = Partial<EventSeriesPush>;
@@ -211,6 +235,8 @@ export interface EventException {
   overrideEnd: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Booking conflicts of the rescheduled occurrence. */
+  conflicts?: BookingConflict[];
 }
 
 export interface EventWorkRoleAssignment {

@@ -36,11 +36,12 @@ import {
   useUnassignUserFromOccurrenceWorkRoleMutation,
   useUpdateOccurrenceWorkRoleMutation,
 } from '../../api/index.js';
+import { BookingConflictsAlert } from '../../components/BookingConflictsAlert/index.js';
 import { QueryError } from '../../components/QueryState/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
 import { useFormatters } from '../../hooks/use-formatters.js';
 import { selectActiveOrganizationId } from '../../store/organization-slice.js';
-import type { RecurrenceFreq, RecurrenceInput } from '../../types/index.js';
+import type { BookingConflict, RecurrenceFreq, RecurrenceInput } from '../../types/index.js';
 
 /**
  * Full-page view of a single event instance (one occurrence of a series).
@@ -91,6 +92,8 @@ function EventOccurrencePage() {
   const [materializeOccurrence] = useMaterializeOccurrenceMutation();
 
   const [actionError, setActionError] = useState<string | null>(null);
+  // Booking conflicts reported when this occurrence was materialized.
+  const [conflicts, setConflicts] = useState<BookingConflict[] | undefined>(undefined);
   const error = actionError ?? (detailError ? getApiErrorMessage(detailError) : null);
 
   const [slotWorkRoleId, setSlotWorkRoleId] = useState<number | null>(null);
@@ -116,6 +119,7 @@ function EventOccurrencePage() {
   const ensureOccurrenceId = async (): Promise<number> => {
     if (occurrenceRef !== null && !/^\d+$/.test(occurrenceRef)) {
       const res = await materializeOccurrence(occurrenceRef).unwrap();
+      setConflicts(res.conflicts);
       navigate(`/events/occurrences/${res.occurrenceId}`, { replace: true });
       return res.occurrenceId;
     }
@@ -225,6 +229,10 @@ function EventOccurrencePage() {
           {error}
         </Alert>
       )}
+
+      <Box mb="md">
+        <BookingConflictsAlert conflicts={conflicts} />
+      </Box>
 
       <Stack gap="md">
         <Card shadow="sm" withBorder>

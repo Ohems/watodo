@@ -334,6 +334,8 @@
     "roomUnclear": "Huone määräytyy myöhemmin",
     "reserveWholeSite": "Varaa koko toimipaikka",
     "wholeSiteReserved": "Koko toimipaikka varattu",
+    "bookingConflicts": "Varausristiriidat",
+    "bookingConflictItem": "{{title}} ({{start}} - {{end}})",
     "filterBySite": "Suodata toimipaikan mukaan",
     "filterByRoom": "Suodata huoneen mukaan",
     "filterByTeam": "Suodata tiimin mukaan",

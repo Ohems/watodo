@@ -1,4 +1,5 @@
 import type {
+  BookingConflict,
   EventComment,
   EventException,
   EventOccurrence,
@@ -325,7 +326,10 @@ export const eventsApi = api.injectEndpoints({
     // The occurrence page calls materialize when the ref is a tmp key, then
     // uses the numeric eventOccurrenceId for all writes.
 
-    materializeOccurrence: build.mutation<{ occurrenceId: number }, string>({
+    materializeOccurrence: build.mutation<
+      { occurrenceId: number; conflicts: BookingConflict[] },
+      string
+    >({
       query: occurrenceRef => ({
         url: `/api/v1/event-occurrences/${encodeURIComponent(occurrenceRef)}/materialize`,
         method: 'POST',
