@@ -329,6 +329,21 @@ export interface EventWorkRoleAssignments {
   created_at: Generated<Date>;
 }
 
+export interface EventInfoSlots {
+  id: Generated<number>;
+  event_series_id: number;
+  /** NULL = parent (series-level) info slot; non-NULL = inherited occurrence slot. */
+  event_occurrence_id: number | null;
+  /** Which parent info slot this occurrence slot was inherited from. */
+  inherited_from_info_slot_id: number | null;
+  title: string;
+  description: Generated<string>;
+  /** The filled text; NULL = not filled yet. On parent slots it is the default copied to occurrences. */
+  value: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
 export interface EventComments {
   id: Generated<number>;
   event_series_id: number;
@@ -371,6 +386,7 @@ export interface Database {
   event_occurrences: EventOccurrences;
   event_work_roles: EventWorkRoles;
   event_work_role_assignments: EventWorkRoleAssignments;
+  event_info_slots: EventInfoSlots;
   event_comments: EventComments;
 }
 
@@ -465,6 +481,10 @@ export type EventWorkRoleUpdate = Updateable<EventWorkRoles>;
 
 export type EventWorkRoleAssignment = Selectable<EventWorkRoleAssignments>;
 export type NewEventWorkRoleAssignment = Insertable<EventWorkRoleAssignments>;
+
+export type EventInfoSlot = Selectable<EventInfoSlots>;
+export type NewEventInfoSlot = Insertable<EventInfoSlots>;
+export type EventInfoSlotUpdate = Updateable<EventInfoSlots>;
 
 export type EventComment = Selectable<EventComments>;
 export type NewEventComment = Insertable<EventComments>;

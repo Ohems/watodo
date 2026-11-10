@@ -3,6 +3,9 @@ import type {
   BookingConflict,
   EventComment,
   EventException,
+  EventInfoSlot,
+  EventInfoSlotPush,
+  EventInfoSlotUpdate,
   EventOccurrence,
   EventOccurrenceDetail,
   EventSeries,
@@ -399,6 +402,105 @@ export const eventsApi = api.injectEndpoints({
       invalidatesTags: ['OccurrenceDetail'],
     }),
 
+    // --- Occurrence-scoped comments ---
+
+    createOccurrenceComment: build.mutation<EventComment, { occurrenceId: number; body: string }>({
+      query: ({ occurrenceId, body }) => ({
+        url: `/api/v1/event-occurrences/${occurrenceId}/comments`,
+        method: 'POST',
+        body: { body },
+      }),
+      invalidatesTags: ['OccurrenceDetail'],
+    }),
+    updateOccurrenceComment: build.mutation<
+      EventComment,
+      { occurrenceId: number; commentId: number; body: string }
+    >({
+      query: ({ occurrenceId, commentId, body }) => ({
+        url: `/api/v1/event-occurrences/${occurrenceId}/comments/${commentId}`,
+        method: 'PATCH',
+        body: { body },
+      }),
+      invalidatesTags: ['OccurrenceDetail'],
+    }),
+    deleteOccurrenceComment: build.mutation<void, { occurrenceId: number; commentId: number }>({
+      query: ({ occurrenceId, commentId }) => ({
+        url: `/api/v1/event-occurrences/${occurrenceId}/comments/${commentId}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['OccurrenceDetail'],
+    }),
+
+    // --- Event info slots ---
+
+    // Series-level: the info slot template (parent slots). Managed in the
+    // series management; occurrence copies are inherited, never added/deleted.
+    getEventSeriesInfoSlots: build.query<EventInfoSlot[], number>({
+      query: seriesId => `/api/v1/event-series/${seriesId}/info-slots`,
+      providesTags: (_result, _error, seriesId) => [seriesDetailTag(seriesId)],
+    }),
+    createEventInfoSlot: build.mutation<
+      EventInfoSlot,
+      { seriesId: number; data: EventInfoSlotPush }
+    >({
+      query: ({ seriesId, data }) => ({
+        url: `/api/v1/event-series/${seriesId}/info-slots`,
+        method: 'POST',
+        body: data,
+      }),
+      invalidatesTags: (_result, _error, { seriesId }) => [
+        seriesDetailTag(seriesId),
+        'OccurrenceDetail',
+      ],
+    }),
+    updateEventInfoSlot: build.mutation<
+      EventInfoSlot,
+      { seriesId: number; infoSlotId: number; data: EventInfoSlotUpdate }
+    >({
+      query: ({ seriesId, infoSlotId, data }) => ({
+        url: `/api/v1/event-series/${seriesId}/info-slots/${infoSlotId}`,
+        method: 'PATCH',
+        body: data,
+      }),
+      invalidatesTags: (_result, _error, { seriesId }) => [
+        seriesDetailTag(seriesId),
+        'OccurrenceDetail',
+      ],
+    }),
+    deleteEventInfoSlot: build.mutation<void, { seriesId: number; infoSlotId: number }>({
+      query: ({ seriesId, infoSlotId }) => ({
+        url: `/api/v1/event-series/${seriesId}/info-slots/${infoSlotId}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: (_result, _error, { seriesId }) => [
+        seriesDetailTag(seriesId),
+        'OccurrenceDetail',
+      ],
+    }),
+    // Occurrence-level: only the value can be updated.
+    updateOccurrenceInfoSlot: build.mutation<
+      EventInfoSlot,
+      { occurrenceId: number; infoSlotId: number; value: string | null }
+    >({
+      query: ({ occurrenceId, infoSlotId, value }) => ({
+        url: `/api/v1/event-occurrences/${occurrenceId}/info-slots/${infoSlotId}`,
+        method: 'PATCH',
+        body: { value },
+      }),
+      invalidatesTags: ['OccurrenceDetail'],
+    }),
+    importParentInfoSlots: build.mutation<EventInfoSlot[], string>({
+      query: occurrenceRef => ({
+        url: `/api/v1/event-occurrences/${encodeURIComponent(occurrenceRef)}/import-info-slots`,
+        method: 'POST',
+        body: {},
+      }),
+      invalidatesTags: (_result, _error, occurrenceRef) => [
+        { type: 'OccurrenceDetail' as const, id: `occ:${occurrenceRef}` },
+        'OccurrenceDetail',
+      ],
+    }),
+
     // --- Event series management ---
 
     getEventSeriesManagementList: build.query<
@@ -461,6 +563,15 @@ export const {
   useDeleteOccurrenceWorkRoleMutation,
   useAssignUserToOccurrenceWorkRoleMutation,
   useUnassignUserFromOccurrenceWorkRoleMutation,
+  useCreateOccurrenceCommentMutation,
+  useUpdateOccurrenceCommentMutation,
+  useDeleteOccurrenceCommentMutation,
+  useGetEventSeriesInfoSlotsQuery,
+  useCreateEventInfoSlotMutation,
+  useUpdateEventInfoSlotMutation,
+  useDeleteEventInfoSlotMutation,
+  useUpdateOccurrenceInfoSlotMutation,
+  useImportParentInfoSlotsMutation,
   useGetEventSeriesManagementListQuery,
   useGetEventSeriesManagementQuery,
   useUpdateEventSeriesConfigMutation,

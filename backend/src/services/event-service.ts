@@ -1,10 +1,19 @@
+import { max } from 'date-fns';
 import { db } from '../database.js';
-import type { EventComment, EventOccurrenceRow, EventSeries, EventWorkRole } from '../db/types.js';
+import type {
+  EventComment,
+  EventInfoSlot,
+  EventOccurrenceRow,
+  EventSeries,
+  EventWorkRole,
+} from '../db/types.js';
 import { badRequest, forbidden, isUniqueViolation, notFound } from '../http-error.js';
 import { createLogger } from '../logger.js';
 import type {
   EventCommentPush,
   EventCommentUpdate,
+  EventInfoSlotPush,
+  EventInfoSlotUpdate,
   EventSeriesPush,
   EventSeriesUpdate,
   EventWorkRolePush,
@@ -150,6 +159,20 @@ export interface EventWorkRoleResponse {
   updatedAt: string;
 }
 
+export interface EventInfoSlotResponse {
+  id: number;
+  seriesId: number;
+  /** NULL = parent (series-level) info slot; non-NULL = occurrence-level inherited slot. */
+  occurrenceId: number | null;
+  inheritedFromInfoSlotId: number | null;
+  title: string;
+  description: string;
+  /** The filled text; NULL = not filled yet. */
+  value: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface RoleReadiness {
   workRoleId: number | null;
   workRoleName: string;
@@ -191,6 +214,14 @@ export interface EventOccurrenceDetailResponse {
   occurrenceWorkRoles: EventWorkRoleResponse[];
   /** Parent slots not yet imported into this occurrence. */
   missingParentWorkRoles: EventWorkRoleResponse[];
+  /** Info slots visible for this occurrence (occurrence-level when materialized, otherwise parent). */
+  infoSlots: EventInfoSlotResponse[];
+  /** Parent (series-level) info slots only. */
+  parentInfoSlots: EventInfoSlotResponse[];
+  /** Occurrence-level (inherited) info slots only. */
+  occurrenceInfoSlots: EventInfoSlotResponse[];
+  /** Parent info slots not yet imported into this occurrence. */
+  missingParentInfoSlots: EventInfoSlotResponse[];
   comments: EventCommentResponse[];
   readiness: EventReadiness;
 }
@@ -377,6 +408,30 @@ async function ensureOccurrenceMaterialized(
           .onConflict(oc => oc.doNothing())
           .execute();
       }
+    }
+    // Inherit parent (series-level) info slots into the new occurrence as well,
+    // copying the parent value as the default for the occurrence's copy.
+    const parentInfoSlots = await db
+      .selectFrom('event_info_slots')
+      .select(['id', 'title', 'description', 'value'])
+      .where('event_series_id', '=', seriesId)
+      .where('event_occurrence_id', 'is', null)
+      .execute();
+    if (parentInfoSlots.length > 0) {
+      await db
+        .insertInto('event_info_slots')
+        .values(
+          parentInfoSlots.map(s => ({
+            event_series_id: seriesId,
+            event_occurrence_id: inserted.id,
+            inherited_from_info_slot_id: s.id,
+            title: s.title,
+            description: s.description,
+            value: s.value,
+          })),
+        )
+        .onConflict(oc => oc.doNothing())
+        .execute();
     }
     return inserted.id;
   }
@@ -616,7 +671,7 @@ async function findBookingConflicts(
   if (!booking.siteId || intervals.length === 0) return [];
   const sorted = [...intervals].sort((a, b) => a.start.getTime() - b.start.getTime());
   const rangeStart = sorted[0].start;
-  const rangeEnd = sorted.reduce((max, i) => (i.end > max ? i.end : max), sorted[0].end);
+  const rangeEnd = max(sorted.map(i => i.end));
 
   // Candidate series in the same organization sharing the site or room.
   let candidateQuery = db
@@ -1819,6 +1874,20 @@ export async function getOccurrenceDetail(
     return !inheritedParentIds.has(j.id);
   });
 
+  // Info slots: occurrence-level (inherited) + parent-level, plus the missing ones.
+  const parentInfoSlots = await listEventInfoSlots(seriesId, { parentOnly: true });
+  const occurrenceInfoSlots =
+    occurrenceId !== null
+      ? await listEventInfoSlots(seriesId, { occurrenceId, occurrenceOnly: true })
+      : [];
+  const inheritedParentInfoSlotIds = new Set(
+    occurrenceInfoSlots
+      .map(s => s.inheritedFromInfoSlotId)
+      .filter((id): id is number => id !== null),
+  );
+  const missingParentInfoSlots = parentInfoSlots.filter(s => !inheritedParentInfoSlotIds.has(s.id));
+  const infoSlots = occurrenceId !== null ? occurrenceInfoSlots : parentInfoSlots;
+
   const comments = await listEventComments(seriesId, occurrenceStart);
   const readiness = await computeReadiness(seriesId, occurrenceStart);
 
@@ -1850,6 +1919,10 @@ export async function getOccurrenceDetail(
     parentWorkRoles,
     occurrenceWorkRoles,
     missingParentWorkRoles,
+    infoSlots,
+    parentInfoSlots,
+    occurrenceInfoSlots,
+    missingParentInfoSlots,
     comments,
     readiness,
   };
@@ -2092,6 +2165,268 @@ export async function unassignUserFromOccurrenceWorkRole(
     assignmentToDelete = inheritedAssignment.id;
   }
   return unassignUserFromWorkRole(slot.event_series_id, slot.id, assignmentToDelete);
+}
+
+// --- Event info slots ---
+
+function serializeInfoSlot(slot: EventInfoSlot): EventInfoSlotResponse {
+  return {
+    id: slot.id,
+    seriesId: slot.event_series_id,
+    occurrenceId: slot.event_occurrence_id,
+    inheritedFromInfoSlotId: slot.inherited_from_info_slot_id,
+    title: slot.title,
+    description: slot.description,
+    value: slot.value,
+    createdAt: slot.created_at.toISOString(),
+    updatedAt: slot.updated_at.toISOString(),
+  };
+}
+
+/**
+ * Lists info slots of a series. Without options, only the parent
+ * (series-level) slots are returned; with occurrenceStart/occurrenceId the
+ * slots visible for that occurrence are returned (mirrors listEventWorkRoles).
+ */
+export async function listEventInfoSlots(
+  seriesId: number,
+  options?: {
+    occurrenceStart?: Date;
+    occurrenceId?: number | null;
+    parentOnly?: boolean;
+    occurrenceOnly?: boolean;
+  },
+): Promise<EventInfoSlotResponse[]> {
+  logger.trace('eventService.listEventInfoSlots');
+  await getSeriesRowOrThrow(seriesId);
+
+  let occurrenceId = options?.occurrenceId ?? null;
+  if (occurrenceId === null && options?.occurrenceStart) {
+    const occ = await db
+      .selectFrom('event_occurrences')
+      .select('id')
+      .where('event_series_id', '=', seriesId)
+      .where('occurrence_start', '=', options.occurrenceStart)
+      .executeTakeFirst();
+    occurrenceId = occ?.id ?? null;
+  }
+  const occurrenceRequested =
+    options?.occurrenceId !== undefined || options?.occurrenceStart !== undefined;
+
+  let query = db.selectFrom('event_info_slots').selectAll().where('event_series_id', '=', seriesId);
+  if (options?.parentOnly || (!occurrenceRequested && !options?.occurrenceOnly)) {
+    // Series-level management lists the parent template only.
+    query = query.where('event_occurrence_id', 'is', null);
+  } else if (options?.occurrenceOnly) {
+    query = query.where('event_occurrence_id', '=', occurrenceId ?? -1);
+  } else if (occurrenceId !== null) {
+    query = query.where(eb =>
+      eb.or([eb('event_occurrence_id', 'is', null), eb('event_occurrence_id', '=', occurrenceId)]),
+    );
+  } else {
+    query = query.where('event_occurrence_id', 'is', null);
+  }
+  const slots = await query.orderBy('id', 'asc').execute();
+  return slots.map(serializeInfoSlot);
+}
+
+/** Creates a parent (series-level) info slot. Info slots are never created per occurrence. */
+export async function createEventInfoSlot(
+  seriesId: number,
+  data: EventInfoSlotPush,
+): Promise<EventInfoSlotResponse> {
+  logger.trace('eventService.createEventInfoSlot');
+  await getSeriesRowOrThrow(seriesId);
+  const slot = await db
+    .insertInto('event_info_slots')
+    .values({
+      event_series_id: seriesId,
+      event_occurrence_id: null,
+      inherited_from_info_slot_id: null,
+      title: data.title,
+      description: data.description ?? '',
+      value: data.value ?? null,
+    })
+    .returningAll()
+    .executeTakeFirstOrThrow();
+  return serializeInfoSlot(slot);
+}
+
+/** Updates a parent (series-level) info slot (title, description, default value). */
+export async function updateEventInfoSlot(
+  seriesId: number,
+  infoSlotId: number,
+  data: EventInfoSlotUpdate,
+): Promise<EventInfoSlotResponse> {
+  logger.trace('eventService.updateEventInfoSlot');
+  await getSeriesRowOrThrow(seriesId);
+  const slot = await db
+    .selectFrom('event_info_slots')
+    .selectAll()
+    .where('id', '=', infoSlotId)
+    .where('event_series_id', '=', seriesId)
+    .executeTakeFirst();
+  if (!slot) {
+    throw notFound(`Info slot ${infoSlotId} not found in event series ${seriesId}!`);
+  }
+  const update: Record<string, unknown> = { updated_at: new Date() };
+  if (data.title !== undefined) update.title = data.title;
+  if (data.description !== undefined) update.description = data.description;
+  if (data.value !== undefined) update.value = data.value;
+  const updated = await db
+    .updateTable('event_info_slots')
+    .set(update)
+    .where('id', '=', infoSlotId)
+    .returningAll()
+    .executeTakeFirstOrThrow();
+  return serializeInfoSlot(updated);
+}
+
+/** Deletes a parent (series-level) info slot. Occurrence-level copies are kept (their inherited reference is set to NULL). */
+export async function deleteEventInfoSlot(seriesId: number, infoSlotId: number): Promise<void> {
+  logger.trace('eventService.deleteEventInfoSlot');
+  await getSeriesRowOrThrow(seriesId);
+  const slot = await db
+    .selectFrom('event_info_slots')
+    .select('id')
+    .where('id', '=', infoSlotId)
+    .where('event_series_id', '=', seriesId)
+    .where('event_occurrence_id', 'is', null)
+    .executeTakeFirst();
+  if (!slot) {
+    throw notFound(`Info slot ${infoSlotId} not found in event series ${seriesId}!`);
+  }
+  await db.deleteFrom('event_info_slots').where('id', '=', infoSlotId).execute();
+}
+
+/** Lists the info slots scoped to a materialized occurrence. */
+export async function listOccurrenceInfoSlots(
+  occurrenceId: number,
+): Promise<EventInfoSlotResponse[]> {
+  const occ = await db
+    .selectFrom('event_occurrences')
+    .select('event_series_id')
+    .where('id', '=', occurrenceId)
+    .executeTakeFirst();
+  if (!occ) throw notFound(`Event occurrence ${occurrenceId} not found!`);
+  return listEventInfoSlots(occ.event_series_id, { occurrenceId, occurrenceOnly: true });
+}
+
+/**
+ * Resolves an info slot referenced by an occurrence-scoped endpoint. When the
+ * given ID is a parent (series-level) slot, the occurrence-level copy
+ * inherited from it is resolved instead; parent slots are never modified here.
+ */
+async function getOccurrenceInfoSlotOrThrow(occurrenceId: number, infoSlotId: number) {
+  const slot = await db
+    .selectFrom('event_info_slots')
+    .selectAll()
+    .where('id', '=', infoSlotId)
+    .where('event_occurrence_id', '=', occurrenceId)
+    .executeTakeFirst();
+  if (slot) {
+    return slot;
+  }
+  const occurrence = await db
+    .selectFrom('event_occurrences')
+    .select('event_series_id')
+    .where('id', '=', occurrenceId)
+    .executeTakeFirst();
+  if (!occurrence) {
+    throw notFound(`Event occurrence ${occurrenceId} not found!`);
+  }
+  const inheritedCopy = await db
+    .selectFrom('event_info_slots')
+    .selectAll()
+    .where('event_series_id', '=', occurrence.event_series_id)
+    .where('event_occurrence_id', '=', occurrenceId)
+    .where('inherited_from_info_slot_id', '=', infoSlotId)
+    .executeTakeFirst();
+  if (!inheritedCopy) {
+    throw notFound(`Info slot ${infoSlotId} not found in occurrence ${occurrenceId}!`);
+  }
+  return inheritedCopy;
+}
+
+/**
+ * Sets the filled value of an occurrence's info slot. Only the value may
+ * change; info slots cannot be added or deleted per occurrence.
+ */
+export async function updateOccurrenceInfoSlotValue(
+  occurrenceId: number,
+  infoSlotId: number,
+  value: string | null,
+): Promise<EventInfoSlotResponse> {
+  logger.trace('eventService.updateOccurrenceInfoSlotValue');
+  const slot = await getOccurrenceInfoSlotOrThrow(occurrenceId, infoSlotId);
+  const updated = await db
+    .updateTable('event_info_slots')
+    .set({ value, updated_at: new Date() })
+    .where('id', '=', slot.id)
+    .returningAll()
+    .executeTakeFirstOrThrow();
+  return serializeInfoSlot(updated);
+}
+
+/**
+ * Imports parent (series-level) info slots into a materialized occurrence.
+ * Only slots not yet inherited are copied (with the parent value as default);
+ * existing occurrence slots are never modified or deleted.
+ */
+export async function importParentInfoSlots(
+  seriesId: number,
+  occurrenceId: number,
+): Promise<EventInfoSlotResponse[]> {
+  logger.trace('eventService.importParentInfoSlots');
+  await getSeriesRowOrThrow(seriesId);
+
+  const occ = await db
+    .selectFrom('event_occurrences')
+    .select('id')
+    .where('id', '=', occurrenceId)
+    .where('event_series_id', '=', seriesId)
+    .executeTakeFirst();
+  if (!occ) {
+    throw notFound(`Occurrence ${occurrenceId} not found in event series ${seriesId}!`);
+  }
+
+  const parentSlots = await db
+    .selectFrom('event_info_slots')
+    .select(['id', 'title', 'description', 'value'])
+    .where('event_series_id', '=', seriesId)
+    .where('event_occurrence_id', 'is', null)
+    .where(eb =>
+      eb.not(
+        eb.exists(
+          db
+            .selectFrom('event_info_slots as occ_slot')
+            .select('occ_slot.id')
+            .where('occ_slot.event_occurrence_id', '=', occurrenceId)
+            .whereRef('occ_slot.inherited_from_info_slot_id', '=', 'event_info_slots.id' as never),
+        ),
+      ),
+    )
+    .execute();
+
+  if (parentSlots.length === 0) return [];
+
+  const inserted = await db
+    .insertInto('event_info_slots')
+    .values(
+      parentSlots.map(s => ({
+        event_series_id: seriesId,
+        event_occurrence_id: occurrenceId,
+        inherited_from_info_slot_id: s.id,
+        title: s.title,
+        description: s.description,
+        value: s.value,
+      })),
+    )
+    .onConflict(oc => oc.doNothing())
+    .returningAll()
+    .execute();
+
+  return inserted.map(serializeInfoSlot);
 }
 
 // --- Occurrence-scoped comments ---

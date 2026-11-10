@@ -132,6 +132,15 @@ test.describe('Event Management page', () => {
       await expect(page.getByText('No teams assigned')).toBeVisible();
     });
 
+    test('shows the series description in the list', async ({ page }) => {
+      await setupEventManagement(page);
+      await gotoApp(page, '/events/management');
+
+      await expect(page.getByText('Annual summer event')).toBeVisible();
+      // Series without a description show a placeholder dash in that row.
+      await expect(page.getByText('Winter Market')).toBeVisible();
+    });
+
     test('shows empty state when no events', async ({ page }) => {
       await setupEventManagement(page, adminUser(), []);
       await gotoApp(page, '/events/management');

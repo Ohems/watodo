@@ -20,6 +20,7 @@ import type {
   Calendar,
   Database,
   DateFormat,
+  EventInfoSlot,
   EventSeries,
   EventWorkRole,
   NewEventSeries,
@@ -542,6 +543,30 @@ async function materializeOccurrence(
           .execute();
       }
     }
+    // Inherit parent (series-level) info slots, copying the parent value as
+    // the default. Mirrors ensureOccurrenceMaterialized in the service.
+    const parentInfoSlots = await tx
+      .selectFrom('event_info_slots')
+      .select(['id', 'title', 'description', 'value'])
+      .where('event_series_id', '=', seriesId)
+      .where('event_occurrence_id', 'is', null)
+      .execute();
+    if (parentInfoSlots.length > 0) {
+      await tx
+        .insertInto('event_info_slots')
+        .values(
+          parentInfoSlots.map(s => ({
+            event_series_id: seriesId,
+            event_occurrence_id: occ.id,
+            inherited_from_info_slot_id: s.id,
+            title: s.title,
+            description: s.description,
+            value: s.value,
+          })),
+        )
+        .onConflict(oc => oc.doNothing())
+        .execute();
+    }
     return occ.id;
   }
   const existing = await tx
@@ -586,6 +611,27 @@ async function assignUser(tx: Tx, slotId: number, userId: string): Promise<void>
     .insertInto('event_work_role_assignments')
     .values({ event_work_role_id: slotId, user_id: userId })
     .execute();
+}
+
+/** Adds a parent (series-level) info slot. Occurrence copies are inherited on materialization. */
+async function addInfoSlot(
+  tx: Tx,
+  seriesId: number,
+  title: string,
+  description: string,
+  value: string | null = null,
+): Promise<EventInfoSlot> {
+  return tx
+    .insertInto('event_info_slots')
+    .values({
+      event_series_id: seriesId,
+      event_occurrence_id: null,
+      title,
+      description,
+      value,
+    })
+    .returningAll()
+    .executeTakeFirstOrThrow();
 }
 
 async function addComment(
@@ -846,6 +892,11 @@ async function seedWeeklyMeeting(
     rrule: buildRruleString({ start, timezone }, { freq: 'WEEKLY', byWeekdays: [1] }),
     timezone,
   });
+
+  // Info slots (form fields) defined on the series; occurrences inherit them
+  // on materialization and fill in their own values.
+  await addInfoSlot(tx, series.id, 'Meeting topic', "What this week's meeting is about.");
+  await addInfoSlot(tx, series.id, 'Special notes', 'Anything participants should know.');
 
   const setupSlot = await addWorkRoleSlot(
     tx,
@@ -1476,6 +1527,20 @@ export async function seedTestData(tx: Tx): Promise<void> {
     duration_minutes: 180,
     timezone: 'UTC',
   });
+  await addInfoSlot(
+    tx,
+    appreciation.id,
+    'Program notes',
+    'Order of the evening: speeches, music, dinner.',
+  );
+  await addInfoSlot(tx, appreciation.id, 'Band composition', 'Who is playing this time.');
+  await addInfoSlot(
+    tx,
+    appreciation.id,
+    'Catering notes',
+    'Dietary requirements and serving times.',
+    'Vegetarian options available.',
+  );
   const welcomeSlot = await addWorkRoleSlot(
     tx,
     appreciation.id,

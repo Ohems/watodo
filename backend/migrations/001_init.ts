@@ -600,6 +600,47 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
   );
   pgm.createIndex('event_work_role_assignments', 'user_id');
 
+  // Event info slots: form-like text fields on an event series. Rows with
+  // `event_occurrence_id` NULL are the parent template (managed from event
+  // management); materialization/import copies them to occurrence-level rows
+  // tracked by `inherited_from_info_slot_id`. Only the occurrence copy's
+  // `value` may be edited - info slots are never added or deleted per
+  // occurrence. On parent rows `value` acts as the default copied to
+  // occurrences.
+  pgm.createTable('event_info_slots', {
+    id: { type: 'serial', primaryKey: true },
+    event_series_id: {
+      type: 'integer',
+      notNull: true,
+      references: 'event_series',
+      onDelete: 'CASCADE',
+    },
+    event_occurrence_id: {
+      type: 'integer',
+      references: 'event_occurrences',
+      onDelete: 'CASCADE',
+    },
+    inherited_from_info_slot_id: {
+      type: 'integer',
+      references: 'event_info_slots',
+      onDelete: 'SET NULL',
+    },
+    title: { type: 'text', notNull: true },
+    description: { type: 'text', notNull: true, default: '' },
+    value: { type: 'text' },
+    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+    updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+  });
+  pgm.createIndex('event_info_slots', 'event_series_id');
+  pgm.createIndex('event_info_slots', 'event_occurrence_id');
+  pgm.createIndex('event_info_slots', 'inherited_from_info_slot_id');
+  // One occurrence-level copy per parent slot (parent rows have NULL
+  // occurrence_id and are unaffected by the unique constraint).
+  pgm.createIndex('event_info_slots', ['event_occurrence_id', 'inherited_from_info_slot_id'], {
+    unique: true,
+    name: 'event_info_slots_occurrence_inherited_unique',
+  });
+
   // Event comments: comments on a whole series (`event_occurrence_id` NULL)
   // or on a single materialized occurrence of it.
   pgm.createTable('event_comments', {
@@ -633,6 +674,7 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
 
 export async function down(pgm: MigrationBuilder): Promise<void> {
   pgm.dropTable('event_comments');
+  pgm.dropTable('event_info_slots');
   pgm.dropTable('event_work_role_assignments');
   pgm.dropTable('event_work_roles');
   pgm.dropTable('event_occurrences');

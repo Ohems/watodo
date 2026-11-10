@@ -299,6 +299,31 @@ export interface EventWorkRolePush {
 
 export type EventWorkRoleUpdate = Partial<EventWorkRolePush>;
 
+// --- Event info slots ---
+
+/** A form-like text field of an event: parent template on the series, per-occurrence copies hold the value. */
+export interface EventInfoSlot {
+  id: number;
+  seriesId: number;
+  /** NULL = parent (series-level) info slot; non-NULL = occurrence-level inherited slot. */
+  occurrenceId: number | null;
+  inheritedFromInfoSlotId: number | null;
+  title: string;
+  description: string;
+  /** The filled text; NULL = not filled yet. */
+  value: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EventInfoSlotPush {
+  title: string;
+  description?: string;
+  value?: string | null;
+}
+
+export type EventInfoSlotUpdate = Partial<EventInfoSlotPush>;
+
 // --- Event readiness ---
 
 export interface RoleReadiness {
@@ -361,6 +386,14 @@ export interface EventOccurrenceDetail {
   occurrenceWorkRoles: EventWorkRole[];
   /** Parent slots not yet imported into this occurrence. */
   missingParentWorkRoles: EventWorkRole[];
+  /** Info slots visible for this occurrence (occurrence-level when materialized, otherwise parent). */
+  infoSlots: EventInfoSlot[];
+  /** Parent (series-level) info slots only. */
+  parentInfoSlots: EventInfoSlot[];
+  /** Occurrence-level (inherited) info slots only. */
+  occurrenceInfoSlots: EventInfoSlot[];
+  /** Parent info slots not yet imported into this occurrence. */
+  missingParentInfoSlots: EventInfoSlot[];
   comments: EventComment[];
   readiness: EventReadiness;
 }

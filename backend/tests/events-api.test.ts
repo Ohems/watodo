@@ -2446,6 +2446,479 @@ describe('Events API', () => {
     });
   });
 
+  describe('GET /api/v1/event-occurrences/:eventOccurrenceId/comments', () => {
+    it('lists series-wide and occurrence-scoped comments', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      await createComment(seed, series.id, { body: 'Series-wide comment' });
+      const slot = await createWorkRole(seed, series.id, {
+        title: 'AV check',
+        occurrenceStart: '2026-10-21T16:00:00.000Z',
+      });
+      const occurrenceId = slot.occurrenceId as number;
+      const created = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${occurrenceId}/comments`,
+        headers: auth(seed.adminToken),
+        payload: { body: 'Occurrence comment' },
+      });
+      expect(created.statusCode).toBe(200);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-occurrences/${occurrenceId}/comments`,
+        headers: auth(seed.readerToken),
+      });
+      expect(response.statusCode).toBe(200);
+      const bodies = (response.json() as { body: string }[]).map(c => c.body);
+      expect(bodies).toContain('Series-wide comment');
+      expect(bodies).toContain('Occurrence comment');
+    });
+  });
+
+  describe('POST /api/v1/event-occurrences/:eventOccurrenceId/comments', () => {
+    it('creates an occurrence-scoped comment attributed to the current user', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, {
+        title: 'AV check',
+        occurrenceStart: '2026-10-21T16:00:00.000Z',
+      });
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${slot.occurrenceId as number}/comments`,
+        headers: auth(seed.adminToken),
+        payload: { body: 'Please bring the keys' },
+      });
+      expect(response.statusCode).toBe(200);
+      const comment = response.json() as { userId: string; userName: string; body: string };
+      expect(comment.userId).toBe(seed.adminUserId);
+      expect(comment.body).toBe('Please bring the keys');
+    });
+
+    it('returns 404 for an unknown occurrence', async () => {
+      const seed = await createEventsFixture();
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/event-occurrences/999/comments',
+        headers: auth(seed.adminToken),
+        payload: { body: 'Hello' },
+      });
+      expect(response.statusCode).toBe(404);
+    });
+  });
+
+  describe('PATCH /api/v1/event-occurrences/:eventOccurrenceId/comments/:commentId', () => {
+    it('lets the author edit the comment and rejects other users', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, {
+        title: 'AV check',
+        occurrenceStart: '2026-10-21T16:00:00.000Z',
+      });
+      const occurrenceId = slot.occurrenceId as number;
+      const created = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${occurrenceId}/comments`,
+        headers: auth(seed.adminToken),
+        payload: { body: 'Original' },
+      });
+      const commentId = (created.json() as { id: number }).id;
+
+      const forbiddenResponse = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-occurrences/${occurrenceId}/comments/${commentId}`,
+        headers: auth(seed.readerToken),
+        payload: { body: 'Hijacked' },
+      });
+      expect(forbiddenResponse.statusCode).toBe(403);
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-occurrences/${occurrenceId}/comments/${commentId}`,
+        headers: auth(seed.adminToken),
+        payload: { body: 'Edited' },
+      });
+      expect(response.statusCode).toBe(200);
+      expect((response.json() as { body: string }).body).toBe('Edited');
+    });
+  });
+
+  describe('DELETE /api/v1/event-occurrences/:eventOccurrenceId/comments/:commentId', () => {
+    it('lets the author delete the comment and rejects other users', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, {
+        title: 'AV check',
+        occurrenceStart: '2026-10-21T16:00:00.000Z',
+      });
+      const occurrenceId = slot.occurrenceId as number;
+      const created = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${occurrenceId}/comments`,
+        headers: auth(seed.adminToken),
+        payload: { body: 'To be deleted' },
+      });
+      const commentId = (created.json() as { id: number }).id;
+
+      const forbiddenResponse = await app.inject({
+        method: 'DELETE',
+        url: `/api/v1/event-occurrences/${occurrenceId}/comments/${commentId}`,
+        headers: auth(seed.readerToken),
+      });
+      expect(forbiddenResponse.statusCode).toBe(403);
+
+      const response = await app.inject({
+        method: 'DELETE',
+        url: `/api/v1/event-occurrences/${occurrenceId}/comments/${commentId}`,
+        headers: auth(seed.adminToken),
+      });
+      expect(response.statusCode).toBe(200);
+
+      const list = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-occurrences/${occurrenceId}/comments`,
+        headers: auth(seed.readerToken),
+      });
+      expect((list.json() as { id: number }[]).map(c => c.id)).not.toContain(commentId);
+    });
+  });
+
+  describe('POST /api/v1/event-series/:seriesId/info-slots', () => {
+    it('creates a parent info slot and lists it via the series endpoint', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const created = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/info-slots`,
+        headers: auth(seed.adminToken),
+        payload: { title: 'Sermon topic', description: 'Text of the sermon', value: null },
+      });
+      expect(created.statusCode).toBe(200);
+      const slot = created.json() as {
+        id: number;
+        occurrenceId: number | null;
+        title: string;
+        value: string | null;
+      };
+      expect(slot.occurrenceId).toBeNull();
+      expect(slot.title).toBe('Sermon topic');
+
+      const list = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series/${series.id}/info-slots`,
+        headers: auth(seed.readerToken),
+      });
+      expect(list.statusCode).toBe(200);
+      const items = list.json() as { id: number; title: string }[];
+      expect(items.map(s => s.title)).toContain('Sermon topic');
+    });
+  });
+
+  describe('PATCH /api/v1/event-series/:seriesId/info-slots/:infoSlotId', () => {
+    it('updates title, description and default value of a parent info slot', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const created = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/info-slots`,
+        headers: auth(seed.adminToken),
+        payload: { title: 'Band composition' },
+      });
+      const slotId = (created.json() as { id: number }).id;
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-series/${series.id}/info-slots/${slotId}`,
+        headers: auth(seed.adminToken),
+        payload: { title: 'Band', description: 'Who plays', value: 'Full band' },
+      });
+      expect(response.statusCode).toBe(200);
+      const updated = response.json() as { title: string; description: string; value: string };
+      expect(updated.title).toBe('Band');
+      expect(updated.description).toBe('Who plays');
+      expect(updated.value).toBe('Full band');
+    });
+  });
+
+  describe('DELETE /api/v1/event-series/:seriesId/info-slots/:infoSlotId', () => {
+    it('deletes a parent info slot but keeps occurrence copies', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const created = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/info-slots`,
+        headers: auth(seed.adminToken),
+        payload: { title: 'Special notes' },
+      });
+      const parentId = (created.json() as { id: number }).id;
+
+      // Materialize the occurrence: the parent info slot is inherited.
+      const ref = encodeURIComponent(`tmp:${series.id}:2026-10-21T16:00:00.000Z`);
+      const mat = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${ref}/materialize`,
+        headers: auth(seed.adminToken),
+      });
+      const { occurrenceId } = mat.json() as { occurrenceId: number };
+
+      const response = await app.inject({
+        method: 'DELETE',
+        url: `/api/v1/event-series/${series.id}/info-slots/${parentId}`,
+        headers: auth(seed.adminToken),
+      });
+      expect(response.statusCode).toBe(200);
+
+      // The occurrence copy still exists (inherited reference set to NULL).
+      const occSlots = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-occurrences/${occurrenceId}/info-slots`,
+        headers: auth(seed.readerToken),
+      });
+      const slots = occSlots.json() as { title: string; inheritedFromInfoSlotId: number | null }[];
+      expect(slots).toHaveLength(1);
+      expect(slots[0].title).toBe('Special notes');
+      expect(slots[0].inheritedFromInfoSlotId).toBeNull();
+    });
+  });
+
+  describe('GET /api/v1/event-occurrences/:eventOccurrenceId/info-slots', () => {
+    it('returns the inherited copies with the parent value as default after materialization', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const parent = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/info-slots`,
+        headers: auth(seed.adminToken),
+        payload: { title: 'Sermon topic', value: 'Default topic' },
+      });
+      const parentId = (parent.json() as { id: number }).id;
+
+      const ref = encodeURIComponent(`tmp:${series.id}:2026-10-21T16:00:00.000Z`);
+      const mat = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${ref}/materialize`,
+        headers: auth(seed.adminToken),
+      });
+      const { occurrenceId } = mat.json() as { occurrenceId: number };
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-occurrences/${occurrenceId}/info-slots`,
+        headers: auth(seed.readerToken),
+      });
+      expect(response.statusCode).toBe(200);
+      const slots = response.json() as {
+        id: number;
+        occurrenceId: number;
+        inheritedFromInfoSlotId: number;
+        value: string | null;
+      }[];
+      expect(slots).toHaveLength(1);
+      expect(slots[0].occurrenceId).toBe(occurrenceId);
+      expect(slots[0].inheritedFromInfoSlotId).toBe(parentId);
+      expect(slots[0].value).toBe('Default topic');
+    });
+  });
+
+  describe('PATCH /api/v1/event-occurrences/:eventOccurrenceId/info-slots/:infoSlotId', () => {
+    it('sets the value via the occurrence slot ID and via the parent slot ID', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const parent = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/info-slots`,
+        headers: auth(seed.adminToken),
+        payload: { title: 'Sermon topic' },
+      });
+      const parentId = (parent.json() as { id: number }).id;
+
+      const ref = encodeURIComponent(`tmp:${series.id}:2026-10-21T16:00:00.000Z`);
+      const mat = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${ref}/materialize`,
+        headers: auth(seed.adminToken),
+      });
+      const { occurrenceId } = mat.json() as { occurrenceId: number };
+
+      const occSlots = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-occurrences/${occurrenceId}/info-slots`,
+        headers: auth(seed.readerToken),
+      });
+      const copyId = (occSlots.json() as { id: number }[])[0].id;
+
+      // Reference the occurrence-level copy directly.
+      const direct = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-occurrences/${occurrenceId}/info-slots/${copyId}`,
+        headers: auth(seed.adminToken),
+        payload: { value: 'The Good Samaritan' },
+      });
+      expect(direct.statusCode).toBe(200);
+      expect((direct.json() as { value: string }).value).toBe('The Good Samaritan');
+
+      // Reference the parent slot: resolves to the inherited occurrence copy.
+      const viaParent = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-occurrences/${occurrenceId}/info-slots/${parentId}`,
+        headers: auth(seed.adminToken),
+        payload: { value: 'Updated topic' },
+      });
+      expect(viaParent.statusCode).toBe(200);
+      const updated = viaParent.json() as { id: number; value: string };
+      expect(updated.id).toBe(copyId);
+      expect(updated.value).toBe('Updated topic');
+
+      // The parent slot's value is unchanged.
+      const seriesSlots = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series/${series.id}/info-slots`,
+        headers: auth(seed.readerToken),
+      });
+      const parentSlot = (seriesSlots.json() as { id: number; value: string | null }[]).find(
+        s => s.id === parentId,
+      );
+      expect(parentSlot?.value).toBeNull();
+    });
+
+    it('returns 404 when the info slot does not exist in the occurrence', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, {
+        title: 'AV check',
+        occurrenceStart: '2026-10-21T16:00:00.000Z',
+      });
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-occurrences/${slot.occurrenceId as number}/info-slots/999`,
+        headers: auth(seed.adminToken),
+        payload: { value: 'x' },
+      });
+      expect(response.statusCode).toBe(404);
+    });
+  });
+
+  describe('POST /api/v1/event-occurrences/:occurrenceRef/import-info-slots', () => {
+    it('syncs info slots added to the series after materialization into the occurrence', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/info-slots`,
+        headers: auth(seed.adminToken),
+        payload: { title: 'Sermon topic' },
+      });
+
+      const ref = encodeURIComponent(`tmp:${series.id}:2026-10-21T16:00:00.000Z`);
+      const mat = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${ref}/materialize`,
+        headers: auth(seed.adminToken),
+      });
+      const { occurrenceId } = mat.json() as { occurrenceId: number };
+
+      // A new info slot is added to the series after the occurrence was materialized.
+      await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/info-slots`,
+        headers: auth(seed.adminToken),
+        payload: { title: 'Special notes', value: 'Default notes' },
+      });
+
+      const before = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-occurrences/${occurrenceId}/info-slots`,
+        headers: auth(seed.readerToken),
+      });
+      expect((before.json() as unknown[]).length).toBe(1);
+
+      const imported = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${occurrenceId}/import-info-slots`,
+        headers: auth(seed.adminToken),
+      });
+      expect(imported.statusCode).toBe(200);
+      const importedSlots = imported.json() as { title: string; value: string | null }[];
+      expect(importedSlots.map(s => s.title)).toEqual(['Special notes']);
+      expect(importedSlots[0].value).toBe('Default notes');
+
+      // Importing again does not duplicate.
+      await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${occurrenceId}/import-info-slots`,
+        headers: auth(seed.adminToken),
+      });
+      const after = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-occurrences/${occurrenceId}/info-slots`,
+        headers: auth(seed.readerToken),
+      });
+      expect((after.json() as unknown[]).length).toBe(2);
+    });
+  });
+
+  describe('GET /api/v1/event-occurrences/:occurrenceRef', () => {
+    it('includes info slots and missing parent info slots in the detail', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/info-slots`,
+        headers: auth(seed.adminToken),
+        payload: { title: 'Sermon topic' },
+      });
+
+      // Not yet materialized: the parent info slots are shown.
+      const ref = encodeURIComponent(`tmp:${series.id}:2026-10-21T16:00:00.000Z`);
+      const detail = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-occurrences/${ref}`,
+        headers: auth(seed.readerToken),
+      });
+      expect(detail.statusCode).toBe(200);
+      const body = detail.json() as {
+        infoSlots: { title: string }[];
+        parentInfoSlots: { title: string }[];
+        occurrenceInfoSlots: unknown[];
+        missingParentInfoSlots: unknown[];
+      };
+      expect(body.infoSlots.map(s => s.title)).toEqual(['Sermon topic']);
+      expect(body.occurrenceInfoSlots).toHaveLength(0);
+
+      // After materialization plus a new parent slot, the new slot is "missing".
+      await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${ref}/materialize`,
+        headers: auth(seed.adminToken),
+      });
+      await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/info-slots`,
+        headers: auth(seed.adminToken),
+        payload: { title: 'Band composition' },
+      });
+      const { occurrenceId } = (
+        await app.inject({
+          method: 'POST',
+          url: `/api/v1/event-occurrences/${ref}/materialize`,
+          headers: auth(seed.adminToken),
+        })
+      ).json() as { occurrenceId: number };
+      const detail2 = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-occurrences/${occurrenceId}`,
+        headers: auth(seed.readerToken),
+      });
+      const body2 = detail2.json() as {
+        infoSlots: { title: string }[];
+        missingParentInfoSlots: { title: string }[];
+      };
+      expect(body2.infoSlots.map(s => s.title)).toEqual(['Sermon topic']);
+      expect(body2.missingParentInfoSlots.map(s => s.title)).toEqual(['Band composition']);
+    });
+  });
+
   describe('DELETE /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments/:assignmentId', () => {
     it('unassigns a user from a work role slot', async () => {
       const seed = await createEventsFixture();

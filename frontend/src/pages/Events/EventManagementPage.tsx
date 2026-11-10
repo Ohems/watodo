@@ -101,6 +101,23 @@ function EventManagementPage() {
       render: item => <span style={{ fontWeight: 500 }}>{item.title}</span>,
     },
     {
+      key: 'description',
+      label: t('common.description'),
+      render: item =>
+        item.description ? (
+          <span
+            style={{ color: 'var(--mantine-color-gray-6)', maxWidth: 320 }}
+            title={item.description}
+          >
+            {item.description.length > 100
+              ? `${item.description.slice(0, 100)}\u2026`
+              : item.description}
+          </span>
+        ) : (
+          <span style={{ color: 'var(--mantine-color-gray-5)' }}>-</span>
+        ),
+    },
+    {
       key: 'start',
       label: t('events.start'),
       render: item => formatDateTime(item.start),

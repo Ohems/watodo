@@ -18,19 +18,25 @@ import {
 } from '@mantine/core';
 import { skipToken } from '@reduxjs/toolkit/query/react';
 import { IconPencil, IconTrash } from '@tabler/icons-react';
+import { differenceInMinutes } from 'date-fns';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   getApiErrorMessage,
+  useCreateOccurrenceCommentMutation,
   useCreateOccurrenceWorkRoleMutation,
+  useDeleteOccurrenceCommentMutation,
   useDeleteOccurrenceWorkRoleMutation,
   useGetAllWorkRolesQuery,
   useGetCurrentUserQuery,
   useGetOccurrenceDetailByRefQuery,
+  useImportParentInfoSlotsMutation,
   useImportParentSlotsMutation,
   useMaterializeOccurrenceMutation,
   useUnassignUserFromOccurrenceWorkRoleMutation,
+  useUpdateOccurrenceCommentMutation,
+  useUpdateOccurrenceInfoSlotMutation,
   useUpdateOccurrenceWorkRoleMutation,
 } from '../../api/index.js';
 import { AssignUserDropdown } from '../../components/AssignUserDropdown/index.js';
@@ -40,7 +46,26 @@ import { SlotAssignees } from '../../components/SlotAssignees/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
 import { useFormatters } from '../../hooks/use-formatters.js';
 import { selectActiveOrganizationId } from '../../store/organization-slice.js';
-import type { BookingConflict, RecurrenceFreq, RecurrenceInput } from '../../types/index.js';
+import type {
+  BookingConflict,
+  EventComment,
+  RecurrenceFreq,
+  RecurrenceInput,
+} from '../../types/index.js';
+
+/**
+ * A comment counts as "edited" only when it was modified more than this many
+ * minutes after its creation (bumps within the threshold are not shown).
+ */
+const EDITED_MARKER_THRESHOLD_MINUTES = 5;
+
+/** Whether a comment was edited long enough after creation to show a marker. */
+function isEditedComment(comment: EventComment): boolean {
+  return (
+    differenceInMinutes(new Date(comment.updatedAt), new Date(comment.createdAt)) >
+    EDITED_MARKER_THRESHOLD_MINUTES
+  );
+}
 
 /**
  * Full-page view of a single event instance (one occurrence of a series).
@@ -82,7 +107,12 @@ function EventOccurrencePage() {
   const [unassignUser] = useUnassignUserFromOccurrenceWorkRoleMutation();
   const [createSlot] = useCreateOccurrenceWorkRoleMutation();
   const [importParentSlots] = useImportParentSlotsMutation();
+  const [importParentInfoSlots] = useImportParentInfoSlotsMutation();
   const [materializeOccurrence] = useMaterializeOccurrenceMutation();
+  const [createComment] = useCreateOccurrenceCommentMutation();
+  const [updateComment] = useUpdateOccurrenceCommentMutation();
+  const [deleteComment] = useDeleteOccurrenceCommentMutation();
+  const [updateInfoSlot] = useUpdateOccurrenceInfoSlotMutation();
 
   const [actionError, setActionError] = useState<string | null>(null);
   // Booking conflicts reported when this occurrence was materialized.
@@ -93,6 +123,12 @@ function EventOccurrencePage() {
   const [slotIsCritical, setSlotIsCritical] = useState(false);
   const [editingDescriptionId, setEditingDescriptionId] = useState<number | null>(null);
   const [descriptionDraft, setDescriptionDraft] = useState('');
+  // Comment draft + inline edit state.
+  const [commentDraft, setCommentDraft] = useState('');
+  const [editingCommentId, setEditingCommentId] = useState<number | null>(null);
+  const [commentEditDraft, setCommentEditDraft] = useState('');
+  // Info slot value drafts keyed by slot ID.
+  const [infoSlotDrafts, setInfoSlotDrafts] = useState<Record<number, string>>({});
 
   const run = async (action: () => Promise<unknown>) => {
     setActionError(null);
@@ -124,8 +160,7 @@ function EventOccurrencePage() {
     if (
       detail?.occurrence.occurrenceId !== null &&
       detail?.occurrence.occurrenceId !== undefined &&
-      occurrenceRef !== null &&
-      occurrenceRef.startsWith('tmp:')
+      occurrenceRef?.startsWith('tmp:')
     ) {
       navigate(`/events/occurrences/${detail.occurrence.occurrenceId}`, { replace: true });
     }
@@ -204,6 +239,10 @@ function EventOccurrencePage() {
   // parent (series-level) slots.
   const slots =
     occurrence.occurrenceId !== null ? detail.occurrenceWorkRoles : detail.parentWorkRoles;
+  // Info slots follow the same rule: the occurrence-level (inherited) copies
+  // once materialized, otherwise the parent template.
+  const infoSlots =
+    occurrence.occurrenceId !== null ? detail.occurrenceInfoSlots : detail.parentInfoSlots;
 
   return (
     <Box p="md" maw={900} mx="auto">
@@ -423,6 +462,7 @@ function EventOccurrencePage() {
                       />
                       <Button
                         size="xs"
+                        aria-label={t('events.saveSlotDescription')}
                         onClick={() =>
                           run(async () => {
                             const occId = await ensureOccurrenceId();
@@ -545,6 +585,236 @@ function EventOccurrencePage() {
                   {t('events.addSlot')}
                 </Button>
               </Group>
+            )}
+          </Stack>
+        </Card>
+
+        {/* Info slots card: form-like text fields inherited from the series */}
+        <Card shadow="sm" withBorder>
+          <Title order={5} mb="xs">
+            {t('events.infoSlots')}
+          </Title>
+          <Text size="xs" c="dimmed" mb="sm">
+            {t('events.instanceInfoSlots')}
+          </Text>
+
+          {detail.missingParentInfoSlots.length > 0 && (
+            <Alert color="blue" variant="light" mb="sm">
+              <Group gap="xs" wrap="wrap" justify="space-between">
+                <Text size="sm">
+                  {t('events.parentHasNewInfoSlots', {
+                    count: detail.missingParentInfoSlots.length,
+                  })}{' '}
+                  {detail.missingParentInfoSlots.map(s => s.title).join(', ')}
+                </Text>
+                {canWrite && occurrence.occurrenceId !== null && (
+                  <Button
+                    size="xs"
+                    variant="light"
+                    onClick={() =>
+                      run(() => importParentInfoSlots(occurrenceRef as string).unwrap())
+                    }
+                  >
+                    {t('events.importInfoSlotsFromParent')}
+                  </Button>
+                )}
+              </Group>
+            </Alert>
+          )}
+
+          <Stack gap="sm">
+            {infoSlots.map(infoSlot => (
+              <Box key={infoSlot.id}>
+                <Text size="sm" fw={500}>
+                  {infoSlot.title}
+                </Text>
+                {infoSlot.description && (
+                  <Text size="xs" c="dimmed">
+                    {infoSlot.description}
+                  </Text>
+                )}
+                {canWrite ? (
+                  <>
+                    <Textarea
+                      size="xs"
+                      mt={4}
+                      autosize
+                      minRows={3}
+                      value={infoSlotDrafts[infoSlot.id] ?? infoSlot.value ?? ''}
+                      onChange={event => {
+                        // Read the value eagerly: inside a functional setState
+                        // updater `event.currentTarget` is already null when
+                        // React invokes the updater during the next render.
+                        const next = event.currentTarget.value;
+                        setInfoSlotDrafts(drafts => ({ ...drafts, [infoSlot.id]: next }));
+                      }}
+                      placeholder={t('events.infoSlotValuePlaceholder')}
+                    />
+                    <Button
+                      size="xs"
+                      mt={4}
+                      aria-label={t('events.saveInfoSlotValue')}
+                      onClick={() =>
+                        run(async () => {
+                          const occId = await ensureOccurrenceId();
+                          const value = infoSlotDrafts[infoSlot.id] ?? infoSlot.value ?? '';
+                          await updateInfoSlot({
+                            occurrenceId: occId,
+                            infoSlotId: infoSlot.id,
+                            value: value.trim() === '' ? null : value,
+                          }).unwrap();
+                        })
+                      }
+                    >
+                      {t('save')}
+                    </Button>
+                  </>
+                ) : (
+                  <Text size="sm" mt={4} style={{ whiteSpace: 'pre-wrap' }}>
+                    {infoSlot.value ?? (
+                      <span style={{ color: 'var(--mantine-color-gray-5)' }}>-</span>
+                    )}
+                  </Text>
+                )}
+                <Divider my="xs" />
+              </Box>
+            ))}
+            {infoSlots.length === 0 && (
+              <Text size="sm" c="dimmed">
+                {t('events.noInfoSlots')}
+              </Text>
+            )}
+          </Stack>
+        </Card>
+
+        {/* Comments card: occurrence-scoped plus series-wide comments */}
+        <Card shadow="sm" withBorder>
+          <Title order={5} mb="xs">
+            {t('events.comments')}
+          </Title>
+          <Stack gap="sm">
+            {detail.comments.map(comment => (
+              <Box key={comment.id}>
+                <Group gap="xs" wrap="wrap">
+                  <Text size="sm" fw={500}>
+                    {comment.userName}
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    {formatDateTime(comment.createdAt)}
+                  </Text>
+                  {isEditedComment(comment) && (
+                    <Text size="xs" c="dimmed" fs="italic">
+                      {t('events.commentEdited', { date: formatDateTime(comment.updatedAt) })}
+                    </Text>
+                  )}
+                  {canWrite && comment.userId === currentUser?.id && (
+                    <>
+                      <ActionIcon
+                        size="sm"
+                        variant="subtle"
+                        aria-label={t('events.editComment')}
+                        onClick={() => {
+                          setEditingCommentId(comment.id);
+                          setCommentEditDraft(comment.body);
+                        }}
+                      >
+                        <IconPencil size={14} />
+                      </ActionIcon>
+                      <ActionIcon
+                        size="sm"
+                        variant="subtle"
+                        color="red"
+                        aria-label={t('events.deleteComment')}
+                        onClick={() =>
+                          run(async () => {
+                            const occId = await ensureOccurrenceId();
+                            await deleteComment({
+                              occurrenceId: occId,
+                              commentId: comment.id,
+                            }).unwrap();
+                          })
+                        }
+                      >
+                        <IconTrash size={14} />
+                      </ActionIcon>
+                    </>
+                  )}
+                </Group>
+                {editingCommentId === comment.id ? (
+                  <>
+                    <Textarea
+                      size="xs"
+                      mt={4}
+                      autosize
+                      minRows={1}
+                      value={commentEditDraft}
+                      onChange={event => setCommentEditDraft(event.currentTarget.value)}
+                      placeholder={t('events.commentPlaceholder')}
+                    />
+                    <Group gap="xs" mt={4}>
+                      <Button
+                        size="xs"
+                        aria-label={t('events.saveCommentEdit')}
+                        disabled={commentEditDraft.trim() === ''}
+                        onClick={() =>
+                          run(async () => {
+                            const occId = await ensureOccurrenceId();
+                            await updateComment({
+                              occurrenceId: occId,
+                              commentId: comment.id,
+                              body: commentEditDraft.trim(),
+                            }).unwrap();
+                            setEditingCommentId(null);
+                          })
+                        }
+                      >
+                        {t('save')}
+                      </Button>
+                      <Button size="xs" variant="subtle" onClick={() => setEditingCommentId(null)}>
+                        {t('cancel')}
+                      </Button>
+                    </Group>
+                  </>
+                ) : (
+                  <Text size="sm" mt={4} style={{ whiteSpace: 'pre-wrap' }}>
+                    {comment.body}
+                  </Text>
+                )}
+                <Divider my="xs" />
+              </Box>
+            ))}
+            {detail.comments.length === 0 && (
+              <Text size="sm" c="dimmed">
+                {t('events.noComments')}
+              </Text>
+            )}
+            {canWrite && (
+              <>
+                <Textarea
+                  size="sm"
+                  autosize
+                  minRows={2}
+                  value={commentDraft}
+                  onChange={event => setCommentDraft(event.currentTarget.value)}
+                  placeholder={t('events.commentPlaceholder')}
+                />
+                <Button
+                  size="xs"
+                  disabled={commentDraft.trim() === ''}
+                  onClick={() =>
+                    run(async () => {
+                      const occId = await ensureOccurrenceId();
+                      await createComment({
+                        occurrenceId: occId,
+                        body: commentDraft.trim(),
+                      }).unwrap();
+                      setCommentDraft('');
+                    })
+                  }
+                >
+                  {t('events.addComment')}
+                </Button>
+              </>
             )}
           </Stack>
         </Card>

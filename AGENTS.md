@@ -230,7 +230,7 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 - `POST /api/v1/event-series` - Create event series (`events:write`; body may include `siteId`/`roomId`/`reserveWholeSite`; the response carries a `conflicts` warning array listing overlapping bookings in the same room/site)
 - `GET /api/v1/event-series/management` - Paginated series list for the management view (`events:read`)
 - `GET /api/v1/event-series/occurrences` - Occurrences in a time range (used by calendars and the Home page; `events:read`). Each occurrence includes `isParticipant`, `isManager`, `workRoleSlots` (per-slot status indicators) and `managedUnfilledCriticalSlots` for the requesting user. The `scope` filter accepts `all`, `mine` (assigned to a slot), `team` (series linked to one of the user's teams) and `involved` (participant or manager; used by the Home page)
-- `GET /api/v1/event-occurrences/:occurrenceRef` - Single occurrence detail by ref (numeric ID or `tmp:{seriesId}:{isoStart}`; `events:read`)
+- `GET /api/v1/event-occurrences/:occurrenceRef` - Single occurrence detail by ref (numeric ID or `tmp:{seriesId}:{isoStart}`; `events:read`). Besides work role slots and comments, the detail includes `infoSlots` (occurrence-level when materialized, otherwise parent), `parentInfoSlots`, `occurrenceInfoSlots` and `missingParentInfoSlots`
 - `POST /api/v1/event-occurrences/:occurrenceRef/materialize` - Materialize a tmp ref into a stable numeric ID, inheriting parent slots (`events:write`). Returns `{ occurrenceId, conflicts }` where `conflicts` lists overlapping bookings of the occurrence's effective time range (`events:write`)
 - `POST /api/v1/event-occurrences/:occurrenceRef/import-slots` - Import parent series slots into a materialized occurrence (`events:write`)
 - `GET/POST /api/v1/event-occurrences/:eventOccurrenceId/work-roles` - List/create occurrence-level slots (numeric ID required; `events:read`/`events:write`)
@@ -239,6 +239,9 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 - `DELETE /api/v1/event-occurrences/:eventOccurrenceId/work-roles/:workRoleId/assignments/:assignmentId` - Unassign (`events:write`)
 - `GET/POST /api/v1/event-occurrences/:eventOccurrenceId/comments` - List/create occurrence comments
 - `PATCH/DELETE /api/v1/event-occurrences/:eventOccurrenceId/comments/:commentId` - Update/delete occurrence comment (author only)
+- `POST /api/v1/event-occurrences/:occurrenceRef/import-info-slots` - Import parent series info slots into a materialized occurrence (`events:write`)
+- `GET /api/v1/event-occurrences/:eventOccurrenceId/info-slots` - List occurrence-level info slots (numeric ID required; `events:read`)
+- `PATCH /api/v1/event-occurrences/:eventOccurrenceId/info-slots/:infoSlotId` - Set the filled value of an occurrence info slot (value only; info slots cannot be added/deleted per occurrence; a parent slot ID resolves to its inherited occurrence copy; `events:write`)
 - `GET /api/v1/event-series/:seriesId` - Get series (`events:read`)
 - `GET /api/v1/event-series/:seriesId/management` - Get series with site/room/teams (`events:read`)
 - `PATCH /api/v1/event-series/:seriesId` - Update series (`events:write`; body may include `siteId`/`roomId`/`reserveWholeSite`; response carries `conflicts`)
@@ -258,6 +261,10 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 - `GET /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignment-candidates` - Users as assignment candidates for a slot (`events:read`): each carries `hasAbsence` (when `start`/`end` are given), `hasWorkRole`, `isQualified` and `missingCertifications` (missing or expired required certifications with `expiredDate`) computed against the slot's `work_role_id`; works for parent and occurrence-level slots
 - `POST /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments` - Assign user to slot (`events:write`)
 - `DELETE /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments/:assignmentId` - Unassign user (`events:write`)
+- `GET /api/v1/event-series/:seriesId/info-slots` - List parent (series-level) info slots (`events:read`, optional `occurrenceStart` query)
+- `POST /api/v1/event-series/:seriesId/info-slots` - Create parent info slot (`events:write`; body: `title`, optional `description`, `value` default)
+- `PATCH /api/v1/event-series/:seriesId/info-slots/:infoSlotId` - Update parent info slot (`events:write`)
+- `DELETE /api/v1/event-series/:seriesId/info-slots/:infoSlotId` - Delete parent info slot (`events:write`; occurrence copies are kept, their inherited reference becomes NULL)
 - `GET /api/v1/event-series/:seriesId/comments` - List comments (`events:read`)
 - `POST /api/v1/event-series/:seriesId/comments` - Add comment (`events:write`)
 - `PATCH /api/v1/event-series/:seriesId/comments/:commentId` - Update comment (author only, `events:write`)
@@ -414,7 +421,9 @@ frontend/src/
   user work roles (availability/qualification), user certifications,
   certification work roles (mandatory certifications per role),
   event series, event occurrences, event work roles (slots), event work role
-  assignments, and event comments.
+  assignments, event info slots (form-like text fields on a series, inherited
+  per occurrence on materialization; only the value is editable per occurrence),
+  and event comments.
   Notifications store their message language-neutrally as `message_key` +
   `params` (jsonb): `message_key` is a key into the backend message catalog
   (`backend/src/i18n/`, per-language templates with `{{placeholder}}` params,
@@ -436,6 +445,10 @@ frontend/src/
   `event_work_roles` slots with `event_occurrence_id` NULL are the parent
   template; materialization copies them to occurrence-level slots tracked by
   `inherited_from_work_role_id` (re-import never duplicates, never deletes).
+  `event_info_slots` works the same way for form-like text fields: parent rows
+  (NULL `event_occurrence_id`) are the template, materialization/import copies
+  them to occurrence-level rows tracked by `inherited_from_info_slot_id`, and
+  only the occurrence copy's `value` may be edited (no add/delete per occurrence).
 - **Event participation and management**: a user is a *participant* of an event
   (series or occurrence) if they are assigned to one of its work role slots
   (a series-wide slot covers every occurrence; an occurrence-level slot only

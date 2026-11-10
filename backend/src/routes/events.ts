@@ -4,11 +4,13 @@ import {
   assignUserToWorkRoleHandler,
   cancelOccurrenceHandler,
   createEventCommentHandler,
+  createEventInfoSlotHandler,
   createEventSeriesHandler,
   createEventWorkRoleHandler,
   createOccurrenceCommentHandler,
   createOccurrenceWorkRoleHandler,
   deleteEventCommentHandler,
+  deleteEventInfoSlotHandler,
   deleteEventSeriesHandler,
   deleteEventWorkRoleHandler,
   deleteExceptionHandler,
@@ -22,13 +24,16 @@ import {
   getOccurrencesHandler,
   getSeriesOccurrencesHandler,
   getUserEventAssignmentsHandler,
+  importParentInfoSlotsHandler,
   importParentSlotsHandler,
   listEventCommentsHandler,
+  listEventInfoSlotsHandler,
   listEventSeriesHandler,
   listEventSeriesPaginatedHandler,
   listEventWorkRolesHandler,
   listExceptionsHandler,
   listOccurrenceCommentsHandler,
+  listOccurrenceInfoSlotsHandler,
   listOccurrenceWorkRolesHandler,
   materializeOccurrenceHandler,
   rescheduleOccurrenceHandler,
@@ -36,10 +41,12 @@ import {
   unassignUserFromOccurrenceWorkRoleHandler,
   unassignUserFromWorkRoleHandler,
   updateEventCommentHandler,
+  updateEventInfoSlotHandler,
   updateEventSeriesConfigHandler,
   updateEventSeriesHandler,
   updateEventWorkRoleHandler,
   updateOccurrenceCommentHandler,
+  updateOccurrenceInfoSlotHandler,
   updateOccurrenceWorkRoleHandler,
 } from '../controllers/event-controller.js';
 import { requirePermissions } from '../middleware/auth.js';
@@ -63,6 +70,14 @@ interface WorkRoleAssignmentParams {
 
 interface CommentParams {
   Params: { seriesId: string; commentId: string };
+}
+
+interface InfoSlotParams {
+  Params: { seriesId: string; infoSlotId: string };
+}
+
+interface OccurrenceInfoSlotParams {
+  Params: { eventOccurrenceId: string; infoSlotId: string };
 }
 
 interface OccurrenceIdParams {
@@ -130,6 +145,13 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
     importParentSlotsHandler,
   );
 
+  // Import parent (series-level) info slots into a materialized occurrence
+  app.post<OccurrenceRefParams>(
+    '/api/v1/event-occurrences/:occurrenceRef/import-info-slots',
+    { preHandler: write },
+    importParentInfoSlotsHandler,
+  );
+
   // --- Occurrence-scoped endpoints (occurrence page) ---
   // Materialize a tmp occurrence ref into a stable numeric ID. After this,
   // the occurrence page uses the numeric eventOccurrenceId for all writes.
@@ -171,6 +193,19 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
     '/api/v1/event-occurrences/:eventOccurrenceId/work-roles/:workRoleId/assignments/:assignmentId',
     { preHandler: write },
     unassignUserFromOccurrenceWorkRoleHandler,
+  );
+
+  // Info slots of a materialized occurrence: list, and value-only update.
+  // Info slots cannot be created or deleted per occurrence.
+  app.get<OccurrenceIdParams>(
+    '/api/v1/event-occurrences/:eventOccurrenceId/info-slots',
+    { preHandler: read },
+    listOccurrenceInfoSlotsHandler,
+  );
+  app.patch<OccurrenceInfoSlotParams>(
+    '/api/v1/event-occurrences/:eventOccurrenceId/info-slots/:infoSlotId',
+    { preHandler: write },
+    updateOccurrenceInfoSlotHandler,
   );
   app.get<OccurrenceIdParams>(
     '/api/v1/event-occurrences/:eventOccurrenceId/comments',
@@ -296,6 +331,29 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
     '/api/v1/event-series/:seriesId/work-roles/:workRoleId/assignment-candidates',
     { preHandler: read },
     getAssignmentCandidatesHandler,
+  );
+
+  // Info slots (series-level form template; occurrence copies are inherited
+  // on materialization and can only have their value edited per occurrence)
+  app.get<SeriesParams>(
+    '/api/v1/event-series/:seriesId/info-slots',
+    { preHandler: read },
+    listEventInfoSlotsHandler,
+  );
+  app.post<SeriesParams>(
+    '/api/v1/event-series/:seriesId/info-slots',
+    { preHandler: write },
+    createEventInfoSlotHandler,
+  );
+  app.patch<InfoSlotParams>(
+    '/api/v1/event-series/:seriesId/info-slots/:infoSlotId',
+    { preHandler: write },
+    updateEventInfoSlotHandler,
+  );
+  app.delete<InfoSlotParams>(
+    '/api/v1/event-series/:seriesId/info-slots/:infoSlotId',
+    { preHandler: write },
+    deleteEventInfoSlotHandler,
   );
 
   // Users assigned to work role slots

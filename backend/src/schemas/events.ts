@@ -130,6 +130,29 @@ export const eventWorkRolesQuerySchema = z.object({
   occurrenceStart: z.iso.datetime().optional(),
 });
 
+// --- Event info slots ---
+
+// Info slots are form-like text fields defined on the series (parent). The
+// push/update schemas are only used at the series level; occurrence-level
+// writes may only set the value (eventInfoSlotValueSchema).
+export const eventInfoSlotPushSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().optional(),
+  value: z.string().nullable().optional(),
+});
+
+export const eventInfoSlotUpdateSchema = eventInfoSlotPushSchema.partial();
+
+// Occurrence-level update: only the filled text may change; info slots cannot
+// be added or deleted per occurrence.
+export const eventInfoSlotValueSchema = z.object({
+  value: z.string().nullable(),
+});
+
+export const eventInfoSlotsQuerySchema = z.object({
+  occurrenceStart: z.iso.datetime().optional(),
+});
+
 // --- Assignment candidates ---
 
 // Optional occurrence range: candidates with an overlapping absence are
@@ -186,6 +209,10 @@ export type EventCommentPush = z.infer<typeof eventCommentPushSchema>;
 export type EventCommentUpdate = z.infer<typeof eventCommentUpdateSchema>;
 export type EventCommentsQuery = z.infer<typeof eventCommentsQuerySchema>;
 export type EventWorkRolesQuery = z.infer<typeof eventWorkRolesQuerySchema>;
+export type EventInfoSlotPush = z.infer<typeof eventInfoSlotPushSchema>;
+export type EventInfoSlotUpdate = z.infer<typeof eventInfoSlotUpdateSchema>;
+export type EventInfoSlotValueUpdate = z.infer<typeof eventInfoSlotValueSchema>;
+export type EventInfoSlotsQuery = z.infer<typeof eventInfoSlotsQuerySchema>;
 export type EventSeriesListQuery = z.infer<typeof eventSeriesListQuerySchema>;
 export type EventSeriesQuery = z.infer<typeof eventSeriesQuerySchema>;
 export type EventSeriesConfig = z.infer<typeof eventSeriesConfigSchema>;

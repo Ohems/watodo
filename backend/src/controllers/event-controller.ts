@@ -6,6 +6,10 @@ import {
   eventCommentPushSchema,
   eventCommentsQuerySchema,
   eventCommentUpdateSchema,
+  eventInfoSlotPushSchema,
+  eventInfoSlotsQuerySchema,
+  eventInfoSlotUpdateSchema,
+  eventInfoSlotValueSchema,
   eventSeriesPushSchema,
   eventSeriesQuerySchema,
   eventSeriesUpdateSchema,
@@ -24,11 +28,13 @@ import {
   assignUserToWorkRole,
   cancelOccurrence,
   createEventComment,
+  createEventInfoSlot,
   createEventSeries,
   createEventWorkRole,
   createOccurrenceComment,
   createOccurrenceWorkRole,
   deleteEventComment,
+  deleteEventInfoSlot,
   deleteEventSeries,
   deleteEventWorkRole,
   deleteException,
@@ -41,12 +47,15 @@ import {
   getOccurrences,
   getSeriesOccurrences,
   getUserEventAssignments,
+  importParentInfoSlots,
   importParentSlots,
   listEventComments,
+  listEventInfoSlots,
   listEventSeries,
   listEventWorkRoles,
   listExceptions,
   listOccurrenceComments,
+  listOccurrenceInfoSlots,
   listOccurrenceWorkRoles,
   materializeOccurrenceByRef,
   rescheduleOccurrence,
@@ -55,9 +64,11 @@ import {
   unassignUserFromOccurrenceWorkRole,
   unassignUserFromWorkRole,
   updateEventComment,
+  updateEventInfoSlot,
   updateEventSeries,
   updateEventWorkRole,
   updateOccurrenceComment,
+  updateOccurrenceInfoSlotValue,
   updateOccurrenceWorkRole,
 } from '../services/event-service.js';
 
@@ -71,6 +82,14 @@ interface OccurrenceParams {
 
 interface WorkRoleParams {
   Params: { seriesId: string; workRoleId: string };
+}
+
+interface InfoSlotParams {
+  Params: { seriesId: string; infoSlotId: string };
+}
+
+interface OccurrenceInfoSlotParams {
+  Params: { eventOccurrenceId: string; infoSlotId: string };
 }
 
 interface WorkRoleAssignmentParams {
@@ -333,6 +352,84 @@ export async function deleteEventWorkRoleHandler(
     request.query.occurrenceRef,
   );
   return reply.status(200).send({ success: true });
+}
+
+// --- Event info slots ---
+
+export async function listEventInfoSlotsHandler(
+  request: FastifyRequest<SeriesParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const query = eventInfoSlotsQuerySchema.parse(request.query);
+  const slots = await listEventInfoSlots(parseId(request.params.seriesId, 'seriesId'), {
+    occurrenceStart: query.occurrenceStart ? new Date(query.occurrenceStart) : undefined,
+  });
+  return reply.status(200).send(slots);
+}
+
+export async function createEventInfoSlotHandler(
+  request: FastifyRequest<SeriesParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const data = eventInfoSlotPushSchema.parse(request.body);
+  const slot = await createEventInfoSlot(parseId(request.params.seriesId, 'seriesId'), data);
+  return reply.status(200).send(slot);
+}
+
+export async function updateEventInfoSlotHandler(
+  request: FastifyRequest<InfoSlotParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const data = eventInfoSlotUpdateSchema.parse(request.body);
+  const slot = await updateEventInfoSlot(
+    parseId(request.params.seriesId, 'seriesId'),
+    parseId(request.params.infoSlotId, 'infoSlotId'),
+    data,
+  );
+  return reply.status(200).send(slot);
+}
+
+export async function deleteEventInfoSlotHandler(
+  request: FastifyRequest<InfoSlotParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  await deleteEventInfoSlot(
+    parseId(request.params.seriesId, 'seriesId'),
+    parseId(request.params.infoSlotId, 'infoSlotId'),
+  );
+  return reply.status(200).send({ success: true });
+}
+
+export async function listOccurrenceInfoSlotsHandler(
+  request: FastifyRequest<OccurrenceIdParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const slots = await listOccurrenceInfoSlots(parseOccurrenceId(request.params.eventOccurrenceId));
+  return reply.status(200).send(slots);
+}
+
+/** Sets the filled value of an occurrence's info slot; only the value may change. */
+export async function updateOccurrenceInfoSlotHandler(
+  request: FastifyRequest<OccurrenceInfoSlotParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const data = eventInfoSlotValueSchema.parse(request.body);
+  const slot = await updateOccurrenceInfoSlotValue(
+    parseOccurrenceId(request.params.eventOccurrenceId),
+    parseId(request.params.infoSlotId, 'infoSlotId'),
+    data.value,
+  );
+  return reply.status(200).send(slot);
+}
+
+/** Imports parent (series-level) info slots into a materialized occurrence. */
+export async function importParentInfoSlotsHandler(
+  request: FastifyRequest<OccurrenceRefParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const { seriesId, occurrenceId } = await resolveOccurrenceForWrite(request.params.occurrenceRef);
+  const imported = await importParentInfoSlots(seriesId, occurrenceId);
+  return reply.status(200).send(imported);
 }
 
 export async function assignUserToWorkRoleHandler(

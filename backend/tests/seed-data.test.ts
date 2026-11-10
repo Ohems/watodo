@@ -64,6 +64,7 @@ describe('seed-data script', () => {
       event_occurrences: 6,
       event_work_roles: 40,
       event_work_role_assignments: 34,
+      event_info_slots: 19,
       event_comments: 10,
       absences: 3,
     };
@@ -89,6 +90,31 @@ describe('seed-data script', () => {
       s => s.event_occurrence_id !== null && !occIds.has(s.event_occurrence_id),
     );
     expect(orphanSlots).toHaveLength(0);
+
+    // Occurrence-level info slots are inherited copies of parent info slots
+    // and reference materialized occurrences.
+    const occInfoSlots = await db
+      .selectFrom('event_info_slots')
+      .select(['id', 'event_occurrence_id', 'inherited_from_info_slot_id'])
+      .where('event_occurrence_id', 'is not', null)
+      .execute();
+    expect(occInfoSlots.length).toBeGreaterThan(0);
+    for (const slot of occInfoSlots) {
+      expect(occIds.has(slot.event_occurrence_id as number)).toBe(true);
+      expect(slot.inherited_from_info_slot_id).not.toBeNull();
+    }
+    const parentInfoSlotIds = new Set(
+      (
+        await db
+          .selectFrom('event_info_slots')
+          .select('id')
+          .where('event_occurrence_id', 'is', null)
+          .execute()
+      ).map(r => r.id),
+    );
+    for (const slot of occInfoSlots) {
+      expect(parentInfoSlotIds.has(slot.inherited_from_info_slot_id as number)).toBe(true);
+    }
 
     // At least one occurrence carries cancel/reschedule state.
     const flagged = await db

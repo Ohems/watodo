@@ -106,7 +106,64 @@ const mockDetail = {
   parentWorkRoles: [],
   occurrenceWorkRoles: [mockSlot, mockCriticalSlot],
   missingParentWorkRoles: [],
-  comments: [],
+  infoSlots: [
+    {
+      id: 21,
+      seriesId: 1,
+      occurrenceId: 9,
+      inheritedFromInfoSlotId: 20,
+      title: 'Sermon topic',
+      description: 'Text of the sermon.',
+      value: 'The Good Samaritan',
+      createdAt: '2025-01-01T00:00:00.000Z',
+      updatedAt: '2025-01-01T00:00:00.000Z',
+    },
+  ],
+  parentInfoSlots: [],
+  occurrenceInfoSlots: [
+    {
+      id: 21,
+      seriesId: 1,
+      occurrenceId: 9,
+      inheritedFromInfoSlotId: 20,
+      title: 'Sermon topic',
+      description: 'Text of the sermon.',
+      value: 'The Good Samaritan',
+      createdAt: '2025-01-01T00:00:00.000Z',
+      updatedAt: '2025-01-01T00:00:00.000Z',
+    },
+  ],
+  missingParentInfoSlots: [],
+  comments: [
+    {
+      id: 31,
+      seriesId: 1,
+      userId: 'user-1',
+      userName: 'Test User',
+      body: 'Please test the microphones before the event starts.',
+      createdAt: '2025-01-01T00:00:00.000Z',
+      // Edited later: the UI shows an "edited <date>" marker for this comment.
+      updatedAt: '2025-01-03T12:00:00.000Z',
+    },
+    {
+      id: 32,
+      seriesId: 1,
+      userId: 'user-2',
+      userName: 'Second User',
+      body: 'Never edited, so no marker.',
+      createdAt: '2025-01-02T00:00:00.000Z',
+      updatedAt: '2025-01-02T00:00:00.000Z',
+    },
+    {
+      id: 33,
+      seriesId: 1,
+      userId: 'user-2',
+      userName: 'Second User',
+      body: 'Edited 4 minutes after creation: below the 5-minute threshold.',
+      createdAt: '2025-01-02T00:00:00.000Z',
+      updatedAt: '2025-01-02T00:04:00.000Z',
+    },
+  ],
   readiness: {
     roles: [
       {
@@ -328,7 +385,7 @@ test.describe('Event occurrence page', () => {
       await page.getByRole('button', { name: 'Edit description' }).first().click();
       const textarea = page.getByPlaceholder('Description for this event instance');
       await textarea.fill('Bring your own apron.');
-      await page.getByRole('button', { name: 'Save' }).click();
+      await page.getByRole('button', { name: 'Save slot description' }).click();
 
       await expect
         .poll(() => captured.length, { message: 'PATCH occurrence work role slot was called' })
@@ -432,6 +489,274 @@ test.describe('Event occurrence page', () => {
       await expect.poll(() => captured.length, { message: 'POST assignment was called' }).toBe(1);
       expect(captured[0].method).toBe('POST');
       expect(captured[0].body).toEqual({ userId: 'user-3' });
+    });
+  });
+
+  test.describe('info slots', () => {
+    test('saving an info slot on an unmaterialized (tmp) occurrence materializes it and PATCHes the inherited copy', async ({
+      page,
+    }) => {
+      // Detail for a tmp ref: not materialized, so the parent info slots are shown.
+      const tmpRef = 'tmp:1:2025-07-15T10:00:00.000Z';
+      const tmpDetail = {
+        ...mockDetail,
+        occurrence: { ...mockDetail.occurrence, occurrenceId: null },
+        workRoles: [],
+        parentWorkRoles: [],
+        occurrenceWorkRoles: [],
+        infoSlots: [
+          {
+            id: 20,
+            seriesId: 1,
+            occurrenceId: null,
+            inheritedFromInfoSlotId: null,
+            title: 'Sermon topic',
+            description: 'Text of the sermon.',
+            value: null,
+            createdAt: '2025-01-01T00:00:00.000Z',
+            updatedAt: '2025-01-01T00:00:00.000Z',
+          },
+        ],
+        parentInfoSlots: [
+          {
+            id: 20,
+            seriesId: 1,
+            occurrenceId: null,
+            inheritedFromInfoSlotId: null,
+            title: 'Sermon topic',
+            description: 'Text of the sermon.',
+            value: null,
+            createdAt: '2025-01-01T00:00:00.000Z',
+            updatedAt: '2025-01-01T00:00:00.000Z',
+          },
+        ],
+        occurrenceInfoSlots: [],
+        missingParentInfoSlots: [],
+        comments: [],
+        readiness: { roles: [], isReady: true, unfilledCriticalCount: 0 },
+      };
+
+      // A multiline value: info slots accept multi-line text (joined via a
+      // char code to keep the literal unambiguous).
+      const multilineValue = ['Faith, hope', 'and love'].join(String.fromCharCode(10));
+
+      await mockCommonApis(page, adminUser(), [testOrg]);
+      await mockOrgApis(page, ORG_ID, { workRoles: [mockWorkRole] });
+      await page.route(
+        url => url.pathname.includes('/api/v1/event-occurrences/tmp'),
+        route => {
+          const pathname = new URL(route.request().url()).pathname;
+          if (pathname.endsWith('/materialize')) {
+            return route.fulfill({ json: { occurrenceId: 9, conflicts: [] } });
+          }
+          return route.fulfill({ json: tmpDetail });
+        },
+      );
+      // After materialization the page navigates to the numeric occurrence.
+      await page.route(
+        url => url.pathname === '/api/v1/event-occurrences/9' && url.search === '',
+        route => route.fulfill({ json: mockDetail }),
+      );
+
+      const materializeCaptured = await interceptMutation(
+        page,
+        '**/api/v1/event-occurrences/tmp*/materialize',
+        'POST',
+        { occurrenceId: 9, conflicts: [] },
+      );
+      const patchCaptured = await interceptMutation(
+        page,
+        '**/api/v1/event-occurrences/9/info-slots/20',
+        'PATCH',
+        {
+          id: 21,
+          seriesId: 1,
+          occurrenceId: 9,
+          inheritedFromInfoSlotId: 20,
+          title: 'Sermon topic',
+          description: 'Text of the sermon.',
+          value: multilineValue,
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-02T00:00:00.000Z',
+        },
+      );
+
+      await gotoApp(page, `/events/occurrences/${encodeURIComponent(tmpRef)}`);
+      await waitForAppReady(page);
+
+      // Typing into the info slot textarea must not crash (regression: the
+      // draft updater read event.currentTarget inside a setState updater).
+      const textarea = page.getByPlaceholder('Write the information here');
+      await expect(textarea).toHaveValue('');
+      await textarea.fill(multilineValue);
+      await page.getByRole('button', { name: 'Save info slot value' }).click();
+
+      await expect
+        .poll(() => materializeCaptured.length, { message: 'materialize was called' })
+        .toBe(1);
+      await expect
+        .poll(() => patchCaptured.length, { message: 'PATCH info slot value was called' })
+        .toBe(1);
+      expect(patchCaptured[0].method).toBe('PATCH');
+      expect(patchCaptured[0].body).toEqual({ value: multilineValue });
+    });
+
+    test('shows the info slots with their values and the series description', async ({ page }) => {
+      await setupOccurrencePage(page);
+
+      // Series description is displayed read-only.
+      await expect(page.getByText('Annual summer event')).toBeVisible();
+      // Info slot title, its description and the filled value.
+      await expect(page.getByRole('heading', { name: 'Info slots' })).toBeVisible();
+      await expect(page.getByText('Sermon topic')).toBeVisible();
+      await expect(page.getByText('Text of the sermon.')).toBeVisible();
+      await expect(page.getByPlaceholder('Write the information here')).toHaveValue(
+        'The Good Samaritan',
+      );
+    });
+
+    test('regular user sees info slot values read-only without save controls', async ({ page }) => {
+      await setupOccurrencePage(page, regularUser());
+
+      await expect(page.getByText('The Good Samaritan')).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Info slots' })).toBeVisible();
+      await expect(page.getByPlaceholder('Write the information here')).toHaveCount(0);
+    });
+
+    test('saving an info slot value PATCHes only the value', async ({ page }) => {
+      await setupOccurrencePage(page, adminUser());
+
+      const captured = await interceptMutation(
+        page,
+        '**/api/v1/event-occurrences/9/info-slots/21',
+        'PATCH',
+        {
+          id: 21,
+          seriesId: 1,
+          occurrenceId: 9,
+          inheritedFromInfoSlotId: 20,
+          title: 'Sermon topic',
+          description: 'Text of the sermon.',
+          value: 'Faith, hope and love',
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-02T00:00:00.000Z',
+        },
+      );
+
+      const textarea = page.getByPlaceholder('Write the information here');
+      await textarea.fill('Faith, hope and love');
+      // The Save button directly below the info slot textarea.
+      await page.getByRole('button', { name: 'Save info slot value' }).click();
+
+      await expect
+        .poll(() => captured.length, { message: 'PATCH info slot value was called' })
+        .toBe(1);
+      expect(captured[0].method).toBe('PATCH');
+      expect(captured[0].body).toEqual({ value: 'Faith, hope and love' });
+    });
+  });
+
+  test.describe('comments', () => {
+    test('shows occurrence comments with author, text and edited marker', async ({ page }) => {
+      await setupOccurrencePage(page);
+
+      await expect(page.getByRole('heading', { name: 'Comments' })).toBeVisible();
+      await expect(page.getByText('Test User').first()).toBeVisible();
+      await expect(
+        page.getByText('Please test the microphones before the event starts.'),
+      ).toBeVisible();
+      // The comment was edited more than 5 minutes after creation: an
+      // "edited <date>" marker is shown, and only for that comment (the
+      // unedited one and the one edited within 5 minutes have no marker).
+      await expect(page.getByText(/^edited /)).toHaveCount(1);
+    });
+
+    test('regular user sees comments read-only without add/edit/delete controls', async ({
+      page,
+    }) => {
+      await setupOccurrencePage(page, regularUser());
+
+      await expect(
+        page.getByText('Please test the microphones before the event starts.'),
+      ).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Add comment' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Edit comment' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Delete comment' })).toHaveCount(0);
+    });
+
+    test('author sees edit/delete controls for own comment and can delete it', async ({ page }) => {
+      await setupOccurrencePage(page, adminUser());
+
+      const captured = await interceptMutation(
+        page,
+        '**/api/v1/event-occurrences/9/comments/31',
+        'DELETE',
+        { success: true },
+      );
+
+      await expect(page.getByRole('button', { name: 'Edit comment' })).toBeVisible();
+      await page.getByRole('button', { name: 'Delete comment' }).click();
+
+      await expect.poll(() => captured.length, { message: 'DELETE comment was called' }).toBe(1);
+      expect(captured[0].method).toBe('DELETE');
+    });
+
+    test('editing a comment PATCHes the body', async ({ page }) => {
+      await setupOccurrencePage(page, adminUser());
+
+      const captured = await interceptMutation(
+        page,
+        '**/api/v1/event-occurrences/9/comments/31',
+        'PATCH',
+        {
+          id: 31,
+          seriesId: 1,
+          userId: 'user-1',
+          userName: 'Test User',
+          body: 'Test the microphones 30 minutes early.',
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-02T00:00:00.000Z',
+        },
+      );
+
+      await page.getByRole('button', { name: 'Edit comment' }).click();
+      // The first "Write a comment" textarea is the inline edit of the comment.
+      const textarea = page.getByPlaceholder('Write a comment').first();
+      await expect(textarea).toHaveValue(/microphones/);
+      await textarea.fill('Test the microphones 30 minutes early.');
+      await page.getByRole('button', { name: 'Save comment edit' }).click();
+
+      await expect.poll(() => captured.length, { message: 'PATCH comment was called' }).toBe(1);
+      expect(captured[0].method).toBe('PATCH');
+      expect(captured[0].body).toEqual({ body: 'Test the microphones 30 minutes early.' });
+    });
+
+    test('adding a comment POSTs the body to the occurrence comments endpoint', async ({
+      page,
+    }) => {
+      await setupOccurrencePage(page, adminUser());
+
+      const captured = await interceptMutation(
+        page,
+        '**/api/v1/event-occurrences/9/comments',
+        'POST',
+        {
+          id: 32,
+          seriesId: 1,
+          userId: 'user-1',
+          userName: 'Test User',
+          body: 'Bring spare chairs.',
+          createdAt: '2025-01-02T00:00:00.000Z',
+          updatedAt: '2025-01-02T00:00:00.000Z',
+        },
+      );
+
+      await page.getByPlaceholder('Write a comment').fill('Bring spare chairs.');
+      await page.getByRole('button', { name: 'Add comment' }).click();
+
+      await expect.poll(() => captured.length, { message: 'POST comment was called' }).toBe(1);
+      expect(captured[0].method).toBe('POST');
+      expect(captured[0].body).toEqual({ body: 'Bring spare chairs.' });
     });
   });
 });
