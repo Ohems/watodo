@@ -2302,6 +2302,150 @@ describe('Events API', () => {
     });
   });
 
+  describe('POST /api/v1/event-occurrences/:eventOccurrenceId/work-roles/:workRoleId/assignments', () => {
+    it('assigns a user to an occurrence-level slot referenced by its own ID', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, {
+        title: 'AV check',
+        occurrenceStart: '2026-10-21T16:00:00.000Z',
+      });
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${slot.occurrenceId as number}/work-roles/${slot.id}/assignments`,
+        headers: auth(seed.adminToken),
+        payload: { userId: seed.memberUserId },
+      });
+      expect(response.statusCode).toBe(200);
+      const assignment = response.json() as { eventWorkRoleId: number; userId: string };
+      expect(assignment.eventWorkRoleId).toBe(slot.id);
+      expect(assignment.userId).toBe(seed.memberUserId);
+    });
+
+    it('assigns to the inherited copy when the parent slot of a materialized occurrence is referenced', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const parentSlot = await createWorkRole(seed, series.id, { title: 'Kitchen Helper' });
+
+      // Materialize the occurrence the way the occurrence page does for a tmp ref.
+      const ref = encodeURIComponent(`tmp:${series.id}:2026-10-21T16:00:00.000Z`);
+      const materialize = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${ref}/materialize`,
+        headers: auth(seed.adminToken),
+      });
+      expect(materialize.statusCode).toBe(200);
+      const { occurrenceId } = materialize.json() as { occurrenceId: number };
+
+      // The occurrence page shows the parent slots until the occurrence is
+      // materialized, so the assign call references the parent slot ID.
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${occurrenceId}/work-roles/${parentSlot.id}/assignments`,
+        headers: auth(seed.adminToken),
+        payload: { userId: seed.memberUserId },
+      });
+      expect(response.statusCode).toBe(200);
+      const assignment = response.json() as { eventWorkRoleId: number; userId: string };
+      expect(assignment.userId).toBe(seed.memberUserId);
+      expect(assignment.eventWorkRoleId).not.toBe(parentSlot.id);
+
+      // The assignment landed on the occurrence-level copy inherited from the
+      // parent slot.
+      const copy = await db
+        .selectFrom('event_work_roles')
+        .select(['id', 'event_occurrence_id', 'inherited_from_work_role_id'])
+        .where('id', '=', assignment.eventWorkRoleId)
+        .executeTakeFirstOrThrow();
+      expect(copy.event_occurrence_id).toBe(occurrenceId);
+      expect(copy.inherited_from_work_role_id).toBe(parentSlot.id);
+
+      // The parent slot itself got no assignment.
+      const parentAssignments = await db
+        .selectFrom('event_work_role_assignments')
+        .selectAll()
+        .where('event_work_role_id', '=', parentSlot.id)
+        .execute();
+      expect(parentAssignments).toHaveLength(0);
+    });
+
+    it('returns 404 when the slot does not exist in the occurrence', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, {
+        title: 'AV check',
+        occurrenceStart: '2026-10-21T16:00:00.000Z',
+      });
+      const otherSeries = await createSeries(seed, {
+        title: 'Other series',
+        start: '2026-10-23T16:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+      });
+      const otherSlot = await createWorkRole(seed, otherSeries.id, { title: 'Other slot' });
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${slot.occurrenceId as number}/work-roles/${otherSlot.id}/assignments`,
+        headers: auth(seed.adminToken),
+        payload: { userId: seed.memberUserId },
+      });
+      expect(response.statusCode).toBe(404);
+    });
+  });
+
+  describe('DELETE /api/v1/event-occurrences/:eventOccurrenceId/work-roles/:workRoleId/assignments/:assignmentId', () => {
+    it('unassigns via the parent slot reference using the parent assignment ID', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const parentSlot = await createWorkRole(seed, series.id, { title: 'Kitchen Helper' });
+      const parentAssignment = await assignToWorkRole(
+        seed,
+        series.id,
+        parentSlot.id,
+        seed.memberUserId,
+      );
+
+      // Materialize: the parent slot and its assignment are copied to the occurrence.
+      const ref = encodeURIComponent(`tmp:${series.id}:2026-10-21T16:00:00.000Z`);
+      const materialize = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${ref}/materialize`,
+        headers: auth(seed.adminToken),
+      });
+      expect(materialize.statusCode).toBe(200);
+      const { occurrenceId } = materialize.json() as { occurrenceId: number };
+
+      // The occurrence page lists the parent assignments before materialization,
+      // so the unassign call references the parent slot and assignment IDs.
+      const response = await app.inject({
+        method: 'DELETE',
+        url: `/api/v1/event-occurrences/${occurrenceId}/work-roles/${parentSlot.id}/assignments/${parentAssignment.id}`,
+        headers: auth(seed.adminToken),
+      });
+      expect(response.statusCode).toBe(200);
+
+      // The inherited copy's assignment is gone, the parent assignment is intact.
+      const copySlot = await db
+        .selectFrom('event_work_roles')
+        .select('id')
+        .where('event_occurrence_id', '=', occurrenceId)
+        .where('inherited_from_work_role_id', '=', parentSlot.id)
+        .executeTakeFirstOrThrow();
+      const copyAssignments = await db
+        .selectFrom('event_work_role_assignments')
+        .selectAll()
+        .where('event_work_role_id', '=', copySlot.id)
+        .execute();
+      expect(copyAssignments).toHaveLength(0);
+      const remainingParent = await db
+        .selectFrom('event_work_role_assignments')
+        .selectAll()
+        .where('id', '=', parentAssignment.id)
+        .execute();
+      expect(remainingParent).toHaveLength(1);
+    });
+  });
+
   describe('DELETE /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments/:assignmentId', () => {
     it('unassigns a user from a work role slot', async () => {
       const seed = await createEventsFixture();

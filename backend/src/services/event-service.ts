@@ -1989,6 +1989,13 @@ export async function createOccurrenceWorkRole(
   });
 }
 
+/**
+ * Resolves a slot referenced by an occurrence-scoped endpoint. When the given
+ * slot ID is a parent (series-level) slot - which the occurrence page shows
+ * before the occurrence is materialized - the occurrence-level copy inherited
+ * from that parent slot is resolved instead. Parent slots themselves are
+ * never returned here, so occurrence-scoped writes never modify them.
+ */
 async function getOccurrenceSlotOrThrow(occurrenceId: number, workRoleId: number) {
   const slot = await db
     .selectFrom('event_work_roles')
@@ -1996,10 +2003,28 @@ async function getOccurrenceSlotOrThrow(occurrenceId: number, workRoleId: number
     .where('id', '=', workRoleId)
     .where('event_occurrence_id', '=', occurrenceId)
     .executeTakeFirst();
-  if (!slot) {
+  if (slot) {
+    return slot;
+  }
+  const occurrence = await db
+    .selectFrom('event_occurrences')
+    .select('event_series_id')
+    .where('id', '=', occurrenceId)
+    .executeTakeFirst();
+  if (!occurrence) {
+    throw notFound(`Event occurrence ${occurrenceId} not found!`);
+  }
+  const inheritedCopy = await db
+    .selectFrom('event_work_roles')
+    .selectAll()
+    .where('event_series_id', '=', occurrence.event_series_id)
+    .where('event_occurrence_id', '=', occurrenceId)
+    .where('inherited_from_work_role_id', '=', workRoleId)
+    .executeTakeFirst();
+  if (!inheritedCopy) {
     throw notFound(`Work role slot ${workRoleId} not found in occurrence ${occurrenceId}!`);
   }
-  return slot;
+  return inheritedCopy;
 }
 
 /**
@@ -2012,36 +2037,7 @@ export async function updateOccurrenceWorkRole(
   workRoleId: number,
   data: EventWorkRoleUpdate,
 ): Promise<EventWorkRoleResponse> {
-  let slot = await db
-    .selectFrom('event_work_roles')
-    .selectAll()
-    .where('id', '=', workRoleId)
-    .where('event_occurrence_id', '=', occurrenceId)
-    .executeTakeFirst();
-  if (!slot) {
-    // Maybe the caller referenced the parent (series-level) slot, which the
-    // occurrence page shows before the occurrence is materialized: resolve
-    // the occurrence-level copy inherited from that parent slot.
-    const occurrence = await db
-      .selectFrom('event_occurrences')
-      .select('event_series_id')
-      .where('id', '=', occurrenceId)
-      .executeTakeFirst();
-    if (!occurrence) {
-      throw notFound(`Event occurrence ${occurrenceId} not found!`);
-    }
-    const inheritedCopy = await db
-      .selectFrom('event_work_roles')
-      .selectAll()
-      .where('event_series_id', '=', occurrence.event_series_id)
-      .where('event_occurrence_id', '=', occurrenceId)
-      .where('inherited_from_work_role_id', '=', workRoleId)
-      .executeTakeFirst();
-    if (!inheritedCopy) {
-      throw notFound(`Work role slot ${workRoleId} not found in occurrence ${occurrenceId}!`);
-    }
-    slot = inheritedCopy;
-  }
+  const slot = await getOccurrenceSlotOrThrow(occurrenceId, workRoleId);
   return updateEventWorkRole(slot.event_series_id, slot.id, data);
 }
 
@@ -2050,8 +2046,8 @@ export async function deleteOccurrenceWorkRole(
   occurrenceId: number,
   workRoleId: number,
 ): Promise<void> {
-  await getOccurrenceSlotOrThrow(occurrenceId, workRoleId);
-  await db.deleteFrom('event_work_roles').where('id', '=', workRoleId).execute();
+  const slot = await getOccurrenceSlotOrThrow(occurrenceId, workRoleId);
+  await db.deleteFrom('event_work_roles').where('id', '=', slot.id).execute();
 }
 
 /** Assigns a user to an occurrence slot. */
@@ -2061,7 +2057,7 @@ export async function assignUserToOccurrenceWorkRole(
   userId: string,
 ): Promise<EventWorkRoleAssignmentResponse> {
   const slot = await getOccurrenceSlotOrThrow(occurrenceId, workRoleId);
-  return assignUserToWorkRole(slot.event_series_id, workRoleId, userId);
+  return assignUserToWorkRole(slot.event_series_id, slot.id, userId);
 }
 
 /** Removes an assignment from an occurrence slot. */
@@ -2071,7 +2067,31 @@ export async function unassignUserFromOccurrenceWorkRole(
   assignmentId: number,
 ): Promise<void> {
   const slot = await getOccurrenceSlotOrThrow(occurrenceId, workRoleId);
-  return unassignUserFromWorkRole(slot.event_series_id, workRoleId, assignmentId);
+  // The occurrence page lists the parent slot's assignments before the
+  // occurrence is materialized: when the given assignment ID belongs to the
+  // parent slot, remove the copy inherited by this occurrence's slot instead.
+  const assignment = await db
+    .selectFrom('event_work_role_assignments')
+    .select(['id', 'event_work_role_id', 'user_id'])
+    .where('id', '=', assignmentId)
+    .executeTakeFirst();
+  let assignmentToDelete = assignmentId;
+  if (assignment && assignment.event_work_role_id !== slot.id) {
+    if (assignment.event_work_role_id !== workRoleId) {
+      throw notFound(`Assignment ${assignmentId} not found in occurrence ${occurrenceId}!`);
+    }
+    const inheritedAssignment = await db
+      .selectFrom('event_work_role_assignments')
+      .select('id')
+      .where('event_work_role_id', '=', slot.id)
+      .where('user_id', '=', assignment.user_id)
+      .executeTakeFirst();
+    if (!inheritedAssignment) {
+      throw notFound(`Assignment ${assignmentId} not found in occurrence ${occurrenceId}!`);
+    }
+    assignmentToDelete = inheritedAssignment.id;
+  }
+  return unassignUserFromWorkRole(slot.event_series_id, slot.id, assignmentToDelete);
 }
 
 // --- Occurrence-scoped comments ---
