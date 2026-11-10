@@ -14,6 +14,7 @@ import {
   deleteExceptionHandler,
   deleteOccurrenceCommentHandler,
   deleteOccurrenceWorkRoleHandler,
+  getAssignmentCandidatesHandler,
   getEventSeriesHandler,
   getEventSeriesManagementHandler,
   getOccurrenceDetailByRefHandler,
@@ -286,6 +287,15 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
     '/api/v1/event-series/:seriesId/work-roles/:workRoleId',
     { preHandler: write },
     deleteEventWorkRoleHandler,
+  );
+
+  // Assignment candidates for a work role slot: all users with the
+  // declared-role/qualification/certification flags computed against the
+  // slot's work role (and absence flags when start/end are given).
+  app.get<WorkRoleParams & { Querystring: unknown }>(
+    '/api/v1/event-series/:seriesId/work-roles/:workRoleId/assignment-candidates',
+    { preHandler: read },
+    getAssignmentCandidatesHandler,
   );
 
   // Users assigned to work role slots

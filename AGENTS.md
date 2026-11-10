@@ -255,6 +255,7 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 - `POST /api/v1/event-series/:seriesId/work-roles` - Create slot (`events:write`; body may include `occurrenceId`, `isCritical`, `workRoleId`)
 - `PATCH /api/v1/event-series/:seriesId/work-roles/:workRoleId` - Update slot (`events:write`)
 - `DELETE /api/v1/event-series/:seriesId/work-roles/:workRoleId` - Delete slot (`events:write`)
+- `GET /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignment-candidates` - Users as assignment candidates for a slot (`events:read`): each carries `hasAbsence` (when `start`/`end` are given), `hasWorkRole`, `isQualified` and `missingCertifications` (missing or expired required certifications with `expiredDate`) computed against the slot's `work_role_id`; works for parent and occurrence-level slots
 - `POST /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments` - Assign user to slot (`events:write`)
 - `DELETE /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments/:assignmentId` - Unassign user (`events:write`)
 - `GET /api/v1/event-series/:seriesId/comments` - List comments (`events:read`)

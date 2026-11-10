@@ -12,32 +12,31 @@ import {
   Select,
   Stack,
   Switch,
-  Table,
   Text,
   Textarea,
   Title,
 } from '@mantine/core';
 import { skipToken } from '@reduxjs/toolkit/query/react';
-import { IconPencil, IconPlus, IconTrash } from '@tabler/icons-react';
+import { IconPencil, IconTrash } from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   getApiErrorMessage,
-  useAssignUserToOccurrenceWorkRoleMutation,
   useCreateOccurrenceWorkRoleMutation,
   useDeleteOccurrenceWorkRoleMutation,
   useGetAllWorkRolesQuery,
   useGetCurrentUserQuery,
   useGetOccurrenceDetailByRefQuery,
-  useGetUserListQuery,
   useImportParentSlotsMutation,
   useMaterializeOccurrenceMutation,
   useUnassignUserFromOccurrenceWorkRoleMutation,
   useUpdateOccurrenceWorkRoleMutation,
 } from '../../api/index.js';
+import { AssignUserDropdown } from '../../components/AssignUserDropdown/index.js';
 import { BookingConflictsAlert } from '../../components/BookingConflictsAlert/index.js';
 import { QueryError } from '../../components/QueryState/index.js';
+import { SlotAssignees } from '../../components/SlotAssignees/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
 import { useFormatters } from '../../hooks/use-formatters.js';
 import { selectActiveOrganizationId } from '../../store/organization-slice.js';
@@ -71,11 +70,6 @@ function EventOccurrencePage() {
     isLoading: loading,
     error: detailError,
   } = useGetOccurrenceDetailByRefQuery(valid ? (occurrenceRef as string) : skipToken);
-  // The user list is fetched with the occurrence's time range so users with
-  // an overlapping absence are marked (hasAbsence) and sorted last below.
-  const { data: userList = [], isError: userListError } = useGetUserListQuery(
-    detail ? { start: detail.occurrence.start, end: detail.occurrence.end } : skipToken,
-  );
   // Work roles are organization-scoped: always offer the ones of the
   // organization that owns this event, not of the currently active one.
   const eventOrganizationId = detail?.occurrence.organizationId ?? activeOrganizationId;
@@ -86,7 +80,6 @@ function EventOccurrencePage() {
   const [deleteSlot] = useDeleteOccurrenceWorkRoleMutation();
   const [updateSlot] = useUpdateOccurrenceWorkRoleMutation();
   const [unassignUser] = useUnassignUserFromOccurrenceWorkRoleMutation();
-  const [assignUser] = useAssignUserToOccurrenceWorkRoleMutation();
   const [createSlot] = useCreateOccurrenceWorkRoleMutation();
   const [importParentSlots] = useImportParentSlotsMutation();
   const [materializeOccurrence] = useMaterializeOccurrenceMutation();
@@ -98,7 +91,6 @@ function EventOccurrencePage() {
 
   const [slotWorkRoleId, setSlotWorkRoleId] = useState<number | null>(null);
   const [slotIsCritical, setSlotIsCritical] = useState(false);
-  const [assignUserIds, setAssignUserIds] = useState<Record<number, string>>({});
   const [editingDescriptionId, setEditingDescriptionId] = useState<number | null>(null);
   const [descriptionDraft, setDescriptionDraft] = useState('');
 
@@ -328,7 +320,7 @@ function EventOccurrencePage() {
             {t('events.instanceWorkRoles')}
           </Text>
 
-          {(userListError || workRolesError) && (
+          {workRolesError && (
             <Box mb="sm">
               <QueryError />
             </Box>
@@ -475,94 +467,33 @@ function EventOccurrencePage() {
                       )}
                     </Group>
                   )}
-                  {/* Headerless table so the delete buttons align in a column. */}
-                  <Table mt={4} verticalSpacing="xs">
-                    <Table.Tbody>
-                      {slot.assignments.map(assignment => (
-                        <Table.Tr key={assignment.id}>
-                          <Table.Td>
-                            <Text size="md" fw={500}>
-                              {assignment.userName}
-                            </Text>
-                          </Table.Td>
-                          <Table.Td style={{ width: 40, textAlign: 'right' }}>
-                            {canWrite && (
-                              <ActionIcon
-                                size="sm"
-                                variant="subtle"
-                                color="red"
-                                aria-label={t('events.unassignUser', { name: assignment.userName })}
-                                onClick={() =>
-                                  run(() =>
-                                    ensureOccurrenceId().then(occId =>
-                                      unassignUser({
-                                        occurrenceId: occId,
-                                        workRoleId: slot.id,
-                                        assignmentId: assignment.id,
-                                      }).unwrap(),
-                                    ),
-                                  )
-                                }
-                              >
-                                <IconTrash size={14} />
-                              </ActionIcon>
-                            )}
-                          </Table.Td>
-                        </Table.Tr>
-                      ))}
-                    </Table.Tbody>
-                  </Table>
+                  {/* People list: assignees with the same fitness badges as the dropdown. */}
+                  <SlotAssignees
+                    seriesId={series.id}
+                    slot={slot}
+                    start={occurrence.start}
+                    end={occurrence.end}
+                    canWrite={canWrite}
+                    onUnassign={assignmentId =>
+                      run(() =>
+                        ensureOccurrenceId().then(occId =>
+                          unassignUser({
+                            occurrenceId: occId,
+                            workRoleId: slot.id,
+                            assignmentId,
+                          }).unwrap(),
+                        ),
+                      )
+                    }
+                  />
                   {canWrite && (
-                    <Group gap="xs" mt={4} wrap="nowrap">
-                      <Select
-                        size="sm"
-                        placeholder={t('events.assignUser')}
-                        data={userList
-                          .filter(user => !slot.assignments.some(a => a.userId === user.id))
-                          // Users with an absence for this occurrence are
-                          // sorted last (the sort is stable, so the name order
-                          // is kept within both groups).
-                          .sort((a, b) => Number(a.hasAbsence) - Number(b.hasAbsence))
-                          .map(user => ({ value: user.id, label: user.name }))}
-                        renderOption={({ option }) => {
-                          const user = userList.find(u => u.id === option.value);
-                          return (
-                            <Group gap="xs" wrap="nowrap">
-                              <span>{option.label}</span>
-                              {user?.hasAbsence && (
-                                <Badge size="xs" color="orange" variant="light">
-                                  {t('events.absent')}
-                                </Badge>
-                              )}
-                            </Group>
-                          );
-                        }}
-                        value={assignUserIds[slot.id] ?? null}
-                        onChange={value =>
-                          setAssignUserIds(prev => ({ ...prev, [slot.id]: value ?? '' }))
-                        }
-                        style={{ minWidth: 200 }}
-                      />
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        leftSection={<IconPlus size={14} />}
-                        disabled={!assignUserIds[slot.id]}
-                        onClick={() =>
-                          run(async () => {
-                            const occId = await ensureOccurrenceId();
-                            await assignUser({
-                              occurrenceId: occId,
-                              workRoleId: slot.id,
-                              userId: assignUserIds[slot.id],
-                            }).unwrap();
-                            setAssignUserIds(prev => ({ ...prev, [slot.id]: '' }));
-                          })
-                        }
-                      >
-                        {t('events.assign')}
-                      </Button>
-                    </Group>
+                    <AssignUserDropdown
+                      seriesId={series.id}
+                      slot={slot}
+                      start={occurrence.start}
+                      end={occurrence.end}
+                      resolveOccurrenceId={ensureOccurrenceId}
+                    />
                   )}
                   <Divider my="xs" />
                 </Box>

@@ -67,6 +67,31 @@ export interface UserListItem {
   hasAbsence: boolean;
 }
 
+/** A required certification the candidate does not hold, or holds only expired. */
+export interface MissingCertification {
+  certificationId: number;
+  name: string;
+  /**
+   * Expiry date (YYYY-MM-DD) when the user holds the certification but it has
+   * expired; null when the user does not hold it at all.
+   */
+  expiredDate: string | null;
+}
+
+/** A user listed as an assignment candidate for a work role slot. */
+export interface AssignmentCandidate {
+  id: string;
+  name: string;
+  /** True when the user has an absence overlapping the requested range. */
+  hasAbsence: boolean;
+  /** True when the user declared the slot's work role. */
+  hasWorkRole: boolean;
+  /** The qualification flag of the user's declared work role (false when not declared). */
+  isQualified: boolean;
+  /** Required certifications of the slot's work role the user is missing or holds expired. */
+  missingCertifications: MissingCertification[];
+}
+
 export interface AuthProviderInfo {
   id: string;
   name: string;

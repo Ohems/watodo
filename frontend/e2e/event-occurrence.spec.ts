@@ -5,7 +5,6 @@ import {
   interceptMutation,
   mockCommonApis,
   mockOrgApis,
-  mockUserList,
   ORG_ID,
   regularUser,
   userWithPermissions,
@@ -123,16 +122,78 @@ const mockDetail = {
   },
 };
 
+// Assignment candidates for slot 5 (linked to work role 3, which requires the
+// "Food Safety" certification). user-2 is already assigned to the slot, so it
+// is filtered out of the dropdown by the page.
+const mockCandidatesSlot5 = [
+  {
+    id: 'user-1',
+    name: 'Test User',
+    hasAbsence: false,
+    hasWorkRole: true,
+    isQualified: true,
+    missingCertifications: [],
+  },
+  {
+    id: 'user-4',
+    name: 'Fourth User',
+    hasAbsence: false,
+    hasWorkRole: true,
+    isQualified: false,
+    missingCertifications: [],
+  },
+  {
+    id: 'user-3',
+    name: 'Third User',
+    hasAbsence: true,
+    hasWorkRole: false,
+    isQualified: false,
+    missingCertifications: [{ certificationId: 7, name: 'Food Safety', expiredDate: null }],
+  },
+  {
+    id: 'user-2',
+    name: 'Second User',
+    hasAbsence: false,
+    hasWorkRole: true,
+    isQualified: false,
+    missingCertifications: [{ certificationId: 7, name: 'Food Safety', expiredDate: '2024-01-01' }],
+  },
+];
+
+// Slot 6 has no linked work role: neutral flags for everyone.
+const mockCandidatesSlot6 = [
+  {
+    id: 'user-1',
+    name: 'Test User',
+    hasAbsence: false,
+    hasWorkRole: false,
+    isQualified: false,
+    missingCertifications: [],
+  },
+  {
+    id: 'user-3',
+    name: 'Third User',
+    hasAbsence: false,
+    hasWorkRole: false,
+    isQualified: false,
+    missingCertifications: [],
+  },
+];
+
 async function setupOccurrencePage(
   page: import('@playwright/test').Page,
   user = adminUser(),
 ): Promise<void> {
   await mockCommonApis(page, user, [testOrg]);
   await mockOrgApis(page, ORG_ID, { workRoles: [mockWorkRole] });
-  await mockUserList(page, [
-    { id: 'user-1', name: 'Test User' },
-    { id: 'user-2', name: 'Second User' },
-  ]);
+  await page.route(
+    url => url.pathname === '/api/v1/event-series/1/work-roles/5/assignment-candidates',
+    route => route.fulfill({ json: mockCandidatesSlot5 }),
+  );
+  await page.route(
+    url => url.pathname === '/api/v1/event-series/1/work-roles/6/assignment-candidates',
+    route => route.fulfill({ json: mockCandidatesSlot6 }),
+  );
   await page.route(
     url => url.pathname === '/api/v1/event-occurrences/9' && url.search === '',
     route => route.fulfill({ json: mockDetail }),
@@ -299,6 +360,77 @@ test.describe('Event occurrence page', () => {
         isCritical: false,
         workRoleId: 3,
       });
+    });
+  });
+
+  test.describe('assignment matching', () => {
+    test('assignee rows show the same fitness badges as the dropdown', async ({ page }) => {
+      await setupOccurrencePage(page, adminUser());
+
+      // Second User is assigned to slot 5: declared the role but not qualified,
+      // and holds only an expired Food Safety certification.
+      const row = page.getByRole('row').filter({ hasText: 'Second User' });
+      await expect(row).toContainText('not qualified');
+      await expect(row).toContainText('missing certification: Food Safety (expired 2024-01-01)');
+    });
+
+    test('candidates are sorted role-first, flagged users show a warning icon with badges in a hover tooltip', async ({
+      page,
+    }) => {
+      await setupOccurrencePage(page, adminUser());
+
+      // Open the assign dropdown of the first slot (id 5, linked to work role 3).
+      await page.locator('input[placeholder="Assign user"]').first().click();
+
+      const options = page.getByRole('option');
+      // user-2 is already assigned to the slot, so it is not offered.
+      await expect(options).toHaveCount(3);
+      // Role declarers first (qualified before unqualified), absent users last.
+      await expect(options.nth(0)).toContainText('Test User');
+      await expect(options.nth(1)).toContainText('Fourth User');
+      await expect(options.nth(2)).toContainText('Third User');
+      // Test User has no issues: no warning icon. The others have one.
+      await expect(options.nth(0).locator('svg')).toHaveCount(0);
+      await expect(options.nth(1).locator('svg')).toHaveCount(1);
+      await expect(options.nth(2).locator('svg')).toHaveCount(1);
+      // The badges are not inline in the narrow option; they show in a tooltip
+      // on hover.
+      await expect(options.nth(1)).not.toContainText('not qualified');
+      await options.nth(1).hover();
+      await expect(page.getByRole('tooltip', { name: 'not qualified' })).toBeVisible();
+      await options.nth(2).hover();
+      const tooltip = page.getByRole('tooltip', { name: /absent/ });
+      await expect(tooltip).toBeVisible();
+      await expect(tooltip).toContainText('missing certification: Food Safety');
+    });
+
+    test('assigning a flagged user still works (coordinator override) and POSTs the assignment', async ({
+      page,
+    }) => {
+      await setupOccurrencePage(page, adminUser());
+
+      const captured = await interceptMutation(
+        page,
+        '**/api/v1/event-occurrences/9/work-roles/5/assignments',
+        'POST',
+        {
+          id: 12,
+          eventWorkRoleId: 5,
+          userId: 'user-3',
+          userName: 'Third User',
+          createdAt: '2025-01-01T00:00:00.000Z',
+        },
+      );
+
+      await page.locator('input[placeholder="Assign user"]').first().click();
+      // Third User is absent and missing the required certification, but can
+      // still be assigned.
+      await page.getByRole('option', { name: /Third User/ }).click();
+      await page.getByRole('button', { name: 'Assign' }).first().click();
+
+      await expect.poll(() => captured.length, { message: 'POST assignment was called' }).toBe(1);
+      expect(captured[0].method).toBe('POST');
+      expect(captured[0].body).toEqual({ userId: 'user-3' });
     });
   });
 });

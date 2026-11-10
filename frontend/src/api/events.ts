@@ -1,4 +1,5 @@
 import type {
+  AssignmentCandidate,
   BookingConflict,
   EventComment,
   EventException,
@@ -235,6 +236,17 @@ export const eventsApi = api.injectEndpoints({
         'UserEventAssignments',
       ],
     }),
+    getAssignmentCandidates: build.query<
+      AssignmentCandidate[],
+      { seriesId: number; slotId: number; start?: string; end?: string }
+    >({
+      query: ({ seriesId, slotId, start, end }) =>
+        withQuery(`/api/v1/event-series/${seriesId}/work-roles/${slotId}/assignment-candidates`, {
+          start,
+          end,
+        }),
+      providesTags: ['UserList'],
+    }),
     assignUserToWorkRole: build.mutation<
       EventWorkRoleAssignment,
       { seriesId: number; workRoleId: number; userId: string }
@@ -435,6 +447,7 @@ export const {
   useCreateEventWorkRoleMutation,
   useUpdateEventWorkRoleMutation,
   useDeleteEventWorkRoleMutation,
+  useGetAssignmentCandidatesQuery,
   useAssignUserToWorkRoleMutation,
   useUnassignUserFromWorkRoleMutation,
   useListEventCommentsQuery,

@@ -1762,6 +1762,245 @@ describe('Events API', () => {
     });
   });
 
+  describe('GET /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignment-candidates', () => {
+    interface CandidateItem {
+      id: string;
+      name: string;
+      hasAbsence: boolean;
+      hasWorkRole: boolean;
+      isQualified: boolean;
+      missingCertifications: {
+        certificationId: number;
+        name: string;
+        expiredDate: string | null;
+      }[];
+    }
+
+    /** Builds a series with a slot linked to a work role that requires one certification. */
+    async function createSlotWithWorkRole(seed: Seed) {
+      const suffix = randomUUID();
+      const series = await createSeries(seed, weeklyPayload);
+      const workRoleId = (
+        await db
+          .insertInto('work_roles')
+          .values({ name: `Cook ${suffix}`, organization_id: seed.organizationId })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+      const certificationId = (
+        await db
+          .insertInto('certifications')
+          .values({ name: `Food Safety ${suffix}`, organization_id: seed.organizationId })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+      await db
+        .insertInto('certification_work_roles')
+        .values({ work_role_id: workRoleId, certification_id: certificationId })
+        .execute();
+      const slot = await createWorkRole(seed, series.id, {
+        title: 'Cook',
+        workRoleId,
+        isCritical: true,
+      });
+      return { series, workRoleId, certificationId, slot };
+    }
+
+    const candidatesOf = async (
+      seed: Seed,
+      seriesId: number,
+      slotId: number,
+      query = '',
+      token = seed.readerToken,
+    ): Promise<CandidateItem[]> => {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series/${seriesId}/work-roles/${slotId}/assignment-candidates${query}`,
+        headers: auth(token),
+      });
+      expect(response.statusCode).toBe(200);
+      return response.json() as CandidateItem[];
+    };
+
+    it('returns 403 for a member without events:read', async () => {
+      const seed = await createEventsFixture();
+      const { series, slot } = await createSlotWithWorkRole(seed);
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series/${series.id}/work-roles/${slot.id}/assignment-candidates`,
+        headers: auth(seed.memberToken),
+      });
+      expect(response.statusCode).toBe(403);
+    });
+
+    it('returns 404 for an unknown slot', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series/${series.id}/work-roles/99999/assignment-candidates`,
+        headers: auth(seed.readerToken),
+      });
+      expect(response.statusCode).toBe(404);
+    });
+
+    it('computes hasWorkRole, isQualified and missing/expired certifications against the slot work role', async () => {
+      const seed = await createEventsFixture();
+      const { series, workRoleId, certificationId, slot } = await createSlotWithWorkRole(seed);
+
+      // Admin: declared the role and is qualified, holds a valid certification.
+      await db
+        .insertInto('user_work_roles')
+        .values({ user_id: seed.adminUserId, work_role_id: workRoleId, is_qualified: true })
+        .execute();
+      await db
+        .insertInto('user_certifications')
+        .values({
+          user_id: seed.adminUserId,
+          certification_id: certificationId,
+          valid_until_date: new Date('2999-01-01T00:00:00.000Z'),
+        })
+        .execute();
+      // Reader: declared the role but not qualified, certification expired.
+      await db
+        .insertInto('user_work_roles')
+        .values({ user_id: seed.readerUserId, work_role_id: workRoleId, is_qualified: false })
+        .execute();
+      await db
+        .insertInto('user_certifications')
+        .values({
+          user_id: seed.readerUserId,
+          certification_id: certificationId,
+          valid_until_date: new Date('2020-01-01T00:00:00.000Z'),
+        })
+        .execute();
+      // Member: no role, no certification.
+
+      const candidates = await candidatesOf(seed, series.id, slot.id);
+      expect(candidates.map(c => c.name)).toEqual(['Admin User', 'Member User', 'Reader User']);
+
+      const admin = candidates.find(c => c.id === seed.adminUserId);
+      expect(admin).toMatchObject({
+        hasWorkRole: true,
+        isQualified: true,
+        hasAbsence: false,
+      });
+      expect(admin?.missingCertifications).toEqual([]);
+
+      const reader = candidates.find(c => c.id === seed.readerUserId);
+      expect(reader).toMatchObject({ hasWorkRole: true, isQualified: false });
+      expect(reader?.missingCertifications).toEqual([
+        {
+          certificationId,
+          name: expect.stringContaining('Food Safety'),
+          expiredDate: '2020-01-01',
+        },
+      ]);
+
+      const member = candidates.find(c => c.id === seed.memberUserId);
+      expect(member).toMatchObject({ hasWorkRole: false, isQualified: false });
+      expect(member?.missingCertifications).toEqual([
+        { certificationId, name: expect.stringContaining('Food Safety'), expiredDate: null },
+      ]);
+    });
+
+    it('treats a certification without expiry as valid and one expiring today as still valid', async () => {
+      const seed = await createEventsFixture();
+      const { series, workRoleId, certificationId, slot } = await createSlotWithWorkRole(seed);
+
+      const noExpiryUser = await createUser('No Expiry User');
+      const todayUser = await createUser('Today Expiry User');
+      await db
+        .insertInto('user_work_roles')
+        .values([
+          { user_id: noExpiryUser.id, work_role_id: workRoleId, is_qualified: true },
+          { user_id: todayUser.id, work_role_id: workRoleId, is_qualified: true },
+        ])
+        .execute();
+      const today = new Date().toISOString().slice(0, 10);
+      await db
+        .insertInto('user_certifications')
+        .values([
+          { user_id: noExpiryUser.id, certification_id: certificationId, valid_until_date: null },
+          {
+            user_id: todayUser.id,
+            certification_id: certificationId,
+            valid_until_date: new Date(`${today}T00:00:00.000Z`),
+          },
+        ])
+        .execute();
+
+      const candidates = await candidatesOf(seed, series.id, slot.id);
+      for (const id of [noExpiryUser.id, todayUser.id]) {
+        expect(candidates.find(c => c.id === id)?.missingCertifications).toEqual([]);
+      }
+    });
+
+    it('flags hasAbsence when a range is given and returns neutral flags for a slot without work role', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const plainSlot = await createWorkRole(seed, series.id, { title: 'Anyone' });
+
+      // The member is absent on 2026-10-21 (inclusive day range).
+      await db
+        .insertInto('absences')
+        .values({
+          user_id: seed.memberUserId,
+          type: 'away',
+          start_date: new Date('2026-10-21T00:00:00.000Z'),
+          end_date: new Date('2026-10-21T00:00:00.000Z'),
+        })
+        .execute();
+
+      const withRange = await candidatesOf(
+        seed,
+        series.id,
+        plainSlot.id,
+        '?start=2026-10-21T10:00:00.000Z&end=2026-10-21T11:00:00.000Z',
+      );
+      const member = withRange.find(c => c.id === seed.memberUserId);
+      expect(member?.hasAbsence).toBe(true);
+      expect(member?.hasWorkRole).toBe(false);
+      expect(member?.isQualified).toBe(false);
+      expect(member?.missingCertifications).toEqual([]);
+      expect(withRange.find(c => c.id === seed.adminUserId)?.hasAbsence).toBe(false);
+
+      // Without a range no absence flags are computed.
+      const withoutRange = await candidatesOf(seed, series.id, plainSlot.id);
+      expect(withoutRange.every(c => !c.hasAbsence)).toBe(true);
+    });
+
+    it('returns 404 when the slot work role belongs to another organization', async () => {
+      const seed = await createEventsFixture();
+      const otherOrgId = await createOrganization(`Other Org ${randomUUID()}`, {
+        defaultTimezone: 'UTC',
+      });
+      const otherWorkRoleId = (
+        await db
+          .insertInto('work_roles')
+          .values({ name: `Other Role ${randomUUID()}`, organization_id: otherOrgId })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+      const series = await createSeries(seed, weeklyPayload);
+      // Insert a slot pointing at the foreign work role directly (the API
+      // validates on write, so bypass it here to test the read guard).
+      const slot = await createWorkRole(seed, series.id, { title: 'Foreign role slot' });
+      await db
+        .updateTable('event_work_roles')
+        .set({ work_role_id: otherWorkRoleId })
+        .where('id', '=', slot.id)
+        .execute();
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series/${series.id}/work-roles/${slot.id}/assignment-candidates`,
+        headers: auth(seed.readerToken),
+      });
+      expect(response.statusCode).toBe(404);
+    });
+  });
+
   describe('POST /api/v1/event-series/:seriesId/comments', () => {
     it('creates series-wide and occurrence-scoped comments', async () => {
       const seed = await createEventsFixture();

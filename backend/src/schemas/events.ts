@@ -130,6 +130,17 @@ export const eventWorkRolesQuerySchema = z.object({
   occurrenceStart: z.iso.datetime().optional(),
 });
 
+// --- Assignment candidates ---
+
+// Optional occurrence range: candidates with an overlapping absence are
+// flagged `hasAbsence` (same semantics as GET /api/v1/users/list).
+export const assignmentCandidatesQuerySchema = z.object({
+  start: z.iso.datetime().optional(),
+  end: z.iso.datetime().optional(),
+});
+
+export type AssignmentCandidatesQuery = z.infer<typeof assignmentCandidatesQuerySchema>;
+
 // --- Event series management query ---
 
 // The management view only ever shows the active organization, so the

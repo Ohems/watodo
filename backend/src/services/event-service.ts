@@ -13,6 +13,7 @@ import type {
   RecurrenceInput,
   RescheduleOccurrenceInput,
 } from '../schemas/index.js';
+import { usersWithAbsenceInRange } from './absence-service.js';
 import {
   anchorRecurrenceAtStart,
   buildRruleString,
@@ -2563,6 +2564,183 @@ export async function unassignUserFromWorkRole(
   }
 
   await db.deleteFrom('event_work_role_assignments').where('id', '=', assignmentId).execute();
+}
+
+// --- Assignment candidates ---
+
+/** A required certification the candidate does not hold, or holds only expired. */
+export interface MissingCertification {
+  certificationId: number;
+  name: string;
+  /**
+   * Expiry date (YYYY-MM-DD) when the user holds the certification but it has
+   * expired; null when the user does not hold it at all.
+   */
+  expiredDate: string | null;
+}
+
+/** A user listed as an assignment candidate for a work role slot. */
+export interface AssignmentCandidate {
+  id: string;
+  name: string;
+  /** True when the user has an absence overlapping the requested range. */
+  hasAbsence: boolean;
+  /** True when the user declared the slot's work role (`user_work_roles`). */
+  hasWorkRole: boolean;
+  /** The `is_qualified` flag of the user's declared work role (false when not declared). */
+  isQualified: boolean;
+  /** Required certifications of the slot's work role the user is missing or holds expired. */
+  missingCertifications: MissingCertification[];
+}
+
+/**
+ * Lists all users as assignment candidates for a work role slot, enriched with
+ * the flags computed against the slot's `work_role_id`: whether the user
+ * declared the role (`hasWorkRole`), their qualification (`isQualified`) and
+ * the required certifications of the role the user is missing or holds only
+ * expired (`missingCertifications`). A certification is expired when its
+ * `valid_until_date` is before today (the expiry day itself is still valid; a
+ * null date never expires). When both `start` and `end` are given, candidates
+ * with an overlapping absence are flagged `hasAbsence`. Slots without a linked
+ * work role return neutral flags for everyone. The slot may be a parent
+ * (series-level) or occurrence-level slot; both belong to the series.
+ * @param seriesId - The series ID.
+ * @param slotId - The work role slot ID.
+ * @param query - Optional occurrence range for the absence flags.
+ * @returns The candidates, sorted by name.
+ */
+export async function getAssignmentCandidates(
+  seriesId: number,
+  slotId: number,
+  query: { start?: string; end?: string } = {},
+): Promise<AssignmentCandidate[]> {
+  logger.trace('eventService.getAssignmentCandidates');
+  const series = await getSeriesRowOrThrow(seriesId);
+
+  const slot = await db
+    .selectFrom('event_work_roles')
+    .select(['id', 'work_role_id'])
+    .where('id', '=', slotId)
+    .where('event_series_id', '=', seriesId)
+    .executeTakeFirst();
+  if (!slot) {
+    throw notFound(`Work role slot ${slotId} not found in event series ${seriesId}!`);
+  }
+
+  const users = await db
+    .selectFrom('users')
+    .select(['id', 'name'])
+    .orderBy('name', 'asc')
+    .execute();
+
+  let absentIds = new Set<string>();
+  if (query.start && query.end) {
+    absentIds = await usersWithAbsenceInRange(
+      users.map(user => user.id),
+      new Date(query.start),
+      new Date(query.end),
+    );
+  }
+
+  const workRoleId = slot.work_role_id;
+  if (workRoleId === null) {
+    return users.map(user => ({
+      id: user.id,
+      name: user.name,
+      hasAbsence: absentIds.has(user.id),
+      hasWorkRole: false,
+      isQualified: false,
+      missingCertifications: [],
+    }));
+  }
+
+  // The work role must belong to the same organization as the series (work
+  // roles are organization-scoped catalog data).
+  const organization = await getCalendarOrganizationOrThrow(series.calendar_id);
+  const workRole = await db
+    .selectFrom('work_roles')
+    .select('id')
+    .where('id', '=', workRoleId)
+    .where('organization_id', '=', organization.organizationId)
+    .executeTakeFirst();
+  if (!workRole) {
+    throw notFound(`Work role ${workRoleId} not found in this organization!`);
+  }
+
+  // Certifications required for the work role.
+  const requiredCerts = await db
+    .selectFrom('certification_work_roles')
+    .innerJoin('certifications', 'certifications.id', 'certification_work_roles.certification_id')
+    .select(['certifications.id', 'certifications.name'])
+    .where('certification_work_roles.work_role_id', '=', workRoleId)
+    .orderBy('certifications.name', 'asc')
+    .execute();
+
+  // Users who declared the work role, with their qualification flag.
+  const userRoles = await db
+    .selectFrom('user_work_roles')
+    .select(['user_id', 'is_qualified'])
+    .where('work_role_id', '=', workRoleId)
+    .execute();
+  const qualificationByUser = new Map(userRoles.map(row => [row.user_id, row.is_qualified]));
+
+  // The users' held certifications for the required certification IDs.
+  const requiredCertIds = requiredCerts.map(cert => cert.id);
+  const heldCerts =
+    requiredCertIds.length > 0
+      ? await db
+          .selectFrom('user_certifications')
+          .select(['user_id', 'certification_id', 'valid_until_date'])
+          .where('certification_id', 'in', requiredCertIds)
+          .execute()
+      : [];
+  // userId -> certificationId -> expiry date (null = no expiry).
+  const heldByUser = new Map<string, Map<number, Date | null>>();
+  for (const row of heldCerts) {
+    let byCert = heldByUser.get(row.user_id);
+    if (!byCert) {
+      byCert = new Map();
+      heldByUser.set(row.user_id, byCert);
+    }
+    byCert.set(row.certification_id, row.valid_until_date);
+  }
+
+  // The expiry day itself is still valid: a certification is expired only
+  // when valid_until_date is before the start of today (UTC).
+  const now = new Date();
+  const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+
+  return users.map(user => {
+    const hasWorkRole = qualificationByUser.has(user.id);
+    const missingCertifications: MissingCertification[] = [];
+    if (requiredCerts.length > 0) {
+      const held = heldByUser.get(user.id);
+      for (const cert of requiredCerts) {
+        const expiry = held?.get(cert.id);
+        if (expiry === undefined) {
+          missingCertifications.push({
+            certificationId: cert.id,
+            name: cert.name,
+            expiredDate: null,
+          });
+        } else if (expiry !== null && expiry.getTime() < todayStart.getTime()) {
+          missingCertifications.push({
+            certificationId: cert.id,
+            name: cert.name,
+            expiredDate: expiry.toISOString().slice(0, 10),
+          });
+        }
+      }
+    }
+    return {
+      id: user.id,
+      name: user.name,
+      hasAbsence: absentIds.has(user.id),
+      hasWorkRole,
+      isQualified: qualificationByUser.get(user.id) ?? false,
+      missingCertifications,
+    };
+  });
 }
 
 // --- Work role slots: import from parent ---

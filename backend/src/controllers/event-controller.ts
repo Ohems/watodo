@@ -2,6 +2,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { db } from '../database.js';
 import { getAuth } from '../middleware/auth.js';
 import {
+  assignmentCandidatesQuerySchema,
   eventCommentPushSchema,
   eventCommentsQuerySchema,
   eventCommentUpdateSchema,
@@ -33,6 +34,7 @@ import {
   deleteException,
   deleteOccurrenceComment,
   deleteOccurrenceWorkRole,
+  getAssignmentCandidates,
   getEventSeries,
   getOccurrenceDetail,
   getOccurrenceDetailByRef,
@@ -344,6 +346,24 @@ export async function assignUserToWorkRoleHandler(
     data.userId,
   );
   return reply.status(200).send(assignment);
+}
+
+/**
+ * Lists the users as assignment candidates for a work role slot, with the
+ * declared-role/qualification/certification flags computed against the slot's
+ * work role (and absence flags when start/end are given).
+ */
+export async function getAssignmentCandidatesHandler(
+  request: FastifyRequest<WorkRoleParams & { Querystring: unknown }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const query = assignmentCandidatesQuerySchema.parse(request.query ?? {});
+  const candidates = await getAssignmentCandidates(
+    parseId(request.params.seriesId, 'seriesId'),
+    parseId(request.params.workRoleId, 'workRoleId'),
+    query,
+  );
+  return reply.status(200).send(candidates);
 }
 
 export async function unassignUserFromWorkRoleHandler(
