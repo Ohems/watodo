@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import {
   adminUser,
   createOrganization,
+  gotoApp,
   interceptMutation,
   mockCommonApis,
   mockMyWorkRolesAndCerts,
@@ -155,7 +156,7 @@ test.describe('Profile page', () => {
   test.describe('data display', () => {
     test('shows personal information', async ({ page }) => {
       await setupProfilePage(page, adminUser({ name: 'John Doe', email: 'john@example.com' }));
-      await page.goto('/profile');
+      await gotoApp(page, '/profile');
 
       await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible();
       await expect(page.getByRole('heading', { name: 'Personal information' })).toBeVisible();
@@ -166,7 +167,7 @@ test.describe('Profile page', () => {
 
     test('shows assigned work roles with qualified badge', async ({ page }) => {
       await setupProfilePage(page);
-      await page.goto('/profile');
+      await gotoApp(page, '/profile');
 
       await expect(page.getByRole('heading', { name: 'My work roles' })).toBeVisible();
       // "Setup Crew" also appears as a role badge in the event assignments card.
@@ -177,7 +178,7 @@ test.describe('Profile page', () => {
 
     test('shows assigned certifications with dates', async ({ page }) => {
       await setupProfilePage(page);
-      await page.goto('/profile');
+      await gotoApp(page, '/profile');
 
       await expect(page.getByRole('heading', { name: 'My certifications' })).toBeVisible();
       await expect(page.getByText('First Aid').first()).toBeVisible();
@@ -187,14 +188,14 @@ test.describe('Profile page', () => {
 
     test('shows empty state when no work roles assigned', async ({ page }) => {
       await setupProfilePage(page, adminUser(), { myRoles: [] });
-      await page.goto('/profile');
+      await gotoApp(page, '/profile');
 
       await expect(page.getByText('You have not selected any roles yet')).toBeVisible();
     });
 
     test('shows empty state when no certifications', async ({ page }) => {
       await setupProfilePage(page, adminUser(), { myCerts: [] });
-      await page.goto('/profile');
+      await gotoApp(page, '/profile');
 
       await expect(page.getByText('You have not added any certifications yet')).toBeVisible();
     });
@@ -222,7 +223,7 @@ test.describe('Profile page', () => {
         },
       );
 
-      await page.goto('/profile');
+      await gotoApp(page, '/profile');
 
       // Select a role from the MultiSelect
       await page.getByPlaceholder('Add a role...').click();
@@ -243,7 +244,7 @@ test.describe('Profile page', () => {
         'DELETE',
       );
 
-      await page.goto('/profile');
+      await gotoApp(page, '/profile');
       await expect(page.getByText('Setup Crew')).toBeVisible();
 
       // Click the delete button next to the role
@@ -277,7 +278,7 @@ test.describe('Profile page', () => {
         },
       );
 
-      await page.goto('/profile');
+      await gotoApp(page, '/profile');
 
       // Select certification from dropdown
       await page.getByPlaceholder('Select a certification...').click();
@@ -310,7 +311,7 @@ test.describe('Profile page', () => {
         'DELETE',
       );
 
-      await page.goto('/profile');
+      await gotoApp(page, '/profile');
 
       // The cert entry contains an Edit button (work role entries do not).
       // Find the ancestor div that has both the Edit and Delete buttons.
@@ -348,7 +349,7 @@ test.describe('Profile page', () => {
         },
       );
 
-      await page.goto('/profile');
+      await gotoApp(page, '/profile');
 
       // Find the Edit button within the "My certifications" section
       // (work role entries do not have an Edit button)
@@ -377,7 +378,7 @@ test.describe('Profile page', () => {
   test.describe('permission levels', () => {
     test('regular user can manage their own work roles and certifications', async ({ page }) => {
       await setupProfilePage(page, regularUser());
-      await page.goto('/profile');
+      await gotoApp(page, '/profile');
 
       await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible();
       await expect(page.getByText('Setup Crew').first()).toBeVisible();
@@ -406,7 +407,7 @@ test.describe('Profile page', () => {
           return route.fulfill({ json: mockEventAssignments });
         },
       );
-      await page.goto('/profile');
+      await gotoApp(page, '/profile');
 
       await expect(page.getByRole('heading', { name: 'Event assignments' })).toBeVisible();
       await expect(page.getByText('Weekly Community Meeting')).toBeVisible();
@@ -439,7 +440,7 @@ test.describe('Profile page', () => {
           return route.fulfill({ json: mockEventAssignments });
         },
       );
-      await page.goto('/profile');
+      await gotoApp(page, '/profile');
 
       await expect(page.getByRole('heading', { name: 'Event assignments' })).toBeVisible();
       // The "To" field defaults to one month ahead, so its picker opens on
@@ -461,7 +462,7 @@ test.describe('Profile page', () => {
 
     test('regular user without events:read does not see the card', async ({ page }) => {
       await setupProfilePage(page, regularUser());
-      await page.goto('/profile');
+      await gotoApp(page, '/profile');
 
       await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible();
       await expect(page.getByRole('heading', { name: 'Event assignments' })).toHaveCount(0);

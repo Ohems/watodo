@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import {
   adminUser,
+  gotoApp,
   interceptMutation,
   mockAuthAccounts,
   mockCommonApis,
@@ -21,7 +22,7 @@ test.describe('Account page', () => {
       await mockAuthAccounts(page, [
         { provider: 'discord', providerAccountId: '123', createdAt: '2025-01-01T00:00:00.000Z' },
       ]);
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       await expect(page.getByRole('heading', { name: 'Account' })).toBeVisible();
       await expect(page.getByRole('heading', { name: 'Personal information' })).toBeVisible();
@@ -37,7 +38,7 @@ test.describe('Account page', () => {
       await mockAuthAccounts(page, [
         { provider: 'discord', providerAccountId: '123', createdAt: '2025-01-01T00:00:00.000Z' },
       ]);
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       await expect(page.getByRole('heading', { name: 'Login methods' })).toBeVisible();
       // Discord is connected -> shows Disconnect button
@@ -53,7 +54,7 @@ test.describe('Account page', () => {
       await mockAuthAccounts(page, [
         { provider: 'discord', providerAccountId: '123', createdAt: '2025-01-01T00:00:00.000Z' },
       ]);
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       await expect(page.getByText('You cannot disconnect your last login method.')).toBeVisible();
       // Disconnect button should be disabled
@@ -63,7 +64,7 @@ test.describe('Account page', () => {
     test('shows danger zone section', async ({ page }) => {
       await mockCommonApis(page, testUser);
       await mockAuthAccounts(page, []);
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       await expect(page.getByRole('heading', { name: 'Danger zone' })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Delete account' })).toBeVisible();
@@ -72,7 +73,7 @@ test.describe('Account page', () => {
     test('shows the language preference with the current language', async ({ page }) => {
       await mockCommonApis(page, testUser);
       await mockAuthAccounts(page, []);
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       await expect(page.getByRole('heading', { name: 'Preferences' })).toBeVisible();
       await expect(page.getByRole('combobox', { name: 'Language' })).toHaveValue('English (UK)');
@@ -100,7 +101,7 @@ test.describe('Account page', () => {
         return route.fulfill({ json: { ...testUser, language: currentLanguage } });
       });
 
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       const patchRequest = page.waitForRequest(
         req => req.url().includes('/api/v1/users/@me') && req.method() === 'PATCH',
@@ -120,7 +121,7 @@ test.describe('Account page', () => {
     test('shows the week start preference with the current week start', async ({ page }) => {
       await mockCommonApis(page, testUser);
       await mockAuthAccounts(page, []);
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       await expect(page.getByRole('combobox', { name: 'Week starts on' })).toHaveValue('Sunday');
     });
@@ -143,7 +144,7 @@ test.describe('Account page', () => {
         return route.fulfill({ json: { ...testUser, weekStart: currentWeekStart } });
       });
 
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       const patchRequest = page.waitForRequest(
         req => req.url().includes('/api/v1/users/@me') && req.method() === 'PATCH',
@@ -162,7 +163,7 @@ test.describe('Account page', () => {
     test('show the current formats', async ({ page }) => {
       await mockCommonApis(page, testUser);
       await mockAuthAccounts(page, []);
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       await expect(page.getByRole('combobox', { name: 'Date format' })).toHaveValue(
         'YYYY-MM-DD (year-month-day)',
@@ -188,7 +189,7 @@ test.describe('Account page', () => {
         return route.fulfill({ json: { ...testUser, dateFormat: currentDateFormat } });
       });
 
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       const patchRequest = page.waitForRequest(
         req => req.url().includes('/api/v1/users/@me') && req.method() === 'PATCH',
@@ -220,7 +221,7 @@ test.describe('Account page', () => {
         return route.fulfill({ json: { ...testUser, timeFormat: currentTimeFormat } });
       });
 
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       const patchRequest = page.waitForRequest(
         req => req.url().includes('/api/v1/users/@me') && req.method() === 'PATCH',
@@ -252,7 +253,7 @@ test.describe('Account page', () => {
         return route.fulfill({ json: testUser });
       });
 
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       // Click Edit
       await page.getByRole('button', { name: 'Edit' }).click();
@@ -286,7 +287,7 @@ test.describe('Account page', () => {
       await mockAuthAccounts(page, [
         { provider: 'discord', providerAccountId: '123', createdAt: '2025-01-01T00:00:00.000Z' },
       ]);
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       await page.getByRole('button', { name: 'Edit' }).click();
 
@@ -303,7 +304,7 @@ test.describe('Account page', () => {
       await mockAuthAccounts(page, [
         { provider: 'discord', providerAccountId: '123', createdAt: '2025-01-01T00:00:00.000Z' },
       ]);
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       await page.getByRole('button', { name: 'Edit' }).click();
 
@@ -320,7 +321,7 @@ test.describe('Account page', () => {
       await mockAuthAccounts(page, [
         { provider: 'discord', providerAccountId: '123', createdAt: '2025-01-01T00:00:00.000Z' },
       ]);
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       await page.getByRole('button', { name: 'Edit' }).click();
       const nameInput = page.getByRole('textbox', { name: 'Name' });
@@ -346,7 +347,7 @@ test.describe('Account page', () => {
         'DELETE',
       );
 
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       // Google row should have a Disconnect button (2 accounts, can disconnect)
       const googleRow = page.locator('text=Google').locator('..').locator('..');
@@ -364,7 +365,7 @@ test.describe('Account page', () => {
       await mockAuthAccounts(page, [
         { provider: 'discord', providerAccountId: '123', createdAt: '2025-01-01T00:00:00.000Z' },
       ]);
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       await page.getByRole('button', { name: 'Delete account' }).click();
 
@@ -379,7 +380,7 @@ test.describe('Account page', () => {
       await mockAuthAccounts(page, [
         { provider: 'discord', providerAccountId: '123', createdAt: '2025-01-01T00:00:00.000Z' },
       ]);
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       await page.getByRole('button', { name: 'Delete account' }).click();
       await expect(page.getByRole('heading', { name: 'Delete account?' })).toBeVisible();
@@ -410,7 +411,7 @@ test.describe('Account page', () => {
         return route.fulfill({ json: testUser });
       });
 
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       await page.getByRole('button', { name: 'Delete account' }).click();
       await page.getByRole('button', { name: 'Delete my account' }).click();
@@ -427,7 +428,7 @@ test.describe('Account page', () => {
       await mockAuthAccounts(page, [
         { provider: 'discord', providerAccountId: '123', createdAt: '2025-01-01T00:00:00.000Z' },
       ]);
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       await expect(page.getByRole('heading', { name: 'Account' })).toBeVisible();
       await expect(page.getByText('Regular User').nth(1)).toBeVisible();

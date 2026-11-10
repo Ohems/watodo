@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import {
   adminUser,
+  gotoApp,
   interceptMutation,
   mockCommonApis,
   mockNotifications,
@@ -63,7 +64,7 @@ test.describe('Home page', () => {
       ];
       await mockCommonApis(page, adminUser());
       await mockNotifications(page, notifications, 1);
-      await page.goto('/');
+      await gotoApp(page, '/');
 
       await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible();
       await expect(page.getByText('Notifications')).toBeVisible();
@@ -101,7 +102,7 @@ test.describe('Home page', () => {
       ];
       await mockCommonApis(page, adminUser());
       await mockOccurrences(page, occurrences);
-      await page.goto('/');
+      await gotoApp(page, '/');
 
       await expect(page.getByText('Upcoming events')).toBeVisible();
 
@@ -122,7 +123,7 @@ test.describe('Home page', () => {
     test('shows empty state when no notifications', async ({ page }) => {
       await mockCommonApis(page, adminUser());
       await mockNotifications(page, [], 0);
-      await page.goto('/');
+      await gotoApp(page, '/');
 
       await expect(page.getByText('No notifications')).toBeVisible();
       await expect(page.getByRole('button', { name: 'Mark all as read' })).toHaveCount(0);
@@ -131,7 +132,7 @@ test.describe('Home page', () => {
     test('shows empty state when no upcoming events', async ({ page }) => {
       await mockCommonApis(page, adminUser());
       await mockOccurrences(page, []);
-      await page.goto('/');
+      await gotoApp(page, '/');
 
       await expect(page.getByText('No upcoming events')).toBeVisible();
     });
@@ -158,7 +159,7 @@ test.describe('Home page', () => {
       ];
       await mockCommonApis(page, adminUser());
       await mockOccurrences(page, occurrences);
-      await page.goto('/');
+      await gotoApp(page, '/');
 
       await expect(page.getByText('Visible Event')).toBeVisible();
       await expect(page.getByText('Cancelled Event')).toHaveCount(0);
@@ -171,7 +172,7 @@ test.describe('Home page', () => {
         captured.push(route.request().url());
         return route.fulfill({ json: [] });
       });
-      await page.goto('/');
+      await gotoApp(page, '/');
 
       await expect(page.getByText('Upcoming events')).toBeVisible();
       await expect
@@ -238,7 +239,7 @@ test.describe('Home page', () => {
       ];
       await mockCommonApis(page, adminUser());
       await mockOccurrences(page, occurrences);
-      await page.goto('/');
+      await gotoApp(page, '/');
 
       // Slot status indicators: 1/2 filled for the managed event (red, critical
       // unfilled), 1/1 filled for the participant event (green).
@@ -274,7 +275,7 @@ test.describe('Home page', () => {
         isRead: true,
       });
 
-      await page.goto('/');
+      await gotoApp(page, '/');
       await expect(page.getByText('New event comment')).toBeVisible();
 
       await page.getByText('New event comment').click();
@@ -309,7 +310,7 @@ test.describe('Home page', () => {
         { updated: 1 },
       );
 
-      await page.goto('/');
+      await gotoApp(page, '/');
       await page.getByRole('button', { name: 'Mark all as read' }).click();
 
       await expect
@@ -334,7 +335,7 @@ test.describe('Home page', () => {
       ];
       await mockCommonApis(page, adminUser());
       await mockOccurrences(page, occurrences);
-      await page.goto('/');
+      await gotoApp(page, '/');
 
       await expect(page.getByText('My Event')).toBeVisible();
       await page.getByText('My Event').click();
@@ -351,7 +352,7 @@ test.describe('Home page', () => {
       // the backend being down.
       await page.route('**/api/v1/notifications*', route => route.abort());
       await page.route('**/api/v1/event-series/occurrences*', route => route.abort());
-      await page.goto('/');
+      await gotoApp(page, '/');
 
       await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible();
       // Both cards communicate that their data could not be loaded.
@@ -378,7 +379,7 @@ test.describe('Home page', () => {
       ];
       await mockCommonApis(page, regularUser());
       await mockNotifications(page, notifications, 1);
-      await page.goto('/');
+      await gotoApp(page, '/');
 
       await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible();
       await expect(page.getByText('New event comment')).toBeVisible();

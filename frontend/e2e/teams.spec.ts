@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import {
   adminUser,
   createOrganization,
+  gotoApp,
   interceptMutation,
   mockCommonApis,
   mockEventSeriesManagement,
@@ -117,7 +118,7 @@ test.describe('Teams page', () => {
       page,
     }) => {
       await setupTeamsPage(page);
-      await page.goto('/teams');
+      await gotoApp(page, '/teams');
 
       await expect(page.getByRole('heading', { name: 'Teams' })).toBeVisible();
       await expect(page.getByText('Setup Team')).toBeVisible();
@@ -132,7 +133,7 @@ test.describe('Teams page', () => {
 
     test('shows empty state when no teams', async ({ page }) => {
       await setupTeamsPage(page, adminUser(), []);
-      await page.goto('/teams');
+      await gotoApp(page, '/teams');
 
       await expect(page.getByText('No results found')).toBeVisible();
     });
@@ -141,21 +142,21 @@ test.describe('Teams page', () => {
   test.describe('permission-based UI', () => {
     test('admin sees the Add button', async ({ page }) => {
       await setupTeamsPage(page, adminUser());
-      await page.goto('/teams');
+      await gotoApp(page, '/teams');
 
       await expect(page.getByRole('button', { name: 'Add' })).toBeVisible();
     });
 
     test('user with team-management:write sees the Add button', async ({ page }) => {
       await setupTeamsPage(page, userWithPermissions(['team-management:write']));
-      await page.goto('/teams');
+      await gotoApp(page, '/teams');
 
       await expect(page.getByRole('button', { name: 'Add' })).toBeVisible();
     });
 
     test('regular user does not see the Add button', async ({ page }) => {
       await setupTeamsPage(page, regularUser());
-      await page.goto('/teams');
+      await gotoApp(page, '/teams');
 
       await expect(page.getByRole('button', { name: 'Add' })).toHaveCount(0);
       await expect(page.getByText('Setup Team')).toBeVisible();
@@ -184,7 +185,7 @@ test.describe('Teams page', () => {
         newTeam,
       );
 
-      await page.goto('/teams');
+      await gotoApp(page, '/teams');
       await page.getByRole('button', { name: 'Add' }).click();
 
       await expect(page.getByRole('heading', { name: 'New team' })).toBeVisible();
@@ -220,7 +221,7 @@ test.describe('Teams page', () => {
         newTeam,
       );
 
-      await page.goto('/teams');
+      await gotoApp(page, '/teams');
       await page.getByRole('button', { name: 'Add' }).click();
       await page.getByRole('textbox', { name: 'Name' }).fill('Setup Crew');
 
@@ -246,7 +247,7 @@ test.describe('Teams page', () => {
   test.describe('navigation', () => {
     test('clicking a team row navigates to team management', async ({ page }) => {
       await setupTeamsPage(page);
-      await page.goto('/teams');
+      await gotoApp(page, '/teams');
 
       await page.getByText('Setup Team').click();
       await expect(page).toHaveURL('/teams/team-1');
@@ -258,7 +259,7 @@ test.describe('Team Management page', () => {
   test.describe('data display', () => {
     test('shows team details, leader, work roles, event series and members', async ({ page }) => {
       await setupTeamDetail(page);
-      await page.goto('/teams/team-1');
+      await gotoApp(page, '/teams/team-1');
 
       await expect(page.getByRole('heading', { name: 'Setup Team' })).toBeVisible();
       await expect(page.getByText('Handles venue setup')).toBeVisible();
@@ -282,7 +283,7 @@ test.describe('Team Management page', () => {
   test.describe('permission-based UI', () => {
     test('admin sees Edit button and Add member button', async ({ page }) => {
       await setupTeamDetail(page, adminUser());
-      await page.goto('/teams/team-1');
+      await gotoApp(page, '/teams/team-1');
 
       await expect(page.getByRole('button', { name: 'Edit' })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Add member' })).toBeVisible();
@@ -291,7 +292,7 @@ test.describe('Team Management page', () => {
     test('regular user sees no edit/add buttons', async ({ page }) => {
       // user-2 (Bob Brown) is a plain member without the manager toggle.
       await setupTeamDetail(page, regularUser({ id: 'user-2', name: 'Bob Brown' }));
-      await page.goto('/teams/team-1');
+      await gotoApp(page, '/teams/team-1');
 
       await expect(page.getByRole('button', { name: 'Edit' })).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Add member' })).toHaveCount(0);
@@ -308,7 +309,7 @@ test.describe('Team Management page', () => {
       // user-1 (Alice Anderson) has the manager toggle on team-1 but no
       // team-management permissions.
       await setupTeamDetail(page, userWithPermissions(['events:read']));
-      await page.goto('/teams/team-1');
+      await gotoApp(page, '/teams/team-1');
 
       await expect(page.getByRole('button', { name: 'Edit' })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Add member' })).toBeVisible();
@@ -342,7 +343,7 @@ test.describe('Team Management page', () => {
         return route.fulfill({ json: mockTeamDetail });
       });
 
-      await page.goto('/teams/team-1');
+      await gotoApp(page, '/teams/team-1');
 
       await page.getByRole('button', { name: 'Edit' }).click();
       await expect(page.getByRole('heading', { name: 'Edit team' })).toBeVisible();
@@ -394,7 +395,7 @@ test.describe('Team Management page', () => {
         return route.fulfill({ json: mockTeamDetail });
       });
 
-      await page.goto('/teams/team-1');
+      await gotoApp(page, '/teams/team-1');
 
       await page.getByRole('button', { name: 'Edit' }).click();
       const nameInput = page.getByRole('textbox').first();
@@ -426,7 +427,7 @@ test.describe('Team Management page', () => {
         newMember,
       );
 
-      await page.goto('/teams/team-1');
+      await gotoApp(page, '/teams/team-1');
 
       await page.getByRole('button', { name: 'Add member' }).click();
       await expect(page.getByRole('heading', { name: 'Add member' })).toBeVisible();
@@ -455,7 +456,7 @@ test.describe('Team Management page', () => {
         { ...mockMembers[1], isManager: true },
       );
 
-      await page.goto('/teams/team-1');
+      await gotoApp(page, '/teams/team-1');
 
       const toggle = page.getByRole('switch', { name: 'Manager: Bob Brown' });
       await expect(toggle).not.toBeChecked();
@@ -476,7 +477,7 @@ test.describe('Team Management page', () => {
         'DELETE',
       );
 
-      await page.goto('/teams/team-1');
+      await gotoApp(page, '/teams/team-1');
 
       // Find the delete button in Bob's row
       const bobRow = page.locator('tr', { hasText: 'Bob Brown' });
@@ -495,7 +496,7 @@ test.describe('Team Management page', () => {
   test.describe('navigation', () => {
     test('back to list button returns to teams', async ({ page }) => {
       await setupTeamDetail(page, adminUser());
-      await page.goto('/teams/team-1');
+      await gotoApp(page, '/teams/team-1');
 
       await page.getByRole('button', { name: 'Back to teams' }).click();
       await expect(page).toHaveURL('/teams');

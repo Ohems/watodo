@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import {
   adminUser,
   createOrganization,
+  gotoApp,
   interceptMutation,
   mockCommonApis,
   mockOrgApis,
@@ -198,7 +199,7 @@ async function setupOccurrencePage(
     url => url.pathname === '/api/v1/event-occurrences/9' && url.search === '',
     route => route.fulfill({ json: mockDetail }),
   );
-  await page.goto('/events/occurrences/9');
+  await gotoApp(page, '/events/occurrences/9');
   await waitForAppReady(page);
 }
 

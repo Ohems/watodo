@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import {
   adminUser,
   createOrganization,
+  gotoApp,
   interceptMutation,
   mockCommonApis,
   pickDate,
@@ -58,7 +59,7 @@ test.describe('Absences page', () => {
     test('shows the absences from the API in the list and on the calendar', async ({ page }) => {
       await mockCommonApis(page, adminUser({ name: 'Alice' }), [testOrg]);
       await mockAbsences(page);
-      await page.goto('/absences');
+      await gotoApp(page, '/absences');
 
       await expect(page.getByRole('heading', { name: 'Absences', exact: true })).toBeVisible();
       await expect(page.getByText('Sick', { exact: true })).toBeVisible();
@@ -74,7 +75,7 @@ test.describe('Absences page', () => {
     test('shows an empty state when there are no absences', async ({ page }) => {
       await mockCommonApis(page, adminUser(), [testOrg]);
       await mockAbsences(page, []);
-      await page.goto('/absences');
+      await gotoApp(page, '/absences');
 
       await expect(page.getByText('No absences yet')).toBeVisible();
     });
@@ -84,7 +85,7 @@ test.describe('Absences page', () => {
     test('a regular user without permissions can also see and add absences', async ({ page }) => {
       await mockCommonApis(page, regularUser(), [testOrg]);
       await mockAbsences(page);
-      await page.goto('/absences');
+      await gotoApp(page, '/absences');
 
       await expect(page.getByRole('heading', { name: 'Absences', exact: true })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Add absence' })).toBeVisible();
@@ -98,7 +99,7 @@ test.describe('Absences page', () => {
     }) => {
       await mockCommonApis(page, adminUser({ weekStart: 'monday' }), [testOrg]);
       await mockAbsences(page, []);
-      await page.goto('/absences');
+      await gotoApp(page, '/absences');
 
       await page.getByRole('button', { name: 'Add absence' }).click();
       await page.getByLabel('Start date').click();
@@ -125,7 +126,7 @@ test.describe('Absences page', () => {
         startDate: start,
         endDate: end,
       });
-      await page.goto('/absences');
+      await gotoApp(page, '/absences');
 
       await page.getByRole('button', { name: 'Add absence' }).click();
       const dialog = page.getByRole('dialog');
@@ -157,7 +158,7 @@ test.describe('Absences page', () => {
         'DELETE',
         { success: true },
       );
-      await page.goto('/absences');
+      await gotoApp(page, '/absences');
 
       await page.getByRole('button', { name: 'Delete' }).first().click();
 
@@ -171,7 +172,7 @@ test.describe('Absences page', () => {
     test('the user menu contains Absences and navigates to /absences', async ({ page }) => {
       await mockCommonApis(page, adminUser(), [testOrg]);
       await mockAbsences(page);
-      await page.goto('/');
+      await gotoApp(page, '/');
 
       await settingsButton(page).click();
       await expect(page.getByRole('menuitem', { name: 'Absences' })).toBeVisible();
@@ -200,7 +201,7 @@ test.describe('Home quick actions', () => {
       startDate: start,
       endDate: end,
     });
-    await page.goto('/');
+    await gotoApp(page, '/');
 
     await page.getByRole('button', { name: 'Add absence' }).click();
     const dialog = page.getByRole('dialog');

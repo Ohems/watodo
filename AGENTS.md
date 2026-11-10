@@ -81,7 +81,7 @@ Run from `frontend/`:
 
 | Command | Description |
 |---------|-------------|
-| `npm run test:e2e` | Run Playwright E2E tests |
+| `npm run test:e2e` | Run Playwright E2E tests (builds the frontend first; for direct `npx playwright test` runs, build with `npm run build -w frontend` beforehand) |
 | `npm run test:e2e:headed` | Run E2E tests in headed mode |
 | `npm run test:e2e:ui` | Run E2E tests with Playwright UI |
 | `npm run test:all` | Run unit tests + E2E tests |
@@ -522,14 +522,19 @@ Group frontend tests by the page or component being tested, for example `Account
 
 - Tests live in `frontend/e2e/`.
 - Config: `frontend/playwright.config.ts` (3 browsers: chromium, firefox, webkit).
-- Playwright starts its own frontend instance before tests: a production build
-  served by `vite preview` on port 4173 (so it never clashes with a dev server
-  on 5173). See `frontend/playwright.config.ts` (`webServer`). No backend is
-  needed: every API call the pages make is mocked via `page.route` (see
-  `e2e/helpers.ts`; `mockCommonApis` includes the auth provider list, and the
-  specs that do not use it mock it in their own `beforeEach`). The frontend
-  has no hardcoded provider fallback.
-- Run: `npm run test:e2e -w frontend`
+- Playwright starts its own frontend instance before tests: the production
+  build in `frontend/dist/` served by `vite preview` on port 4173 (so it never
+  clashes with a dev server on 5173). See `frontend/playwright.config.ts`
+  (`webServer`). The build is deliberately not part of the Playwright command:
+  always build the frontend before running Playwright tests with
+  `npm run build -w frontend` (or use `npm run test:e2e -w frontend`, which
+  builds first). Running `npx playwright test` directly without a prior build
+  serves a stale or missing `dist/`.
+  No backend is needed: every API call the pages make is mocked via
+  `page.route` (see `e2e/helpers.ts`; `mockCommonApis` includes the auth
+  provider list, and the specs that do not use it mock it in their own
+  `beforeEach`). The frontend has no hardcoded provider fallback.
+- Run: `npm run test:e2e -w frontend` (builds first)
 - Install browsers first: `npm run playwright:install -w frontend`
 
 #### E2E test requirements

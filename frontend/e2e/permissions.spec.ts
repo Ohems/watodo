@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import {
   adminUser,
   createOrganization,
+  gotoApp,
   mockCommonApis,
   mockMyWorkRolesAndCerts,
   mockOrgApis,
@@ -89,7 +90,7 @@ test.describe('Permission matrix', () => {
     for (const { label, user, expectEdit } of permissions) {
       test(`${label} ${expectEdit ? 'sees' : 'does not see'} the Edit button`, async ({ page }) => {
         await mockCommonApis(page, user, [testOrg]);
-        await page.goto('/organization/general');
+        await gotoApp(page, '/organization/general');
 
         await expect(page.getByRole('heading', { name: 'Test Org' })).toBeVisible();
         if (expectEdit) {
@@ -116,7 +117,7 @@ test.describe('Permission matrix', () => {
       test(`${label} ${expectAdd ? 'sees' : 'does not see'} the Add button`, async ({ page }) => {
         await mockCommonApis(page, user, [testOrg]);
         await mockOrgApis(page, ORG_ID, { sites: mockSites });
-        await page.goto('/organization/sites');
+        await gotoApp(page, '/organization/sites');
 
         await expect(page.getByText('Main Hall').first()).toBeVisible();
         if (expectAdd) {
@@ -143,7 +144,7 @@ test.describe('Permission matrix', () => {
       test(`${label} ${expectAdd ? 'sees' : 'does not see'} the Add button`, async ({ page }) => {
         await mockCommonApis(page, user, [testOrg]);
         await mockOrgApis(page, ORG_ID, { workRoles: mockWorkRoles });
-        await page.goto('/organization/work-roles');
+        await gotoApp(page, '/organization/work-roles');
 
         await expect(page.getByText('Setup Crew')).toBeVisible();
         if (expectAdd) {
@@ -170,7 +171,7 @@ test.describe('Permission matrix', () => {
       test(`${label} ${expectAdd ? 'sees' : 'does not see'} the Add button`, async ({ page }) => {
         await mockCommonApis(page, user, [testOrg]);
         await mockOrgApis(page, ORG_ID, { teams: mockTeams });
-        await page.goto('/teams');
+        await gotoApp(page, '/teams');
 
         await expect(page.getByText('Setup Team')).toBeVisible();
         if (expectAdd) {
@@ -201,21 +202,21 @@ test.describe('Permission matrix', () => {
 
     test('admin sees Edit button for site', async ({ page }) => {
       await setupSiteConfig(page, adminUser());
-      await page.goto('/organization/sites/site-1');
+      await gotoApp(page, '/organization/sites/site-1');
 
       await expect(page.getByRole('button', { name: 'Edit' })).toBeVisible();
     });
 
     test('site-management:write user sees Edit button for site', async ({ page }) => {
       await setupSiteConfig(page, userWithPermissions(['site-management:write']));
-      await page.goto('/organization/sites/site-1');
+      await gotoApp(page, '/organization/sites/site-1');
 
       await expect(page.getByRole('button', { name: 'Edit' })).toBeVisible();
     });
 
     test('regular user does not see Edit button for site', async ({ page }) => {
       await setupSiteConfig(page, regularUser());
-      await page.goto('/organization/sites/site-1');
+      await gotoApp(page, '/organization/sites/site-1');
 
       await expect(page.getByRole('button', { name: 'Edit' })).toHaveCount(0);
       await expect(page.getByRole('heading', { name: 'Main Hall' })).toBeVisible();
@@ -225,7 +226,7 @@ test.describe('Permission matrix', () => {
       page,
     }) => {
       await setupSiteConfig(page, userWithPermissions(['room-management:write']));
-      await page.goto('/organization/sites/site-1');
+      await gotoApp(page, '/organization/sites/site-1');
 
       // No site edit
       await expect(page.getByRole('button', { name: 'Edit' })).toHaveCount(0);
@@ -241,7 +242,7 @@ test.describe('Permission matrix', () => {
       await mockCommonApis(page, regularUser(), [testOrg]);
       await mockOrgApis(page, ORG_ID, { workRoles: mockWorkRoles, certifications: [] });
       await mockMyWorkRolesAndCerts(page, ORG_ID, { workRoles: [], certifications: [] });
-      await page.goto('/profile');
+      await gotoApp(page, '/profile');
 
       await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible();
       await expect(page.getByPlaceholder('Add a role...')).toBeVisible();
@@ -252,7 +253,7 @@ test.describe('Permission matrix', () => {
     test('any authenticated user can view contacts', async ({ page }) => {
       await mockCommonApis(page, regularUser(), [testOrg]);
       await mockUsersList(page, mockUsers);
-      await page.goto('/users');
+      await gotoApp(page, '/users');
 
       await expect(page.getByText('Alice Anderson')).toBeVisible();
     });
@@ -262,7 +263,7 @@ test.describe('Permission matrix', () => {
     test('any authenticated user can access account page', async ({ page }) => {
       await mockCommonApis(page, regularUser(), [testOrg]);
       await page.route('**/api/v1/users/@me/auth-accounts', route => route.fulfill({ json: [] }));
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       await expect(page.getByRole('heading', { name: 'Account' })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Edit' })).toBeVisible();
@@ -272,7 +273,7 @@ test.describe('Permission matrix', () => {
   test.describe('Home page', () => {
     test('any authenticated user sees home page', async ({ page }) => {
       await mockCommonApis(page, regularUser(), [testOrg]);
-      await page.goto('/');
+      await gotoApp(page, '/');
 
       await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible();
     });

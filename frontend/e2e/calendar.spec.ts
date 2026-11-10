@@ -10,7 +10,7 @@ import {
   subMonths,
   subWeeks,
 } from 'date-fns';
-import { mockAuthProviders } from './helpers.js';
+import { gotoApp, mockAuthProviders } from './helpers.js';
 
 const ORG_ID = 'org-1';
 
@@ -101,7 +101,7 @@ async function switchView(page: Page, name: 'Month' | 'Week' | 'Day' | 'Agenda')
 
 async function openCalendar(page: Page, user: typeof mockUser = mockUser) {
   await mockApi(page, user);
-  await page.goto('/events/calendar');
+  await gotoApp(page, '/events/calendar');
   await expect(page.locator('.rbc-calendar')).toBeVisible();
   await expect(toolbarLabel(page)).toHaveText(monthLabel(new Date()));
 }

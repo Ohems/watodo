@@ -20,6 +20,11 @@ export default defineConfig({
     baseURL: 'http://localhost:4173',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
+    // Emulate prefers-reduced-motion: Mantine disables its transitions under
+    // reduced motion, so Playwright's actionability checks (which wait for
+    // elements to stop animating) resolve immediately instead of waiting out
+    // every CSS transition.
+    reducedMotion: 'reduce',
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
@@ -28,10 +33,13 @@ export default defineConfig({
   ],
   webServer: [
     {
-      // Dedicated frontend for the tests: a production build served by
-      // `vite preview` on port 4173. Always started fresh (rebuild included),
-      // never reusing another instance, so tests always run current code.
-      command: 'npm run build && npm run preview -- --port 4173 --strictPort',
+      // Dedicated frontend for the tests: the production build in dist/
+      // served by `vite preview` on port 4173. The build is NOT part of this
+      // command on purpose: building on every `playwright test` invocation is
+      // slow. Build once before running the tests (`npm run build -w frontend`,
+      // or just use `npm run test:e2e -w frontend`, which builds first). The
+      // server is always started fresh, never reusing another instance.
+      command: 'npm run preview -- --port 4173 --strictPort',
       url: 'http://localhost:4173',
       reuseExistingServer: false,
       timeout: 120 * 1000,

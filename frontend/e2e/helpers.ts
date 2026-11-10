@@ -476,6 +476,15 @@ export async function interceptMutation(
 // Navigation helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Navigates to an app route. Uses `domcontentloaded` instead of the default
+ * `load`: waiting for full load (fonts, images, ...) only slows the test
+ * down, and `waitForAppReady` already waits for a concrete element afterwards.
+ */
+export async function gotoApp(page: Page, url: string): Promise<void> {
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
+}
+
 /** Waits for the app to finish loading (spinner gone, content visible). */
 export async function waitForAppReady(page: Page): Promise<void> {
   // Wait for the NavBar to appear (indicates authenticated app is loaded)

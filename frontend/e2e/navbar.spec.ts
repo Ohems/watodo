@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { adminUser, createOrganization, mockCommonApis } from './helpers.js';
+import { adminUser, createOrganization, gotoApp, mockCommonApis } from './helpers.js';
 
 const testOrg = createOrganization({ name: 'Acme Events' });
 const secondOrg = createOrganization({ id: 'org-2', name: 'Beta Org' });
@@ -10,7 +10,7 @@ test.describe('NavBar', () => {
       page,
     }) => {
       await mockCommonApis(page, adminUser({ name: 'Alice' }), [testOrg, secondOrg]);
-      await page.goto('/');
+      await gotoApp(page, '/');
 
       // Logo
       await expect(page.getByAltText('WATODO').first()).toBeVisible();
@@ -30,7 +30,7 @@ test.describe('NavBar', () => {
 
     test('shows the active organization in the selector', async ({ page }) => {
       await mockCommonApis(page, adminUser(), [testOrg, secondOrg]);
-      await page.goto('/');
+      await gotoApp(page, '/');
 
       const orgSelect = page.getByRole('combobox', { name: 'Select organisation' });
       await expect(orgSelect).toHaveValue('Acme Events');
@@ -40,7 +40,7 @@ test.describe('NavBar', () => {
   test.describe('navigation', () => {
     test('clicking Home navigates to /', async ({ page }) => {
       await mockCommonApis(page, adminUser(), [testOrg]);
-      await page.goto('/users');
+      await gotoApp(page, '/users');
 
       await page.getByRole('link', { name: 'Home' }).click();
       await expect(page).toHaveURL('/');
@@ -48,7 +48,7 @@ test.describe('NavBar', () => {
 
     test('clicking Teams navigates to /teams', async ({ page }) => {
       await mockCommonApis(page, adminUser(), [testOrg]);
-      await page.goto('/');
+      await gotoApp(page, '/');
 
       await page.getByRole('link', { name: 'Teams' }).click();
       await expect(page).toHaveURL('/teams');
@@ -56,7 +56,7 @@ test.describe('NavBar', () => {
 
     test('Events dropdown shows Calendar and Management links', async ({ page }) => {
       await mockCommonApis(page, adminUser(), [testOrg]);
-      await page.goto('/');
+      await gotoApp(page, '/');
 
       // Hover over Events to open dropdown
       await page.getByRole('button', { name: 'Events' }).hover();
@@ -69,7 +69,7 @@ test.describe('NavBar', () => {
       page,
     }) => {
       await mockCommonApis(page, adminUser(), [testOrg]);
-      await page.goto('/');
+      await gotoApp(page, '/');
 
       await page.getByRole('button', { name: 'Organisation' }).hover();
 
@@ -81,7 +81,7 @@ test.describe('NavBar', () => {
 
     test('clicking Calendar in Events dropdown navigates to calendar', async ({ page }) => {
       await mockCommonApis(page, adminUser(), [testOrg]);
-      await page.goto('/');
+      await gotoApp(page, '/');
 
       await page.getByRole('button', { name: 'Events' }).hover();
       await page.getByRole('menuitem', { name: 'Calendar' }).click();
@@ -97,7 +97,7 @@ test.describe('NavBar', () => {
 
     test('clicking the avatar opens the settings menu', async ({ page }) => {
       await mockCommonApis(page, adminUser(), [testOrg]);
-      await page.goto('/');
+      await gotoApp(page, '/');
 
       await settingsButton(page).click();
 
@@ -108,7 +108,7 @@ test.describe('NavBar', () => {
 
     test('clicking Profile navigates to /profile', async ({ page }) => {
       await mockCommonApis(page, adminUser(), [testOrg]);
-      await page.goto('/');
+      await gotoApp(page, '/');
 
       await settingsButton(page).click();
       await page.getByRole('menuitem', { name: 'Profile' }).click();
@@ -117,7 +117,7 @@ test.describe('NavBar', () => {
 
     test('clicking Account navigates to /account', async ({ page }) => {
       await mockCommonApis(page, adminUser(), [testOrg]);
-      await page.goto('/');
+      await gotoApp(page, '/');
 
       await settingsButton(page).click();
       await page.getByRole('menuitem', { name: 'Account' }).click();
@@ -139,7 +139,7 @@ test.describe('NavBar', () => {
         return route.fulfill({ json: adminUser() });
       });
 
-      await page.goto('/');
+      await gotoApp(page, '/');
       await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible();
 
       await settingsButton(page).click();
@@ -152,7 +152,7 @@ test.describe('NavBar', () => {
   test.describe('organization switching', () => {
     test('switching organization updates the selector', async ({ page }) => {
       await mockCommonApis(page, adminUser(), [testOrg, secondOrg]);
-      await page.goto('/');
+      await gotoApp(page, '/');
 
       const orgSelect = page.getByRole('combobox', { name: 'Select organisation' });
       await expect(orgSelect).toHaveValue('Acme Events');
@@ -169,7 +169,7 @@ test.describe('NavBar', () => {
 test.describe('Error page (404)', () => {
   test('shows error page for unknown routes when authenticated', async ({ page }) => {
     await mockCommonApis(page, adminUser(), [testOrg]);
-    await page.goto('/nonexistent-route');
+    await gotoApp(page, '/nonexistent-route');
 
     await expect(page.getByRole('heading', { name: 'Oops!' })).toBeVisible();
     await expect(page.getByText(/was not found/)).toBeVisible();
@@ -184,7 +184,7 @@ test.describe('No Organization page', () => {
     await page.route(`**/api/v1/organizations/${''}/my/work-roles`, route =>
       route.fulfill({ json: [] }),
     );
-    await page.goto('/profile');
+    await gotoApp(page, '/profile');
 
     await expect(
       page.getByText(
