@@ -4,14 +4,15 @@ import {
   Badge,
   Box,
   Button,
+  Card,
   Center,
   Checkbox,
   Group,
   Loader,
   MultiSelect,
-  Paper,
   Select,
   Stack,
+  Switch,
   Text,
   Textarea,
   TextInput,
@@ -25,16 +26,21 @@ import { useNavigate, useParams } from 'react-router-dom';
 import {
   getApiErrorMessage,
   useCreateEventInfoSlotMutation,
+  useCreateEventWorkRoleMutation,
   useDeleteEventInfoSlotMutation,
+  useDeleteEventWorkRoleMutation,
   useGetAllRoomsQuery,
   useGetAllSitesQuery,
+  useGetAllWorkRolesQuery,
   useGetCurrentUserQuery,
   useGetEventSeriesInfoSlotsQuery,
   useGetEventSeriesManagementQuery,
   useGetTeamsQuery,
+  useListEventWorkRolesQuery,
   useUpdateEventInfoSlotMutation,
   useUpdateEventSeriesConfigMutation,
   useUpdateEventSeriesMutation,
+  useUpdateEventWorkRoleMutation,
 } from '../../api/index.js';
 import { BookingConflictsAlert } from '../../components/BookingConflictsAlert/index.js';
 import { QueryError } from '../../components/QueryState/index.js';
@@ -97,17 +103,31 @@ function EventConfigPage() {
   const [editInfoSlotTitle, setEditInfoSlotTitle] = useState('');
   const [editInfoSlotDescription, setEditInfoSlotDescription] = useState('');
   const [editInfoSlotValue, setEditInfoSlotValue] = useState('');
+  // Work role slot template management (parent slots of the series).
+  const [newSlotWorkRoleId, setNewSlotWorkRoleId] = useState<number | null>(null);
+  const [newSlotIsCritical, setNewSlotIsCritical] = useState(false);
 
   const {
     data: infoSlots = [],
     isLoading: infoSlotsLoading,
     isError: infoSlotsError,
   } = useGetEventSeriesInfoSlotsQuery(validId ? seriesId : skipToken);
+  const {
+    data: parentSlots = [],
+    isLoading: slotsLoading,
+    isError: slotsError,
+  } = useListEventWorkRolesQuery(validId ? { seriesId, parentOnly: true } : skipToken);
+  const { data: workRoles = [], isError: workRolesError } = useGetAllWorkRolesQuery(
+    series?.organizationId ?? skipToken,
+  );
   const [createInfoSlot, { isLoading: creatingInfoSlot }] = useCreateEventInfoSlotMutation();
   const [updateInfoSlot, { isLoading: updatingInfoSlot }] = useUpdateEventInfoSlotMutation();
   const [deleteInfoSlot] = useDeleteEventInfoSlotMutation();
+  const [createSlot, { isLoading: creatingSlot }] = useCreateEventWorkRoleMutation();
+  const [updateSlot] = useUpdateEventWorkRoleMutation();
+  const [deleteSlot] = useDeleteEventWorkRoleMutation();
 
-  const runInfoSlotAction = async (action: () => Promise<unknown>) => {
+  const runTemplateAction = async (action: () => Promise<unknown>) => {
     setActionError(null);
     try {
       await action();
@@ -198,339 +218,471 @@ function EventConfigPage() {
 
   return (
     <Box p="md" maw={700} mx="auto">
-      <Paper shadow="sm" p="lg">
-        <Group justify="space-between" mb="md">
-          <Title order={3}>{series.title}</Title>
-          {canWrite && (
-            <Button variant="filled" onClick={handleSave} loading={saving}>
-              {t('common.save')}
-            </Button>
-          )}
-        </Group>
-
-        {error && (
-          <Alert color="red" variant="light" mb="md">
-            {error}
-          </Alert>
+      <Group justify="space-between" mb="md">
+        <Title order={3}>{series.title}</Title>
+        {canWrite && (
+          <Button variant="filled" onClick={handleSave} loading={saving}>
+            {t('common.save')}
+          </Button>
         )}
+      </Group>
 
+      {error && (
+        <Alert color="red" variant="light" mb="md">
+          {error}
+        </Alert>
+      )}
+
+      <Box mb="md">
+        <BookingConflictsAlert conflicts={conflicts} />
+      </Box>
+
+      {filtersError && (
         <Box mb="md">
-          <BookingConflictsAlert conflicts={conflicts} />
+          <QueryError />
         </Box>
+      )}
 
-        {filtersError && (
-          <Box mb="md">
-            <QueryError />
-          </Box>
-        )}
+      <Stack gap="md">
+        <Card shadow="sm" withBorder>
+          <Title order={5} mb="md">
+            {t('events.generalInfo')}
+          </Title>
+          <Stack gap="md">
+            <Box>
+              <Text size="sm" fw={500} c="dimmed" mb={4}>
+                {t('events.organization')}
+              </Text>
+              <Text>{series.organizationName}</Text>
+            </Box>
 
-        <Stack gap="md">
-          <Box>
-            <Text size="sm" fw={500} c="dimmed" mb={4}>
-              {t('events.organization')}
-            </Text>
-            <Text>{series.organizationName}</Text>
-          </Box>
+            <Box>
+              <Text size="sm" fw={500} c="dimmed" mb={4}>
+                {t('events.seriesTitle')}
+              </Text>
+              <Text>{series.title}</Text>
+            </Box>
 
-          <Box>
-            <Text size="sm" fw={500} c="dimmed" mb={4}>
-              {t('events.seriesTitle')}
-            </Text>
-            <Text>{series.title}</Text>
-          </Box>
-
-          <Box>
-            <Text size="sm" fw={500} c="dimmed" mb={4}>
-              {t('common.description')}
-            </Text>
-            {canWrite ? (
-              <>
-                <Textarea
-                  value={descriptionDraft}
-                  onChange={event => setDescriptionDraft(event.currentTarget.value)}
-                  minRows={2}
-                />
-                <Button
-                  size="xs"
-                  mt={4}
-                  variant="light"
-                  loading={savingDescription}
-                  aria-label={t('events.saveDescription')}
-                  onClick={handleSaveDescription}
-                >
-                  {t('common.save')}
-                </Button>
-              </>
-            ) : (
-              <Text style={{ whiteSpace: 'pre-wrap' }}>{series.description ?? '-'}</Text>
-            )}
-          </Box>
-
-          <Box>
-            <Group justify="space-between" mb={4} wrap="wrap">
-              <Title order={5}>{t('events.infoSlots')}</Title>
-              {infoSlotsError && <QueryError />}
-            </Group>
-            <Stack gap="sm">
-              {infoSlotsLoading ? (
-                <Loader size="xs" />
-              ) : (
-                infoSlots.map(infoSlot => (
-                  <Box key={infoSlot.id}>
-                    {editingInfoSlotId === infoSlot.id ? (
-                      <Stack gap="xs">
-                        <TextInput
-                          size="xs"
-                          value={editInfoSlotTitle}
-                          onChange={e => setEditInfoSlotTitle(e.currentTarget.value)}
-                          placeholder={t('events.infoSlotTitlePlaceholder')}
-                        />
-                        <TextInput
-                          size="xs"
-                          value={editInfoSlotDescription}
-                          onChange={e => setEditInfoSlotDescription(e.currentTarget.value)}
-                          placeholder={t('events.infoSlotDescriptionPlaceholder')}
-                        />
-                        <Textarea
-                          size="xs"
-                          autosize
-                          minRows={2}
-                          value={editInfoSlotValue}
-                          onChange={e => setEditInfoSlotValue(e.currentTarget.value)}
-                          placeholder={t('events.infoSlotDefaultValue')}
-                        />
-                        <Group gap="xs">
-                          <Button
-                            size="xs"
-                            disabled={editInfoSlotTitle.trim() === ''}
-                            loading={updatingInfoSlot}
-                            aria-label={t('events.saveInfoSlotValue')}
-                            onClick={() =>
-                              runInfoSlotAction(async () => {
-                                await updateInfoSlot({
-                                  seriesId: series.id,
-                                  infoSlotId: infoSlot.id,
-                                  data: {
-                                    title: editInfoSlotTitle.trim(),
-                                    description: editInfoSlotDescription,
-                                    value:
-                                      editInfoSlotValue.trim() === '' ? null : editInfoSlotValue,
-                                  },
-                                }).unwrap();
-                                setEditingInfoSlotId(null);
-                              })
-                            }
-                          >
-                            {t('common.save')}
-                          </Button>
-                          <Button
-                            size="xs"
-                            variant="subtle"
-                            onClick={() => setEditingInfoSlotId(null)}
-                          >
-                            {t('cancel')}
-                          </Button>
-                        </Group>
-                      </Stack>
-                    ) : (
-                      <Group gap="xs" wrap="wrap">
-                        <Text size="sm" fw={500}>
-                          {infoSlot.title}
-                        </Text>
-                        {infoSlot.description && (
-                          <Text size="xs" c="dimmed">
-                            {infoSlot.description}
-                          </Text>
-                        )}
-                        {canWrite && (
-                          <>
-                            <ActionIcon
-                              size="sm"
-                              variant="subtle"
-                              aria-label={t('events.editInfoSlot')}
-                              onClick={() => {
-                                setEditingInfoSlotId(infoSlot.id);
-                                setEditInfoSlotTitle(infoSlot.title);
-                                setEditInfoSlotDescription(infoSlot.description);
-                                setEditInfoSlotValue(infoSlot.value ?? '');
-                              }}
-                            >
-                              <IconPencil size={14} />
-                            </ActionIcon>
-                            <ActionIcon
-                              size="sm"
-                              variant="subtle"
-                              color="red"
-                              aria-label={t('events.deleteInfoSlot')}
-                              onClick={() =>
-                                runInfoSlotAction(() =>
-                                  deleteInfoSlot({
-                                    seriesId: series.id,
-                                    infoSlotId: infoSlot.id,
-                                  }).unwrap(),
-                                )
-                              }
-                            >
-                              <IconTrash size={14} />
-                            </ActionIcon>
-                          </>
-                        )}
-                      </Group>
-                    )}
-                  </Box>
-                ))
-              )}
-              {infoSlots.length === 0 && !infoSlotsLoading && (
-                <Text size="sm" c="dimmed">
-                  {t('events.noInfoSlots')}
-                </Text>
-              )}
-              {canWrite && (
-                <Group gap="xs" wrap="wrap">
-                  <TextInput
-                    size="sm"
-                    value={newInfoSlotTitle}
-                    onChange={e => setNewInfoSlotTitle(e.currentTarget.value)}
-                    placeholder={t('events.infoSlotTitlePlaceholder')}
-                    style={{ minWidth: 200 }}
-                  />
-                  <TextInput
-                    size="sm"
-                    value={newInfoSlotDescription}
-                    onChange={e => setNewInfoSlotDescription(e.currentTarget.value)}
-                    placeholder={t('events.infoSlotDescriptionPlaceholder')}
-                    style={{ minWidth: 200 }}
+            <Box>
+              <Text size="sm" fw={500} c="dimmed" mb={4}>
+                {t('common.description')}
+              </Text>
+              {canWrite ? (
+                <>
+                  <Textarea
+                    value={descriptionDraft}
+                    onChange={event => setDescriptionDraft(event.currentTarget.value)}
+                    minRows={2}
                   />
                   <Button
-                    size="sm"
+                    size="xs"
+                    mt={4}
                     variant="light"
-                    disabled={newInfoSlotTitle.trim() === ''}
-                    loading={creatingInfoSlot}
-                    onClick={() =>
-                      runInfoSlotAction(async () => {
-                        await createInfoSlot({
-                          seriesId: series.id,
-                          data: {
-                            title: newInfoSlotTitle.trim(),
-                            description: newInfoSlotDescription,
-                          },
-                        }).unwrap();
-                        setNewInfoSlotTitle('');
-                        setNewInfoSlotDescription('');
-                      })
-                    }
+                    loading={savingDescription}
+                    aria-label={t('events.saveDescription')}
+                    onClick={handleSaveDescription}
                   >
-                    {t('events.addInfoSlot')}
+                    {t('common.save')}
                   </Button>
-                </Group>
+                </>
+              ) : (
+                <Text style={{ whiteSpace: 'pre-wrap' }}>{series.description ?? '-'}</Text>
               )}
-            </Stack>
-          </Box>
+            </Box>
+          </Stack>
+        </Card>
 
-          <Box>
-            <Text size="sm" fw={500} c="dimmed" mb={4}>
-              {t('events.start')}
-            </Text>
-            <Text>{formatDateTime(series.start)}</Text>
-          </Box>
-
-          <Box>
-            <Text size="sm" fw={500} c="dimmed" mb={4}>
-              {t('events.durationMinutes')}
-            </Text>
-            <Text>{series.durationMinutes}</Text>
-          </Box>
-
-          <Box>
-            <Text size="sm" fw={500} c="dimmed" mb={4}>
-              {t('events.site')}
-            </Text>
-            {canWrite ? (
-              <Select
-                value={selectedSiteId}
-                onChange={value => {
-                  setSelectedSiteId(value);
-                  setSelectedRoomId(null);
-                  setReserveWholeSite(false);
-                }}
-                data={sites.map(s => ({ value: s.id, label: s.name }))}
-                placeholder={t('events.noSite')}
-                clearable
-              />
+        <Card shadow="sm" withBorder>
+          <Group justify="space-between" mb={4} wrap="wrap">
+            <Title order={5}>{t('events.workRoles')}</Title>
+            {(slotsError || workRolesError) && <QueryError />}
+          </Group>
+          <Text size="xs" c="dimmed" mb="sm">
+            {t('events.seriesWorkRolesHint')}
+          </Text>
+          <Stack gap="sm">
+            {slotsLoading ? (
+              <Loader size="xs" />
             ) : (
-              <Text>{series.siteName ?? t('events.noSite')}</Text>
-            )}
-          </Box>
-
-          {selectedSiteId && (
-            <>
-              <Box>
-                <Text size="sm" fw={500} c="dimmed" mb={4}>
-                  {t('events.room')}
-                </Text>
-                {canWrite ? (
-                  <Select
-                    value={selectedRoomId}
-                    onChange={setSelectedRoomId}
-                    data={availableRooms.map(r => ({ value: r.id, label: r.name }))}
-                    placeholder={t('events.roomUnclear')}
-                    clearable
-                  />
-                ) : (
-                  <Text>{series.roomName ?? t('events.roomUnclear')}</Text>
-                )}
-              </Box>
-
-              {!selectedRoomId && canWrite && (
-                <Checkbox
-                  label={t('events.reserveWholeSite')}
-                  checked={reserveWholeSite}
-                  onChange={e => setReserveWholeSite(e.currentTarget.checked)}
-                />
-              )}
-              {!canWrite && reserveWholeSite && !series.roomId && (
-                <Badge color="blue" variant="light">
-                  {t('events.wholeSiteReserved')}
-                </Badge>
-              )}
-            </>
-          )}
-
-          <Box>
-            <Text size="sm" fw={500} c="dimmed" mb={4}>
-              {t('events.assignedTeams')}
-            </Text>
-            {canWrite ? (
-              <MultiSelect
-                value={selectedTeamIds}
-                onChange={setSelectedTeamIds}
-                data={teams.map(team => ({ value: team.id, label: team.name }))}
-                placeholder={t('events.noTeams')}
-                clearable
-                searchable
-              />
-            ) : (
-              <Group gap="xs">
-                {series.teams.length > 0 ? (
-                  series.teams.map(team => (
-                    <Badge key={team.id} size="lg" variant="light">
-                      {team.name}
+              parentSlots.map(slot => (
+                <Group key={slot.id} gap="xs" wrap="wrap">
+                  <Text size="sm" fw={500}>
+                    {slot.workRoleName ?? slot.title}
+                  </Text>
+                  {slot.description && (
+                    <Text size="xs" c="dimmed">
+                      {slot.description}
+                    </Text>
+                  )}
+                  {slot.isCritical && (
+                    <Badge size="sm" color="red" variant="filled">
+                      {t('events.critical')}
                     </Badge>
-                  ))
-                ) : (
-                  <Text c="dimmed">{t('events.noTeams')}</Text>
-                )}
+                  )}
+                  {canWrite && (
+                    <>
+                      <Switch
+                        size="xs"
+                        label={t('events.criticalRole')}
+                        checked={slot.isCritical}
+                        onChange={() =>
+                          runTemplateAction(() =>
+                            updateSlot({
+                              seriesId: series.id,
+                              workRoleId: slot.id,
+                              data: { isCritical: !slot.isCritical },
+                            }).unwrap(),
+                          )
+                        }
+                      />
+                      <ActionIcon
+                        size="sm"
+                        variant="subtle"
+                        color="red"
+                        aria-label={t('events.deleteSlot')}
+                        onClick={() =>
+                          runTemplateAction(() =>
+                            deleteSlot({ seriesId: series.id, workRoleId: slot.id }).unwrap(),
+                          )
+                        }
+                      >
+                        <IconTrash size={14} />
+                      </ActionIcon>
+                    </>
+                  )}
+                </Group>
+              ))
+            )}
+            {parentSlots.length === 0 && !slotsLoading && (
+              <Text size="sm" c="dimmed">
+                {t('events.noRoleRequirements')}
+              </Text>
+            )}
+            {canWrite && (
+              <Group gap="xs" wrap="wrap">
+                <Select
+                  size="sm"
+                  placeholder={t('events.selectWorkRole')}
+                  data={workRoles.map(wr => ({ value: String(wr.id), label: wr.name }))}
+                  value={newSlotWorkRoleId !== null ? String(newSlotWorkRoleId) : null}
+                  onChange={value =>
+                    setNewSlotWorkRoleId(value ? Number.parseInt(value, 10) : null)
+                  }
+                  clearable
+                  style={{ minWidth: 180 }}
+                />
+                <Switch
+                  size="sm"
+                  label={t('events.criticalRole')}
+                  checked={newSlotIsCritical}
+                  onChange={event => setNewSlotIsCritical(event.currentTarget.checked)}
+                />
+                <Button
+                  size="sm"
+                  variant="light"
+                  disabled={newSlotWorkRoleId === null}
+                  loading={creatingSlot}
+                  onClick={() =>
+                    runTemplateAction(async () => {
+                      if (newSlotWorkRoleId === null) return;
+                      const wr = workRoles.find(w => w.id === newSlotWorkRoleId);
+                      await createSlot({
+                        seriesId: series.id,
+                        data: {
+                          title: wr?.name ?? 'Slot',
+                          isCritical: newSlotIsCritical,
+                          workRoleId: newSlotWorkRoleId,
+                        },
+                      }).unwrap();
+                      setNewSlotWorkRoleId(null);
+                      setNewSlotIsCritical(false);
+                    })
+                  }
+                >
+                  {t('events.addSlot')}
+                </Button>
               </Group>
             )}
-          </Box>
-        </Stack>
+          </Stack>
+        </Card>
 
-        <Box mt="lg">
-          <Button variant="subtle" onClick={() => navigate('/events/management')}>
-            {t('events.backToList')}
-          </Button>
-        </Box>
-      </Paper>
+        <Card shadow="sm" withBorder>
+          <Group justify="space-between" mb={4} wrap="wrap">
+            <Title order={5}>{t('events.infoSlots')}</Title>
+            {infoSlotsError && <QueryError />}
+          </Group>
+          <Stack gap="sm">
+            {infoSlotsLoading ? (
+              <Loader size="xs" />
+            ) : (
+              infoSlots.map(infoSlot => (
+                <Box key={infoSlot.id}>
+                  {editingInfoSlotId === infoSlot.id ? (
+                    <Stack gap="xs">
+                      <TextInput
+                        size="xs"
+                        value={editInfoSlotTitle}
+                        onChange={e => setEditInfoSlotTitle(e.currentTarget.value)}
+                        placeholder={t('events.infoSlotTitlePlaceholder')}
+                      />
+                      <TextInput
+                        size="xs"
+                        value={editInfoSlotDescription}
+                        onChange={e => setEditInfoSlotDescription(e.currentTarget.value)}
+                        placeholder={t('events.infoSlotDescriptionPlaceholder')}
+                      />
+                      <Textarea
+                        size="xs"
+                        autosize
+                        minRows={2}
+                        value={editInfoSlotValue}
+                        onChange={e => setEditInfoSlotValue(e.currentTarget.value)}
+                        placeholder={t('events.infoSlotDefaultValue')}
+                      />
+                      <Group gap="xs">
+                        <Button
+                          size="xs"
+                          disabled={editInfoSlotTitle.trim() === ''}
+                          loading={updatingInfoSlot}
+                          aria-label={t('events.saveInfoSlotValue')}
+                          onClick={() =>
+                            runTemplateAction(async () => {
+                              await updateInfoSlot({
+                                seriesId: series.id,
+                                infoSlotId: infoSlot.id,
+                                data: {
+                                  title: editInfoSlotTitle.trim(),
+                                  description: editInfoSlotDescription,
+                                  value: editInfoSlotValue.trim() === '' ? null : editInfoSlotValue,
+                                },
+                              }).unwrap();
+                              setEditingInfoSlotId(null);
+                            })
+                          }
+                        >
+                          {t('common.save')}
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="subtle"
+                          onClick={() => setEditingInfoSlotId(null)}
+                        >
+                          {t('cancel')}
+                        </Button>
+                      </Group>
+                    </Stack>
+                  ) : (
+                    <Group gap="xs" wrap="wrap">
+                      <Text size="sm" fw={500}>
+                        {infoSlot.title}
+                      </Text>
+                      {infoSlot.description && (
+                        <Text size="xs" c="dimmed">
+                          {infoSlot.description}
+                        </Text>
+                      )}
+                      {canWrite && (
+                        <>
+                          <ActionIcon
+                            size="sm"
+                            variant="subtle"
+                            aria-label={t('events.editInfoSlot')}
+                            onClick={() => {
+                              setEditingInfoSlotId(infoSlot.id);
+                              setEditInfoSlotTitle(infoSlot.title);
+                              setEditInfoSlotDescription(infoSlot.description);
+                              setEditInfoSlotValue(infoSlot.value ?? '');
+                            }}
+                          >
+                            <IconPencil size={14} />
+                          </ActionIcon>
+                          <ActionIcon
+                            size="sm"
+                            variant="subtle"
+                            color="red"
+                            aria-label={t('events.deleteInfoSlot')}
+                            onClick={() =>
+                              runTemplateAction(() =>
+                                deleteInfoSlot({
+                                  seriesId: series.id,
+                                  infoSlotId: infoSlot.id,
+                                }).unwrap(),
+                              )
+                            }
+                          >
+                            <IconTrash size={14} />
+                          </ActionIcon>
+                        </>
+                      )}
+                    </Group>
+                  )}
+                </Box>
+              ))
+            )}
+            {infoSlots.length === 0 && !infoSlotsLoading && (
+              <Text size="sm" c="dimmed">
+                {t('events.noInfoSlots')}
+              </Text>
+            )}
+            {canWrite && (
+              <Group gap="xs" wrap="wrap">
+                <TextInput
+                  size="sm"
+                  value={newInfoSlotTitle}
+                  onChange={e => setNewInfoSlotTitle(e.currentTarget.value)}
+                  placeholder={t('events.infoSlotTitlePlaceholder')}
+                  style={{ minWidth: 200 }}
+                />
+                <TextInput
+                  size="sm"
+                  value={newInfoSlotDescription}
+                  onChange={e => setNewInfoSlotDescription(e.currentTarget.value)}
+                  placeholder={t('events.infoSlotDescriptionPlaceholder')}
+                  style={{ minWidth: 200 }}
+                />
+                <Button
+                  size="sm"
+                  variant="light"
+                  disabled={newInfoSlotTitle.trim() === ''}
+                  loading={creatingInfoSlot}
+                  onClick={() =>
+                    runTemplateAction(async () => {
+                      await createInfoSlot({
+                        seriesId: series.id,
+                        data: {
+                          title: newInfoSlotTitle.trim(),
+                          description: newInfoSlotDescription,
+                        },
+                      }).unwrap();
+                      setNewInfoSlotTitle('');
+                      setNewInfoSlotDescription('');
+                    })
+                  }
+                >
+                  {t('events.addInfoSlot')}
+                </Button>
+              </Group>
+            )}
+          </Stack>
+        </Card>
+
+        <Card shadow="sm" withBorder>
+          <Title order={5} mb="md">
+            {t('events.schedule')}
+          </Title>
+          <Stack gap="md">
+            <Box>
+              <Text size="sm" fw={500} c="dimmed" mb={4}>
+                {t('events.start')}
+              </Text>
+              <Text>{formatDateTime(series.start)}</Text>
+            </Box>
+
+            <Box>
+              <Text size="sm" fw={500} c="dimmed" mb={4}>
+                {t('events.durationMinutes')}
+              </Text>
+              <Text>{series.durationMinutes}</Text>
+            </Box>
+          </Stack>
+        </Card>
+
+        <Card shadow="sm" withBorder>
+          <Title order={5} mb="md">
+            {t('events.location')}
+          </Title>
+          <Stack gap="md">
+            <Box>
+              <Text size="sm" fw={500} c="dimmed" mb={4}>
+                {t('events.site')}
+              </Text>
+              {canWrite ? (
+                <Select
+                  value={selectedSiteId}
+                  onChange={value => {
+                    setSelectedSiteId(value);
+                    setSelectedRoomId(null);
+                    setReserveWholeSite(false);
+                  }}
+                  data={sites.map(s => ({ value: s.id, label: s.name }))}
+                  placeholder={t('events.noSite')}
+                  clearable
+                />
+              ) : (
+                <Text>{series.siteName ?? t('events.noSite')}</Text>
+              )}
+            </Box>
+
+            {selectedSiteId && (
+              <>
+                <Box>
+                  <Text size="sm" fw={500} c="dimmed" mb={4}>
+                    {t('events.room')}
+                  </Text>
+                  {canWrite ? (
+                    <Select
+                      value={selectedRoomId}
+                      onChange={setSelectedRoomId}
+                      data={availableRooms.map(r => ({ value: r.id, label: r.name }))}
+                      placeholder={t('events.roomUnclear')}
+                      clearable
+                    />
+                  ) : (
+                    <Text>{series.roomName ?? t('events.roomUnclear')}</Text>
+                  )}
+                </Box>
+
+                {!selectedRoomId && canWrite && (
+                  <Checkbox
+                    label={t('events.reserveWholeSite')}
+                    checked={reserveWholeSite}
+                    onChange={e => setReserveWholeSite(e.currentTarget.checked)}
+                  />
+                )}
+                {!canWrite && reserveWholeSite && !series.roomId && (
+                  <Badge color="blue" variant="light">
+                    {t('events.wholeSiteReserved')}
+                  </Badge>
+                )}
+              </>
+            )}
+          </Stack>
+        </Card>
+
+        <Card shadow="sm" withBorder>
+          <Title order={5} mb="md">
+            {t('events.assignedTeams')}
+          </Title>
+          {canWrite ? (
+            <MultiSelect
+              value={selectedTeamIds}
+              onChange={setSelectedTeamIds}
+              data={teams.map(team => ({ value: team.id, label: team.name }))}
+              placeholder={t('events.noTeams')}
+              clearable
+              searchable
+            />
+          ) : (
+            <Group gap="xs">
+              {series.teams.length > 0 ? (
+                series.teams.map(team => (
+                  <Badge key={team.id} size="lg" variant="light">
+                    {team.name}
+                  </Badge>
+                ))
+              ) : (
+                <Text c="dimmed">{t('events.noTeams')}</Text>
+              )}
+            </Group>
+          )}
+        </Card>
+      </Stack>
+
+      <Box mt="lg">
+        <Button variant="subtle" onClick={() => navigate('/events/management')}>
+          {t('events.backToList')}
+        </Button>
+      </Box>
     </Box>
   );
 }

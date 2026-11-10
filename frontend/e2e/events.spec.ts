@@ -477,6 +477,160 @@ test.describe('Event Config page', () => {
       expect(captured[0].body).toMatchObject({ title: 'Sermon text' });
     });
   });
+
+  test.describe('work role slots (series template)', () => {
+    const mockCatalogWorkRole = {
+      id: 3,
+      name: 'Kitchen Helper',
+      description: 'Help prepare and serve food.',
+      organizationId: ORG_ID,
+      createdAt: '2025-01-01T00:00:00.000Z',
+      updatedAt: '2025-01-01T00:00:00.000Z',
+    };
+    const mockParentSlots = [
+      {
+        id: 5,
+        seriesId: 1,
+        occurrenceId: null,
+        inheritedFromWorkRoleId: null,
+        title: 'Kitchen Helper',
+        description: 'Help prepare and serve food.',
+        isCritical: false,
+        workRoleId: 3,
+        workRoleName: 'Kitchen Helper',
+        assignments: [],
+        createdAt: '2025-01-01T00:00:00.000Z',
+        updatedAt: '2025-01-01T00:00:00.000Z',
+      },
+      {
+        id: 6,
+        seriesId: 1,
+        occurrenceId: null,
+        inheritedFromWorkRoleId: null,
+        title: 'Setup',
+        description: '',
+        isCritical: true,
+        workRoleId: null,
+        workRoleName: null,
+        assignments: [],
+        createdAt: '2025-01-01T00:00:00.000Z',
+        updatedAt: '2025-01-01T00:00:00.000Z',
+      },
+    ];
+
+    async function setupEventConfigWithSlots(
+      page: import('@playwright/test').Page,
+      user = adminUser(),
+    ) {
+      await mockCommonApis(page, user, [testOrg]);
+      await mockOrgApis(page, ORG_ID, {
+        sites: mockSites,
+        rooms: mockRooms,
+        teams: mockTeams,
+        workRoles: [mockCatalogWorkRole],
+      });
+      await page.route(
+        url => url.pathname === '/api/v1/event-series/1/management',
+        route => route.fulfill({ json: mockSeriesDetail }),
+      );
+      await page.route(
+        url =>
+          url.pathname === '/api/v1/event-series/1/work-roles' &&
+          url.searchParams.get('parentOnly') === 'true',
+        route => route.fulfill({ json: mockParentSlots }),
+      );
+    }
+
+    test('lists the parent work role slots with critical badge', async ({ page }) => {
+      await setupEventConfigWithSlots(page);
+      await gotoApp(page, '/events/1');
+
+      await expect(page.getByRole('heading', { name: 'Work roles' })).toBeVisible();
+      await expect(page.getByText('Kitchen Helper')).toBeVisible();
+      await expect(page.getByText('Setup')).toBeVisible();
+      await expect(page.getByText('Critical', { exact: true })).toBeVisible();
+    });
+
+    test('regular user sees the slots read-only without add/toggle/delete controls', async ({
+      page,
+    }) => {
+      await setupEventConfigWithSlots(page, regularUser());
+      await gotoApp(page, '/events/1');
+
+      await expect(page.getByText('Kitchen Helper')).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Add work role slot' })).toHaveCount(0);
+      await expect(page.getByRole('switch', { name: 'Critical role' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Delete work role slot' })).toHaveCount(0);
+    });
+
+    test('admin can add a parent slot and POSTs it', async ({ page }) => {
+      await setupEventConfigWithSlots(page, adminUser());
+
+      const captured = await interceptMutation(
+        page,
+        '**/api/v1/event-series/1/work-roles',
+        'POST',
+        { ...mockParentSlots[0], id: 7 },
+      );
+
+      await gotoApp(page, '/events/1');
+      await page.getByRole('combobox', { name: 'Select work role' }).click();
+      await page.getByRole('option', { name: 'Kitchen Helper' }).click();
+      await page.getByRole('button', { name: 'Add work role slot' }).click();
+
+      await expect
+        .poll(() => captured.length, { message: 'POST work role slot was called' })
+        .toBe(1);
+      expect(captured[0].method).toBe('POST');
+      expect(captured[0].body).toMatchObject({
+        title: 'Kitchen Helper',
+        isCritical: false,
+        workRoleId: 3,
+      });
+    });
+
+    test('toggling the critical switch PATCHes the parent slot', async ({ page }) => {
+      await setupEventConfigWithSlots(page, adminUser());
+
+      const captured = await interceptMutation(
+        page,
+        '**/api/v1/event-series/1/work-roles/5',
+        'PATCH',
+        { ...mockParentSlots[0], isCritical: true },
+      );
+
+      await gotoApp(page, '/events/1');
+      // Wait for the slot list to render before clicking (avoids racing the refetch).
+      await expect(page.getByText('Kitchen Helper')).toBeVisible();
+      // First slot (id 5) is the non-critical one.
+      await page.getByRole('switch', { name: 'Critical role' }).first().click();
+
+      await expect
+        .poll(() => captured.length, { message: 'PATCH work role slot was called' })
+        .toBe(1);
+      expect(captured[0].method).toBe('PATCH');
+      expect(captured[0].body).toEqual({ isCritical: true });
+    });
+
+    test('admin can delete a parent slot and DELETE is called', async ({ page }) => {
+      await setupEventConfigWithSlots(page, adminUser());
+
+      const captured = await interceptMutation(
+        page,
+        '**/api/v1/event-series/1/work-roles/5',
+        'DELETE',
+        { success: true },
+      );
+
+      await gotoApp(page, '/events/1');
+      await page.getByRole('button', { name: 'Delete work role slot' }).first().click();
+
+      await expect
+        .poll(() => captured.length, { message: 'DELETE work role slot was called' })
+        .toBe(1);
+      expect(captured[0].method).toBe('DELETE');
+    });
+  });
 });
 
 test.describe('New event page', () => {

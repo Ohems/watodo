@@ -128,6 +128,8 @@ export const eventCommentsQuerySchema = z.object({
 
 export const eventWorkRolesQuerySchema = z.object({
   occurrenceStart: z.iso.datetime().optional(),
+  /** Only the parent (series-level) slots; used by the series management UI. */
+  parentOnly: z.coerce.boolean().optional(),
 });
 
 // --- Event info slots ---

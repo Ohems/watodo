@@ -1725,6 +1725,38 @@ describe('Events API', () => {
     });
   });
 
+  describe('GET /api/v1/event-series/:seriesId/work-roles', () => {
+    it('returns all slots by default and only parent slots with parentOnly=true', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      await createWorkRole(seed, series.id, { title: 'Setup crew' });
+      await createWorkRole(seed, series.id, {
+        title: 'AV check',
+        occurrenceStart: '2026-10-21T16:00:00.000Z',
+      });
+
+      const all = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series/${series.id}/work-roles`,
+        headers: auth(seed.readerToken),
+      });
+      expect(all.statusCode).toBe(200);
+      // Parent slot + inherited occurrence copy + the occurrence-scoped slot.
+      expect(all.json() as { occurrenceId: number | null }[]).toHaveLength(3);
+
+      const parents = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series/${series.id}/work-roles?parentOnly=true`,
+        headers: auth(seed.readerToken),
+      });
+      expect(parents.statusCode).toBe(200);
+      const parentSlots = parents.json() as { title: string; occurrenceId: number | null }[];
+      expect(parentSlots).toHaveLength(1);
+      expect(parentSlots[0].title).toBe('Setup crew');
+      expect(parentSlots[0].occurrenceId).toBeNull();
+    });
+  });
+
   describe('POST /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments', () => {
     it('assigns a user to a work role slot', async () => {
       const seed = await createEventsFixture();

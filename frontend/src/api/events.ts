@@ -190,10 +190,10 @@ export const eventsApi = api.injectEndpoints({
 
     listEventWorkRoles: build.query<
       EventWorkRole[],
-      { seriesId: number; occurrenceStart?: string }
+      { seriesId: number; occurrenceStart?: string; parentOnly?: boolean }
     >({
-      query: ({ seriesId, occurrenceStart }) =>
-        withQuery(`/api/v1/event-series/${seriesId}/work-roles`, { occurrenceStart }),
+      query: ({ seriesId, occurrenceStart, parentOnly }) =>
+        withQuery(`/api/v1/event-series/${seriesId}/work-roles`, { occurrenceStart, parentOnly }),
       providesTags: (_result, _error, { seriesId }) => [seriesDetailTag(seriesId)],
     }),
     createEventWorkRole: build.mutation<

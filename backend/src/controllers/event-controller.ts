@@ -316,6 +316,7 @@ export async function listEventWorkRolesHandler(
   const query = eventWorkRolesQuerySchema.parse(request.query);
   const slots = await listEventWorkRoles(parseId(request.params.seriesId, 'seriesId'), {
     occurrenceStart: query.occurrenceStart ? new Date(query.occurrenceStart) : undefined,
+    parentOnly: query.parentOnly,
   });
   return reply.status(200).send(slots);
 }
