@@ -3,6 +3,7 @@ import { db } from '../database.js';
 import { getAuth } from '../middleware/auth.js';
 import {
   assignmentCandidatesQuerySchema,
+  bulkAssignmentSchema,
   eventCommentPushSchema,
   eventCommentsQuerySchema,
   eventCommentUpdateSchema,
@@ -21,11 +22,13 @@ import {
   occurrenceStartSchema,
   organizationUserParamsSchema,
   rescheduleOccurrenceSchema,
+  staffingWorkloadQuerySchema,
   userEventAssignmentsQuerySchema,
 } from '../schemas/index.js';
 import {
   assignUserToOccurrenceWorkRole,
   assignUserToWorkRole,
+  assignUserToWorkRoleBulk,
   cancelOccurrence,
   createEventComment,
   createEventInfoSlot,
@@ -46,6 +49,7 @@ import {
   getOccurrenceDetailByRef,
   getOccurrences,
   getSeriesOccurrences,
+  getStaffingWorkload,
   getUserEventAssignments,
   importParentInfoSlots,
   importParentSlots,
@@ -444,6 +448,44 @@ export async function assignUserToWorkRoleHandler(
     data.userId,
   );
   return reply.status(200).send(assignment);
+}
+
+/** Assigns a user to the same slot across many occurrences of the series in one call. */
+export async function bulkAssignUserToWorkRoleHandler(
+  request: FastifyRequest<WorkRoleParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const data = bulkAssignmentSchema.parse(request.body);
+  const results = await assignUserToWorkRoleBulk(
+    parseId(request.params.seriesId, 'seriesId'),
+    parseId(request.params.workRoleId, 'workRoleId'),
+    data.userId,
+    data.occurrenceStarts,
+  );
+  return reply.status(200).send({ results });
+}
+
+interface OrganizationParams {
+  Params: { organizationId: string };
+}
+
+/** Per-user staffing workload of an organization over a range (weekly buckets included). */
+export async function getStaffingWorkloadHandler(
+  request: FastifyRequest<OrganizationParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const query = staffingWorkloadQuerySchema.parse(request.query);
+  const items = await getStaffingWorkload(
+    request.params.organizationId,
+    new Date(query.start),
+    new Date(query.end),
+    {
+      siteId: query.siteId,
+      roomId: query.roomId,
+      teamId: query.teamId,
+    },
+  );
+  return reply.status(200).send({ items });
 }
 
 /**

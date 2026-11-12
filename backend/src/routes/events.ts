@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import {
   assignUserToOccurrenceWorkRoleHandler,
   assignUserToWorkRoleHandler,
+  bulkAssignUserToWorkRoleHandler,
   cancelOccurrenceHandler,
   createEventCommentHandler,
   createEventInfoSlotHandler,
@@ -23,6 +24,7 @@ import {
   getOccurrenceDetailHandler,
   getOccurrencesHandler,
   getSeriesOccurrencesHandler,
+  getStaffingWorkloadHandler,
   getUserEventAssignmentsHandler,
   importParentInfoSlotsHandler,
   importParentSlotsHandler,
@@ -104,6 +106,10 @@ interface OrgUserParams {
   Params: { organizationId: string; userId: string };
 }
 
+interface OrgParams {
+  Params: { organizationId: string };
+}
+
 export async function eventRoutes(app: FastifyInstance): Promise<void> {
   const read = requirePermissions(PERMISSIONS.EVENTS_READ);
   const write = requirePermissions(PERMISSIONS.EVENTS_WRITE);
@@ -128,6 +134,14 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
     '/api/v1/organizations/:organizationId/users/:userId/event-assignments',
     { preHandler: read },
     getUserEventAssignmentsHandler,
+  );
+
+  // Per-user staffing workload of an organization over a range (staffing page
+  // workload matrix), optionally narrowed by site/room/team
+  app.get<OrgParams>(
+    '/api/v1/organizations/:organizationId/staffing/workload',
+    { preHandler: read },
+    getStaffingWorkloadHandler,
   );
 
   // A single occurrence by its reference (stable numeric ID, or a temporary
@@ -361,6 +375,12 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
     '/api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments',
     { preHandler: write },
     assignUserToWorkRoleHandler,
+  );
+  // Bulk assign: same user to the same slot across many occurrences at once
+  app.post<WorkRoleParams>(
+    '/api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments/bulk',
+    { preHandler: write },
+    bulkAssignUserToWorkRoleHandler,
   );
   app.delete<WorkRoleAssignmentParams>(
     '/api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments/:assignmentId',

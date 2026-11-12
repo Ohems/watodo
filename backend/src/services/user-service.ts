@@ -4,6 +4,7 @@ import { badRequest, isUniqueViolation } from '../http-error.js';
 import { createLogger } from '../logger.js';
 import type { UserListQuery, UserPush, UserQuery, UserSelfUpdate } from '../schemas/index.js';
 import { usersWithAbsenceInRange } from './absence-service.js';
+import { computeWorkloadInRange } from './event-service.js';
 import { getEffectivePermissions, getEffectivePermissionsForUsers } from './permission-service.js';
 
 const logger = createLogger('user-service');
@@ -100,13 +101,15 @@ export interface UserListItem {
   name: string;
   /** True when the user has an absence overlapping the requested range. */
   hasAbsence: boolean;
+  /** Work role assignments overlapping the requested range (0 when no range given). */
+  assignmentCount: number;
 }
 
 /**
  * Simple user list (id + name). When both `start` and `end` are given, each
- * entry also carries `hasAbsence`, true when the user has an absence
- * overlapping that instant range (used to mark unavailable users in the
- * assignment dropdown).
+ * entry also carries `hasAbsence` (absence overlapping the range, used to mark
+ * unavailable users in the assignment dropdown) and `assignmentCount` (work
+ * role assignments overlapping the range, used by the staffing view).
  */
 export async function getUserList(query: UserListQuery = {}): Promise<UserListItem[]> {
   logger.trace('userService.getUserList');
@@ -117,14 +120,21 @@ export async function getUserList(query: UserListQuery = {}): Promise<UserListIt
     .orderBy('name', 'asc')
     .execute();
   let absentIds = new Set<string>();
+  let workloadByUser = new Map<string, { assignmentCount: number }>();
   if (query.start && query.end) {
     absentIds = await usersWithAbsenceInRange(
       users.map(user => user.id),
       new Date(query.start),
       new Date(query.end),
     );
+    workloadByUser = await computeWorkloadInRange(new Date(query.start), new Date(query.end));
   }
-  return users.map(user => ({ id: user.id, name: user.name, hasAbsence: absentIds.has(user.id) }));
+  return users.map(user => ({
+    id: user.id,
+    name: user.name,
+    hasAbsence: absentIds.has(user.id),
+    assignmentCount: workloadByUser.get(user.id)?.assignmentCount ?? 0,
+  }));
 }
 
 export async function updateUser(userId: string, data: UserPush): Promise<UserWithPermissions> {

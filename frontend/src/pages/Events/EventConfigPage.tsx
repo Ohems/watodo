@@ -467,7 +467,7 @@ function EventConfigPage() {
                           variant="subtle"
                           onClick={() => setEditingInfoSlotId(null)}
                         >
-                          {t('cancel')}
+                          {t('common.cancel')}
                         </Button>
                       </Group>
                     </Stack>

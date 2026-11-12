@@ -33,6 +33,7 @@ interface UserListItemResponse {
   id: string;
   name: string;
   hasAbsence: boolean;
+  assignmentCount: number;
 }
 
 interface TeamMemberResponse {
@@ -529,6 +530,36 @@ describe('Absences API', () => {
       const noRange = await app.inject({ method: 'GET', url: '/api/v1/users/list' });
       const noRangeBody = noRange.json() as UserListItemResponse[];
       expect(noRangeBody.every(u => u.hasAbsence === false)).toBe(true);
+    });
+
+    it('reports assignmentCount for the given range', async () => {
+      const seedData = await seed();
+      // Single event on 2026-10-21 10:00-11:00 UTC with the user assigned to its parent slot.
+      await seedEventWithAssignment(seedData, seedData.userId, '2026-10-21T10:00:00.000Z');
+
+      const inRange = await app.inject({
+        method: 'GET',
+        url: '/api/v1/users/list?start=2026-10-21T00:00:00.000Z&end=2026-10-22T00:00:00.000Z',
+      });
+      expect(inRange.statusCode).toBe(200);
+      const body = inRange.json() as UserListItemResponse[];
+      expect(body.find(u => u.id === seedData.userId)?.assignmentCount).toBe(1);
+      expect(body.find(u => u.id === seedData.otherUserId)?.assignmentCount).toBe(0);
+
+      // Outside the event range, and without a range, the count is 0.
+      const outRange = await app.inject({
+        method: 'GET',
+        url: '/api/v1/users/list?start=2026-11-01T00:00:00.000Z&end=2026-11-02T00:00:00.000Z',
+      });
+      expect(
+        (outRange.json() as UserListItemResponse[]).find(u => u.id === seedData.userId)
+          ?.assignmentCount,
+      ).toBe(0);
+      const noRange = await app.inject({ method: 'GET', url: '/api/v1/users/list' });
+      expect(
+        (noRange.json() as UserListItemResponse[]).find(u => u.id === seedData.userId)
+          ?.assignmentCount,
+      ).toBe(0);
     });
   });
 

@@ -62,6 +62,10 @@ export const occurrenceFilterSchema = z.object({
   siteId: z.uuid().optional(),
   roomId: z.uuid().optional(),
   teamId: z.uuid().optional(),
+  /** Only occurrences that still have at least one unfilled work role slot (staffing view). */
+  unfilledOnly: z.coerce.boolean().optional(),
+  /** Only occurrences with at least one unfilled critical slot (staffing view). */
+  criticalOnly: z.coerce.boolean().optional(),
 });
 
 export type OccurrenceFilter = z.infer<typeof occurrenceFilterSchema>;
@@ -112,6 +116,25 @@ export const eventWorkRoleUpdateSchema = eventWorkRolePushSchema.partial();
 export const eventWorkRoleAssignmentSchema = z.object({
   userId: z.uuid(),
 });
+
+// Bulk assignment: assign one user to the same slot across many occurrences.
+export const bulkAssignmentSchema = z.object({
+  userId: z.uuid(),
+  occurrenceStarts: z.array(z.iso.datetime()).min(1).max(500),
+});
+
+export type BulkAssignmentInput = z.infer<typeof bulkAssignmentSchema>;
+
+// Staffing workload aggregate over a range (org-scoped, events:read).
+export const staffingWorkloadQuerySchema = z.object({
+  start: z.iso.datetime(),
+  end: z.iso.datetime(),
+  siteId: z.uuid().optional(),
+  roomId: z.uuid().optional(),
+  teamId: z.uuid().optional(),
+});
+
+export type StaffingWorkloadQuery = z.infer<typeof staffingWorkloadQuerySchema>;
 
 export const eventCommentPushSchema = z.object({
   body: z.string().min(1),

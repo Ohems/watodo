@@ -110,6 +110,7 @@ export const api = createApi({
     'EventTypes',
     'UserEventAssignments',
     'Absence',
+    'StaffingWorkload',
   ],
   endpoints: () => ({}),
 });

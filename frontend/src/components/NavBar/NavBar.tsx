@@ -37,6 +37,7 @@ function NavBar() {
       children: [
         { label: t('nav.eventsCalendar'), path: '/events/calendar' },
         { label: t('nav.eventsManagement'), path: '/events/management' },
+        { label: t('nav.eventsStaffing'), path: '/events/staffing' },
       ],
     },
     { label: t('nav.teams'), path: '/teams' },

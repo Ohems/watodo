@@ -65,6 +65,8 @@ export interface UserListItem {
   name: string;
   /** True when the user has an absence overlapping the requested range. */
   hasAbsence: boolean;
+  /** Work role assignments overlapping the requested range (0 when no range given). */
+  assignmentCount: number;
 }
 
 /** A required certification the candidate does not hold, or holds only expired. */
@@ -90,6 +92,10 @@ export interface AssignmentCandidate {
   isQualified: boolean;
   /** Required certifications of the slot's work role the user is missing or holds expired. */
   missingCertifications: MissingCertification[];
+  /** Assignments of the user overlapping the requested range (0 when no range given). */
+  assignmentCount: number;
+  /** Workload hours of the user overlapping the requested range (0 when no range given). */
+  workloadHours: number;
 }
 
 export interface AuthProviderInfo {
@@ -226,6 +232,10 @@ export interface EventOccurrence {
   workRoleSlots: OccurrenceSlotStatus[];
   /** Titles of critical, unfilled slots whose work role the current user manages for this series. */
   managedUnfilledCriticalSlots: string[];
+  /** Number of info slots visible for this occurrence (occurrence-level when materialized, else parent). */
+  infoSlotCount?: number;
+  /** How many of those info slots have a non-empty value. */
+  filledInfoSlotCount?: number;
 }
 
 /** Status indicator for a single work role slot of an occurrence. */
@@ -323,6 +333,29 @@ export interface EventInfoSlotPush {
 }
 
 export type EventInfoSlotUpdate = Partial<EventInfoSlotPush>;
+
+// --- Staffing workload ---
+
+export interface StaffingWorkloadWeek {
+  /** ISO start (Monday) of the week bucket. */
+  start: string;
+  count: number;
+  hours: number;
+}
+
+export interface StaffingWorkloadItem {
+  userId: string;
+  name: string;
+  assignmentCount: number;
+  hours: number;
+  criticalAssignmentCount: number;
+  hasAbsence: boolean;
+  weeks: StaffingWorkloadWeek[];
+}
+
+export interface StaffingWorkloadResponse {
+  items: StaffingWorkloadItem[];
+}
 
 // --- Event readiness ---
 
@@ -734,6 +767,10 @@ export interface OccurrenceFilter {
   siteId?: string;
   roomId?: string;
   teamId?: string;
+  /** Only occurrences with at least one unfilled work role slot (staffing view). */
+  unfilledOnly?: boolean;
+  /** Only occurrences with at least one unfilled critical slot (staffing view). */
+  criticalOnly?: boolean;
 }
 
 // --- Table query ---

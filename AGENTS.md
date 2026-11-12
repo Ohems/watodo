@@ -214,7 +214,8 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 - `POST /api/v1/auth/:provider/link` - Start an OAuth flow that connects another login method to the current account (auth required)
 - `GET /api/v1/auth/logout` - Logout
 - `GET /api/v1/users` - List users with permissions (paginated, `user-management:read`)
-- `GET /api/v1/users/list` - Simple user list (id + name, no auth). With `start`/`end` ISO-datetime query params, each item also has `hasAbsence` (an absence overlaps that range), used to mark unavailable users in the assignment dropdown
+- `GET /api/v1/users/list` - Simple user list (id + name, no auth). With `start`/`end` ISO-datetime query params, each item also has `hasAbsence` (an absence overlaps that range), used to mark unavailable users in the assignment dropdown, and `assignmentCount` (work role assignments overlapping that range, used by the staffing view)
+- `GET /api/v1/organizations/:organizationId/staffing/workload` - Per-user staffing workload of an organization over `start`/`end` (optional `siteId`/`roomId`/`teamId` filters; `events:read`): each member has `assignmentCount`, `hours` (sum of effective occurrence durations), `criticalAssignmentCount`, `hasAbsence` and weekly `weeks` buckets for the workload matrix on the staffing page
 - `GET /api/v1/users/@me` - Current user with permissions (auth required)
 - `PATCH /api/v1/users/@me` - Update own personal information (auth required)
 - `DELETE /api/v1/users/@me` - Delete own account (auth required)
@@ -229,7 +230,7 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 - `GET /api/v1/event-series` - List event series (`events:read`, requires `organizationId` query)
 - `POST /api/v1/event-series` - Create event series (`events:write`; body may include `siteId`/`roomId`/`reserveWholeSite`; the response carries a `conflicts` warning array listing overlapping bookings in the same room/site)
 - `GET /api/v1/event-series/management` - Paginated series list for the management view (`events:read`)
-- `GET /api/v1/event-series/occurrences` - Occurrences in a time range (used by calendars and the Home page; `events:read`). Each occurrence includes `isParticipant`, `isManager`, `workRoleSlots` (per-slot status indicators) and `managedUnfilledCriticalSlots` for the requesting user. The `scope` filter accepts `all`, `mine` (assigned to a slot), `team` (series linked to one of the user's teams) and `involved` (participant or manager; used by the Home page)
+- `GET /api/v1/event-series/occurrences` - Occurrences in a time range (used by calendars, the Home page and the staffing page; `events:read`). Each occurrence includes `isParticipant`, `isManager`, `workRoleSlots` (per-slot status indicators), `managedUnfilledCriticalSlots` for the requesting user and info slot summary counts (`infoSlotCount`, `filledInfoSlotCount`). The `scope` filter accepts `all`, `mine` (assigned to a slot), `team` (series linked to one of the user's teams) and `involved` (participant or manager; used by the Home page). `unfilledOnly`/`criticalOnly` (booleans) restrict to non-cancelled occurrences with unfilled (critical) slots for the staffing view
 - `GET /api/v1/event-occurrences/:occurrenceRef` - Single occurrence detail by ref (numeric ID or `tmp:{seriesId}:{isoStart}`; `events:read`). Besides work role slots and comments, the detail includes `infoSlots` (occurrence-level when materialized, otherwise parent), `parentInfoSlots`, `occurrenceInfoSlots` and `missingParentInfoSlots`
 - `POST /api/v1/event-occurrences/:occurrenceRef/materialize` - Materialize a tmp ref into a stable numeric ID, inheriting parent slots (`events:write`). Returns `{ occurrenceId, conflicts }` where `conflicts` lists overlapping bookings of the occurrence's effective time range (`events:write`)
 - `POST /api/v1/event-occurrences/:occurrenceRef/import-slots` - Import parent series slots into a materialized occurrence (`events:write`)
@@ -258,8 +259,9 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 - `POST /api/v1/event-series/:seriesId/work-roles` - Create slot (`events:write`; body may include `occurrenceId`, `isCritical`, `workRoleId`)
 - `PATCH /api/v1/event-series/:seriesId/work-roles/:workRoleId` - Update slot (`events:write`)
 - `DELETE /api/v1/event-series/:seriesId/work-roles/:workRoleId` - Delete slot (`events:write`)
-- `GET /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignment-candidates` - Users as assignment candidates for a slot (`events:read`): each carries `hasAbsence` (when `start`/`end` are given), `hasWorkRole`, `isQualified` and `missingCertifications` (missing or expired required certifications with `expiredDate`) computed against the slot's `work_role_id`; works for parent and occurrence-level slots
+- `GET /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignment-candidates` - Users as assignment candidates for a slot (`events:read`): each carries `hasAbsence` (when `start`/`end` are given), `hasWorkRole`, `isQualified`, `missingCertifications` (missing or expired required certifications with `expiredDate`) computed against the slot's `work_role_id`, and `assignmentCount`/`workloadHours` (the user's assignments overlapping `start`/`end`, for workload-aware sorting in the assign dropdown); works for parent and occurrence-level slots
 - `POST /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments` - Assign user to slot (`events:write`)
+- `POST /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments/bulk` - Assign one user to the same slot across many occurrences at once (`events:write`; body `{ userId, occurrenceStarts[] }`; materializes each occurrence and assigns the inherited occurrence-level copy, never the parent slot; returns per-occurrence `assigned`/`already-assigned` results)
 - `DELETE /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments/:assignmentId` - Unassign user (`events:write`)
 - `GET /api/v1/event-series/:seriesId/info-slots` - List parent (series-level) info slots (`events:read`, optional `occurrenceStart` query)
 - `POST /api/v1/event-series/:seriesId/info-slots` - Create parent info slot (`events:write`; body: `title`, optional `description`, `value` default)
@@ -361,8 +363,11 @@ frontend/src/
 └── pages/
     ├── Home/             # Dashboard: notifications + upcoming events (default route)
     ├── Events/           # CalendarPage (calendar view), EventManagementPage (series list),
-    │                     # EventConfigPage (series site/room/teams), EventOccurrencePage
-    │                     # (single event instance: readiness, work role slots, assignees)
+    │                     # EventConfigPage (series cards: general info, work role slots, info slots,
+    │                     # schedule, location, teams), EventOccurrencePage
+    │                     # (single event instance: readiness, work role slots, assignees, info slots,
+    │                     # comments), StaffingPage (staffing overview: occurrences with expandable
+    │                     # rows, unfilled slots, workload matrix, available volunteers)
     ├── UserList/         # User list (Contacts)
     ├── UserProfile/      # User profile detail
     ├── Account/          # Account page: personal info, login methods, account deletion

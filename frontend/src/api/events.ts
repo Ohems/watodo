@@ -20,6 +20,7 @@ import type {
   EventWorkRoleUpdate,
   OccurrenceFilter,
   Paginated,
+  StaffingWorkloadResponse,
 } from '../types/index.js';
 import { api, withQuery } from './base.js';
 
@@ -98,6 +99,8 @@ export const eventsApi = api.injectEndpoints({
           siteId: filter?.siteId,
           roomId: filter?.roomId,
           teamId: filter?.teamId,
+          unfilledOnly: filter?.unfilledOnly,
+          criticalOnly: filter?.criticalOnly,
         }),
       providesTags: ['Occurrences'],
     }),
@@ -108,6 +111,52 @@ export const eventsApi = api.injectEndpoints({
       query: ({ seriesId, start, end }) =>
         withQuery(`/api/v1/event-series/${seriesId}/occurrences`, { start, end }),
       providesTags: ['Occurrences'],
+    }),
+
+    // --- Staffing ---
+
+    // Per-user staffing workload of an organization over a range (workload
+    // matrix on the staffing page, availability view).
+    getStaffingWorkload: build.query<
+      StaffingWorkloadResponse,
+      {
+        organizationId: string;
+        start: string;
+        end: string;
+        siteId?: string;
+        roomId?: string;
+        teamId?: string;
+      }
+    >({
+      query: query =>
+        withQuery(`/api/v1/organizations/${query.organizationId}/staffing/workload`, {
+          start: query.start,
+          end: query.end,
+          siteId: query.siteId,
+          roomId: query.roomId,
+          teamId: query.teamId,
+        }),
+      providesTags: ['StaffingWorkload'],
+    }),
+    // Bulk assign: one user to the same parent slot across many occurrences.
+    bulkAssignToWorkRole: build.mutation<
+      { results: { occurrenceStart: string; occurrenceId: number; status: string }[] },
+      { seriesId: number; workRoleId: number; userId: string; occurrenceStarts: string[] }
+    >({
+      query: ({ seriesId, workRoleId, userId, occurrenceStarts }) => ({
+        url: `/api/v1/event-series/${seriesId}/work-roles/${workRoleId}/assignments/bulk`,
+        method: 'POST',
+        body: { userId, occurrenceStarts },
+      }),
+      invalidatesTags: [
+        'Occurrences',
+        'OccurrenceDetail',
+        'StaffingWorkload',
+        'UserEventAssignments',
+        'StaffingWorkload',
+        'UserList',
+        'UserList',
+      ],
     }),
     getOccurrenceDetail: build.query<
       EventOccurrenceDetail,
@@ -208,6 +257,8 @@ export const eventsApi = api.injectEndpoints({
       invalidatesTags: (_result, _error, { seriesId }) => [
         seriesDetailTag(seriesId),
         'UserEventAssignments',
+        'StaffingWorkload',
+        'UserList',
       ],
     }),
     updateEventWorkRole: build.mutation<
@@ -222,6 +273,8 @@ export const eventsApi = api.injectEndpoints({
       invalidatesTags: (_result, _error, { seriesId }) => [
         seriesDetailTag(seriesId),
         'UserEventAssignments',
+        'StaffingWorkload',
+        'UserList',
       ],
     }),
     deleteEventWorkRole: build.mutation<
@@ -237,6 +290,8 @@ export const eventsApi = api.injectEndpoints({
       invalidatesTags: (_result, _error, { seriesId }) => [
         seriesDetailTag(seriesId),
         'UserEventAssignments',
+        'StaffingWorkload',
+        'UserList',
       ],
     }),
     getAssignmentCandidates: build.query<
@@ -262,6 +317,8 @@ export const eventsApi = api.injectEndpoints({
       invalidatesTags: (_result, _error, { seriesId }) => [
         seriesDetailTag(seriesId),
         'UserEventAssignments',
+        'StaffingWorkload',
+        'UserList',
       ],
     }),
     unassignUserFromWorkRole: build.mutation<
@@ -275,6 +332,8 @@ export const eventsApi = api.injectEndpoints({
       invalidatesTags: (_result, _error, { seriesId }) => [
         seriesDetailTag(seriesId),
         'UserEventAssignments',
+        'StaffingWorkload',
+        'UserList',
       ],
     }),
 
@@ -297,6 +356,8 @@ export const eventsApi = api.injectEndpoints({
       invalidatesTags: (_result, _error, { seriesId }) => [
         seriesDetailTag(seriesId),
         'UserEventAssignments',
+        'StaffingWorkload',
+        'UserList',
       ],
     }),
     updateEventComment: build.mutation<
@@ -311,6 +372,8 @@ export const eventsApi = api.injectEndpoints({
       invalidatesTags: (_result, _error, { seriesId }) => [
         seriesDetailTag(seriesId),
         'UserEventAssignments',
+        'StaffingWorkload',
+        'UserList',
       ],
     }),
     deleteEventComment: build.mutation<void, { seriesId: number; commentId: number }>({
@@ -321,6 +384,8 @@ export const eventsApi = api.injectEndpoints({
       invalidatesTags: (_result, _error, { seriesId }) => [
         seriesDetailTag(seriesId),
         'UserEventAssignments',
+        'StaffingWorkload',
+        'UserList',
       ],
     }),
 
@@ -538,6 +603,8 @@ export const {
   useDeleteEventSeriesMutation,
   useGetOccurrencesQuery,
   useGetSeriesOccurrencesQuery,
+  useGetStaffingWorkloadQuery,
+  useBulkAssignToWorkRoleMutation,
   useGetOccurrenceDetailQuery,
   useGetOccurrenceDetailByRefQuery,
   useCancelOccurrenceMutation,

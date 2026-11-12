@@ -275,7 +275,7 @@ test.describe('Event occurrence page', () => {
       // rendered as a row of a headerless table (no column headers).
       const assigneeName = page.getByText('Second User', { exact: true }).first();
       await expect(assigneeName).toBeVisible();
-      await expect(assigneeName).toHaveCSS('font-size', '16px');
+      await expect(assigneeName).toHaveCSS('font-size', '14px');
       await expect(page.getByRole('row')).toHaveCount(1);
       await expect(page.getByRole('columnheader')).toHaveCount(0);
       // Tags: the critical slot shows the CRITICAL tag plus UNFILLED, the
@@ -437,8 +437,10 @@ test.describe('Event occurrence page', () => {
     }) => {
       await setupOccurrencePage(page, adminUser());
 
-      // Open the assign dropdown of the first slot (id 5, linked to work role 3).
-      await page.locator('input[placeholder="Assign user"]').first().click();
+      // Open the assign modal of the first slot (id 5, linked to work role 3).
+      await page.getByRole('button', { name: 'Assign', exact: true }).first().click();
+      const dialog = page.getByRole('dialog');
+      await dialog.locator('input[placeholder="Select user"]').click();
 
       const options = page.getByRole('option');
       // user-2 is already assigned to the slot, so it is not offered.
@@ -480,11 +482,13 @@ test.describe('Event occurrence page', () => {
         },
       );
 
-      await page.locator('input[placeholder="Assign user"]').first().click();
+      await page.getByRole('button', { name: 'Assign', exact: true }).first().click();
+      const dialog = page.getByRole('dialog');
+      await dialog.locator('input[placeholder="Select user"]').click();
       // Third User is absent and missing the required certification, but can
       // still be assigned.
       await page.getByRole('option', { name: /Third User/ }).click();
-      await page.getByRole('button', { name: 'Assign' }).first().click();
+      await dialog.getByRole('button', { name: 'Assign', exact: true }).click();
 
       await expect.poll(() => captured.length, { message: 'POST assignment was called' }).toBe(1);
       expect(captured[0].method).toBe('POST');

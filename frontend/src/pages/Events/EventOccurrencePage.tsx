@@ -39,7 +39,7 @@ import {
   useUpdateOccurrenceInfoSlotMutation,
   useUpdateOccurrenceWorkRoleMutation,
 } from '../../api/index.js';
-import { AssignUserDropdown } from '../../components/AssignUserDropdown/index.js';
+import { AssignUserModal } from '../../components/AssignUserModal/index.js';
 import { BookingConflictsAlert } from '../../components/BookingConflictsAlert/index.js';
 import { QueryError } from '../../components/QueryState/index.js';
 import { SlotAssignees } from '../../components/SlotAssignees/index.js';
@@ -413,6 +413,15 @@ function EventOccurrencePage() {
                       {isUnfilled ? t('events.unfilled') : t('events.filled')}
                     </Badge>
                     {canWrite && (
+                      <AssignUserModal
+                        seriesId={series.id}
+                        slot={slot}
+                        start={occurrence.start}
+                        end={occurrence.end}
+                        resolveOccurrenceId={ensureOccurrenceId}
+                      />
+                    )}
+                    {canWrite && (
                       <>
                         <Divider orientation="vertical" />
                         <Switch
@@ -482,7 +491,7 @@ function EventOccurrencePage() {
                         variant="subtle"
                         onClick={() => setEditingDescriptionId(null)}
                       >
-                        {t('cancel')}
+                        {t('common.cancel')}
                       </Button>
                     </Group>
                   ) : (
@@ -526,16 +535,6 @@ function EventOccurrencePage() {
                       )
                     }
                   />
-                  {canWrite && (
-                    <AssignUserDropdown
-                      seriesId={series.id}
-                      slot={slot}
-                      start={occurrence.start}
-                      end={occurrence.end}
-                      resolveOccurrenceId={ensureOccurrenceId}
-                    />
-                  )}
-                  <Divider my="xs" />
                 </Box>
               );
             })}
@@ -771,7 +770,7 @@ function EventOccurrencePage() {
                         {t('save')}
                       </Button>
                       <Button size="xs" variant="subtle" onClick={() => setEditingCommentId(null)}>
-                        {t('cancel')}
+                        {t('common.cancel')}
                       </Button>
                     </Group>
                   </>

@@ -62,15 +62,7 @@ export default function SlotAssignees({
             const candidate = candidateByUserId.get(assignment.userId);
             return (
               <Table.Tr key={assignment.id}>
-                <Table.Td>
-                  <Group gap="xs" wrap="nowrap">
-                    <Text size="md" fw={500}>
-                      {assignment.userName}
-                    </Text>
-                    {candidate && <CandidateBadges user={candidate} size="sm" />}
-                  </Group>
-                </Table.Td>
-                <Table.Td style={{ width: 40, textAlign: 'right' }}>
+                <Table.Td style={{ width: 40 }}>
                   {canWrite && (
                     <ActionIcon
                       size="sm"
@@ -82,6 +74,16 @@ export default function SlotAssignees({
                       <IconTrash size={14} />
                     </ActionIcon>
                   )}
+                </Table.Td>
+                <Table.Td>
+                  <Group gap="xs" wrap="nowrap">
+                    {/* Same size as the work slot title (sm) so assignees do
+                        not outweigh the slot header. */}
+                    <Text size="sm" fw={500}>
+                      {assignment.userName}
+                    </Text>
+                    {candidate && <CandidateBadges user={candidate} size="sm" />}
+                  </Group>
                 </Table.Td>
               </Table.Tr>
             );
