@@ -445,9 +445,15 @@
     "deleteFailed": "Tilin poistaminen epäonnistui",
     "notificationSettings": {
       "title": "Ilmoitusasetukset",
-      "description": "Valitse, mitä ilmoituksia saat, tyypin ja kanavan mukaan. Sähköposti- ja push-ilmoituksia ei ole vielä käytössä, mutta valintasi tallennetaan niiden käyttöönottoa varten.",
+      "description": "Valitse, mitä ilmoituksia saat, tyypin ja kanavan mukaan. Sähköpostitoimitusta ei ole vielä käytössä, mutta valintasi tallennetaan sen käyttöönottoa varten.",
       "type": "Ilmoitus",
       "updateFailed": "Ilmoitusasetuksen tallennus epäonnistui",
+      "pushSection": "Push-ilmoitukset",
+      "pushEnable": "Ota push-ilmoitukset käyttöön tällä laitteella",
+      "pushNotSupported": "Tämä selain ei tue push-ilmoituksia. Lisää iPhonella tai iPadilla Watodo ensin kotinäytölle (Jaa-valikko ja ”Lisää kotinäytölle”) ja käytä asennettua sovellusta.",
+      "pushNotConfigured": "Push-ilmoituksia ei ole vielä määritetty palvelimella.",
+      "pushPermissionDenied": "Ilmoituslupa evättiin. Salli ilmoitukset tälle sivustolle selaimen asetuksissa ja yritä uudelleen.",
+      "pushEnableFailed": "Push-ilmoitusten käyttöönotto epäonnistui",
       "channels": {
         "inApp": "Sovelluksessa",
         "email": "Sähköposti",

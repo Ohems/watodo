@@ -11,6 +11,7 @@ export * from './common.js';
 export * from './events.js';
 export * from './notifications.js';
 export * from './organizations.js';
+export * from './push.js';
 export * from './roles.js';
 export * from './rooms.js';
 export * from './sites.js';

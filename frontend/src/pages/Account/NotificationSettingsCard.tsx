@@ -3,10 +3,15 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   getApiErrorMessage,
+  useDeletePushSubscriptionMutation,
   useGetNotificationPreferencesQuery,
+  useGetPushSubscriptionsQuery,
+  useGetVapidPublicKeyQuery,
+  useRegisterPushSubscriptionMutation,
   useUpdateNotificationPreferenceMutation,
 } from '../../api/index.js';
 import { QueryState } from '../../components/QueryState/index.js';
+import { isPushSupported, subscribeToPush, unsubscribeFromPush } from '../../push.js';
 import type {
   NotificationCategory,
   NotificationChannel,
@@ -75,11 +80,104 @@ function PreferenceTable({ data, messageKeys, onToggle }: PreferenceTableProps) 
 }
 
 /**
- * Notification settings card on the Account page: one row per notification
- * type (message key of the backend catalog) and one toggle per delivery
- * channel, grouped into "General" (sent to everyone) and "Management" (sent
- * only to event/team managers). Email and push delivery is not implemented
- * yet, but the toggles are saved already.
+ * Push notification section of the notification settings: a single switch
+ * that subscribes/unsubscribes this browser via the service worker and
+ * registers/removes the endpoint on the backend. Shown with an explanatory
+ * hint when the browser does not support push, the server has no VAPID key
+ * configured, or notification permission was denied.
+ */
+function PushSection() {
+  const { t } = useTranslation();
+  const supported = isPushSupported();
+  const vapidQuery = useGetVapidPublicKeyQuery(undefined, { skip: !supported });
+  const subscriptionsQuery = useGetPushSubscriptionsQuery(undefined, { skip: !supported });
+  const [register] = useRegisterPushSubscriptionMutation();
+  const [unregister] = useDeletePushSubscriptionMutation();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!supported) {
+    return (
+      <Box mb="lg">
+        <Title order={6} mb="sm">
+          {t('account.notificationSettings.pushSection')}
+        </Title>
+        <Text size="sm" c="dimmed">
+          {t('account.notificationSettings.pushNotSupported')}
+        </Text>
+      </Box>
+    );
+  }
+
+  const vapidKey = vapidQuery.data?.publicKey ?? '';
+  const subscribed = (subscriptionsQuery.data?.length ?? 0) > 0;
+  const permissionDenied =
+    typeof Notification !== 'undefined' && Notification.permission === 'denied';
+
+  const handleChange = async (enabled: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      if (enabled) {
+        const json = await subscribeToPush(vapidKey);
+        await register({ ...json, userAgent: navigator.userAgent }).unwrap();
+      } else {
+        const endpoint = await unsubscribeFromPush();
+        const subscription = subscriptionsQuery.data?.find(s => s.endpoint === endpoint);
+        if (subscription) await unregister(subscription.id).unwrap();
+      }
+    } catch (changeError) {
+      if (changeError instanceof Error && changeError.message === 'permission-denied') {
+        setError(t('account.notificationSettings.pushPermissionDenied'));
+      } else {
+        setError(
+          getApiErrorMessage(changeError) || t('account.notificationSettings.pushEnableFailed'),
+        );
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Box mb="lg">
+      <Title order={6} mb="sm">
+        {t('account.notificationSettings.pushSection')}
+      </Title>
+      {vapidQuery.isLoading || subscriptionsQuery.isLoading ? null : !vapidKey ? (
+        <Text size="sm" c="dimmed">
+          {t('account.notificationSettings.pushNotConfigured')}
+        </Text>
+      ) : (
+        <>
+          <Switch
+            aria-label={t('account.notificationSettings.pushEnable')}
+            checked={subscribed}
+            disabled={busy || permissionDenied}
+            onChange={event => void handleChange(event.currentTarget.checked)}
+          />
+          {permissionDenied && (
+            <Text size="xs" c="red" mt="xs">
+              {t('account.notificationSettings.pushPermissionDenied')}
+            </Text>
+          )}
+          {error && (
+            <Text size="xs" c="red" mt="xs">
+              {error}
+            </Text>
+          )}
+        </>
+      )}
+    </Box>
+  );
+}
+
+/**
+ * Notification settings card on the Account page: web push on/off for this
+ * device, then one row per notification type (message key of the backend
+ * catalog) and one toggle per delivery channel, grouped into "General" (sent
+ * to everyone) and "Management" (sent only to event/team managers). Email
+ * delivery is not implemented yet, but the toggles are saved already.
  */
 export default function NotificationSettingsCard() {
   const { t } = useTranslation();
@@ -119,6 +217,7 @@ export default function NotificationSettingsCard() {
       <Text size="sm" c="dimmed" mb="md">
         {t('account.notificationSettings.description')}
       </Text>
+      <PushSection />
       {error && (
         <Alert color="red" variant="light" mb="md" withCloseButton onClose={() => setError(null)}>
           {error}

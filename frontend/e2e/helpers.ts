@@ -234,6 +234,61 @@ export async function mockNotificationPreferences(
   );
 }
 
+/** A valid-looking base64url VAPID public key (65-byte P-256 point) for mocks. */
+export const MOCK_VAPID_PUBLIC_KEY =
+  'BNUmgNFGR-ttXNJe1Bm0SQ2-17fSZ2Zt7SZIQ0Qu3-IMNNh2nTt1iEc8-PbscygX2qpC634VoAmEta8tnFEZRF8';
+
+export interface MockPushSubscription {
+  id: number;
+  endpoint: string;
+  userAgent: string | null;
+  createdAt: string;
+}
+
+/**
+ * Mocks the web push endpoints (Account page notification settings): the VAPID
+ * public key and the per-user push subscriptions. POST/DELETE update the
+ * served state, so a refetch after enabling/disabling reflects the change.
+ */
+export async function mockPushApis(
+  page: Page,
+  options: { vapidKey?: string; subscriptions?: MockPushSubscription[] } = {},
+): Promise<void> {
+  const vapidKey = options.vapidKey ?? MOCK_VAPID_PUBLIC_KEY;
+  const subscriptions = [...(options.subscriptions ?? [])];
+  await page.route(
+    url => url.pathname === '/api/v1/push/vapid-public-key',
+    route => route.fulfill({ json: { publicKey: vapidKey } }),
+  );
+  await page.route(
+    url => url.pathname.startsWith('/api/v1/users/@me/push-subscriptions'),
+    route => {
+      const request = route.request();
+      if (request.method() === 'POST') {
+        const body = request.postDataJSON() as { endpoint: string; userAgent?: string };
+        const subscription: MockPushSubscription = {
+          id: subscriptions.length + 1,
+          endpoint: body.endpoint,
+          userAgent: body.userAgent ?? null,
+          createdAt: '2026-01-01T00:00:00.000Z',
+        };
+        subscriptions.push(subscription);
+        return route.fulfill({ json: subscription });
+      }
+      if (request.method() === 'DELETE') {
+        const id = Number(new URL(request.url()).pathname.split('/').at(-1));
+        const index = subscriptions.findIndex(s => s.id === id);
+        if (index === -1) {
+          return route.fulfill({ status: 404, json: { error: 'Not found!' } });
+        }
+        subscriptions.splice(index, 1);
+        return route.fulfill({ json: { success: true } });
+      }
+      return route.fulfill({ json: subscriptions });
+    },
+  );
+}
+
 // Notification message bundles mirroring the backend catalog (the frontend
 // fetches them from GET /api/v1/locales/:lng and renders messages with them).
 const NOTIFICATION_BUNDLE_EN = {
@@ -361,6 +416,7 @@ export async function mockCommonApis(
   await mockLocaleBundles(page);
   await mockNotifications(page);
   await mockNotificationPreferences(page);
+  await mockPushApis(page);
   await mockOccurrences(page);
 }
 

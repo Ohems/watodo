@@ -445,9 +445,15 @@
     "timeFormatUpdateFailed": "Failed to change the time format",
     "notificationSettings": {
       "title": "Notification settings",
-      "description": "Choose which notifications you receive, per type and channel. Email and push delivery is not available yet, but your choices are saved for when it is.",
+      "description": "Choose which notifications you receive, per type and channel. Email delivery is not available yet, but your choice is saved for when it is.",
       "type": "Notification",
       "updateFailed": "Failed to save the notification setting",
+      "pushSection": "Push notifications",
+      "pushEnable": "Enable push notifications on this device",
+      "pushNotSupported": "This browser does not support push notifications. On iPhone or iPad, add Watodo to your home screen first (Share menu, then \"Add to Home Screen\") and use the installed app.",
+      "pushNotConfigured": "Push notifications are not configured on this server yet.",
+      "pushPermissionDenied": "Notification permission was denied. Allow notifications for this site in your browser settings, then try again.",
+      "pushEnableFailed": "Failed to enable push notifications",
       "channels": {
         "inApp": "In app",
         "email": "Email",

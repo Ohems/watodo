@@ -224,6 +224,10 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 - `DELETE /api/v1/users/@me/auth-accounts/:provider` - Disconnect a login method (auth required)
 - `GET /api/v1/users/@me/notification-preferences` - List the current user's notification preferences: every configurable catalog message key (all except `welcome`) crossed with every channel (`in_app`/`email`/`push`), stored rows or channel defaults, each entry carrying its settings `category` (`general` = sent to everyone, `management` = sent only to event/team managers; see `notificationMessageKeyCategories` in `src/i18n/messages.ts`) (auth required)
 - `PATCH /api/v1/users/@me/notification-preferences/:messageKey/:channel` - Set one preference, body `{ enabled }` (auth required)
+- `GET /api/v1/push/vapid-public-key` - The configured VAPID public key the browser needs for `pushManager.subscribe()` (auth required)
+- `GET /api/v1/users/@me/push-subscriptions` - List the current user's web push subscriptions (browser/device endpoints) (auth required)
+- `POST /api/v1/users/@me/push-subscriptions` - Register a push subscription, body = `PushSubscription.toJSON()` (`{ endpoint, keys: { p256dh, auth }, userAgent? }`); the endpoint is unique across users, re-registering re-points it at the current user (auth required)
+- `DELETE /api/v1/users/@me/push-subscriptions/:subscriptionId` - Delete one of the current user's push subscriptions (auth required)
 - `GET /api/v1/users/:userId` - Get user with permissions (`user-management:read`)
 - `PATCH /api/v1/users/:userId` - Update user (`user-management:write`)
 - `DELETE /api/v1/users/:userId` - Delete user (`user-management:write`)
@@ -342,7 +346,8 @@ Team-scoped routes (get/update team, members) also accept users who have the man
 
 ```
 frontend/src/
-├── main.tsx              # Entry point (Redux Provider + Router)
+├── main.tsx              # Entry point (Redux Provider + Router); also registers the service worker
+├── push.ts               # Web push helpers (subscribe/unsubscribe via the service worker)
 ├── App.tsx               # Route definitions
 ├── api/
 │   └── index.ts          # RTK Query api (createApi): queries, mutations, cache tags
@@ -384,6 +389,12 @@ frontend/src/
 
 ### Key patterns
 
+- **PWA / web push**: `frontend/public/manifest.webmanifest` + the icons in
+  `public/favicons/` make the app installable; `public/sw.js` (a static
+  passthrough fetch plus `push`/`notificationclick` handlers, registered in
+  `main.tsx`) enables installability and web push. Playwright runs with
+  `serviceWorkers: 'block'` so `page.route` mocks are not bypassed by the
+  worker; push UI tests stub the browser push APIs via `page.addInitScript`.
 - **State management**: Redux Toolkit. The store holds the RTK Query api reducer
   (with `api.middleware`) and the organization slice. Use `useAppDispatch` and
   `useAppSelector` from `hooks/redux.ts` (typed wrappers).
@@ -637,7 +648,13 @@ problem.
 
 ## Environment Variables
 
-See `.env.sample` for all variables. Key ones:
+See `.env.sample` for all variables. Sample env files set the standard
+configuration (server, logging, databases, URLs, job tuning) but keep
+optional-feature credentials (OAuth providers, VAPID push keys) commented out
+with the expected format in the comment, so a fresh copy disables those
+features. (`backend/.env.test` is the exception: it is committed on purpose
+and uses placeholder values, since the test suite needs no real credentials.)
+Key ones:
 
 - `DATABASE_URL` - PostgreSQL connection string (development/production only; the
   test suite uses PGlite and does not need it)
@@ -646,6 +663,7 @@ See `.env.sample` for all variables. Key ones:
 - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` - Google OAuth credentials
 - `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` - Microsoft OAuth credentials
 - `BASE_URL` - Public URL of the backend (used for OAuth redirect)
+- `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` - Web push (VAPID) keys, generate once with `npx web-push generate-vapid-keys`; empty keys disable push delivery. Production must be served over HTTPS, and iOS requires the installed PWA (iOS 16.4+)
 - `PORT` / `HOST` - Server bind address (default: 3000 / 0.0.0.0)
 - `NODE_ENV` - Environment (development / production / test)
 - `LOG_ENABLED` - Set to `false` to disable all logging (default: `true`)

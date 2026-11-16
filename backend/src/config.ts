@@ -23,6 +23,11 @@ export const config = {
     process.env.CRITICAL_SLOT_ALERT_INTERVAL_MINUTES ?? '60',
     10,
   ),
+  // Web push (VAPID) configuration. Generate a pair once with
+  // `npx web-push generate-vapid-keys`. When empty, push delivery is disabled.
+  vapidPublicKey: process.env.VAPID_PUBLIC_KEY ?? '',
+  vapidPrivateKey: process.env.VAPID_PRIVATE_KEY ?? '',
+  vapidSubject: process.env.VAPID_SUBJECT ?? 'mailto:admin@example.com',
 } as const;
 
 export type Config = typeof config;

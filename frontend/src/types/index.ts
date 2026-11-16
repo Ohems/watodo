@@ -714,6 +714,26 @@ export interface NotificationPreferencesResponse {
   preferences: NotificationPreference[];
 }
 
+// --- Push subscriptions ---
+
+/** A registered web push endpoint (browser/device) of the current user. */
+export interface PushSubscription {
+  id: number;
+  endpoint: string;
+  userAgent: string | null;
+  createdAt: string;
+}
+
+/** Body of POST /api/v1/users/@me/push-subscriptions (PushSubscription.toJSON()). */
+export interface PushSubscriptionPush {
+  endpoint: string;
+  keys: {
+    p256dh: string;
+    auth: string;
+  };
+  userAgent?: string;
+}
+
 // --- Paginated responses ---
 
 export interface Paginated<T> {

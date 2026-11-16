@@ -8,6 +8,7 @@ import { eventRoutes } from './events.js';
 import { localeRoutes } from './locales.js';
 import { notificationRoutes } from './notifications.js';
 import { organizationRoutes } from './organizations.js';
+import { pushRoutes } from './push.js';
 import { roleRoutes } from './roles.js';
 import { roomRoutes } from './rooms.js';
 import { siteRoutes } from './sites.js';
@@ -34,4 +35,5 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   await certificationRoutes(app);
   await userWorkRoleRoutes(app);
   await notificationRoutes(app);
+  await pushRoutes(app);
 }

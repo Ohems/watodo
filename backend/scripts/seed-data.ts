@@ -263,6 +263,7 @@ const SUMMARY_TABLES = [
   'certification_work_roles',
   'notifications',
   'notification_preferences',
+  'push_subscriptions',
   'calendars',
   'event_types',
   'event_type_roles',
@@ -1649,6 +1650,18 @@ export async function seedTestData(tx: Tx): Promise<void> {
         enabled: true,
       },
     ])
+    .execute();
+  // One web push subscription (browser endpoint) for the user who opted into
+  // push notifications.
+  await tx
+    .insertInto('push_subscriptions')
+    .values({
+      user_id: mockUsersOne[1].id,
+      endpoint: 'https://push.example.com/seed-subscription-1',
+      p256dh: 'seed-p256dh-key',
+      auth: 'seed-auth-secret',
+      user_agent: 'Mozilla/5.0 (seed)',
+    })
     .execute();
 
   logger.info(`Seeded event series for "${firstOrganization.name}"`);

@@ -11,6 +11,7 @@ import {
 } from '../i18n/messages.js';
 import { createLogger } from '../logger.js';
 import type { NotificationUpdate, TableQuery } from '../schemas/index.js';
+import { deliverPushIfEnabled } from './push-service.js';
 
 const logger = createLogger('notification-service');
 
@@ -321,13 +322,20 @@ async function insertNotification(
       dedup_key: dedupKey ?? null,
     })
     .returningAll();
+  let row: Notification | undefined;
   if (dedupKey) {
-    return query
+    row = await query
       .onConflict(oc => oc.columns(['user_id', 'dedup_key']).doNothing())
-      .executeTakeFirst()
-      .then(row => row ?? null);
+      .executeTakeFirst();
+  } else {
+    row = await query.executeTakeFirstOrThrow();
   }
-  return query.executeTakeFirstOrThrow();
+  if (row) {
+    // Push delivery rides on the in-app insert, so notifications suppressed
+    // in-app or stopped by the dedup key are not pushed either.
+    await deliverPushIfEnabled(executor, userId, key, validatedParams);
+  }
+  return row ?? null;
 }
 
 /**
