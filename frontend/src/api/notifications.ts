@@ -1,4 +1,11 @@
-import type { Notification, PaginatedNotifications, TableQuery } from '../types/index.js';
+import type {
+  Notification,
+  NotificationChannel,
+  NotificationPreference,
+  NotificationPreferencesResponse,
+  PaginatedNotifications,
+  TableQuery,
+} from '../types/index.js';
 import { api, withQuery } from './base.js';
 
 export const notificationsApi = api.injectEndpoints({
@@ -21,6 +28,21 @@ export const notificationsApi = api.injectEndpoints({
       query: () => ({ url: '/api/v1/notifications/mark-all-read', method: 'POST', body: {} }),
       invalidatesTags: ['Notifications'],
     }),
+    getNotificationPreferences: build.query<NotificationPreferencesResponse, void>({
+      query: () => '/api/v1/users/@me/notification-preferences',
+      providesTags: ['NotificationPreferences'],
+    }),
+    updateNotificationPreference: build.mutation<
+      NotificationPreference,
+      { messageKey: string; channel: NotificationChannel; enabled: boolean }
+    >({
+      query: ({ messageKey, channel, enabled }) => ({
+        url: `/api/v1/users/@me/notification-preferences/${encodeURIComponent(messageKey)}/${channel}`,
+        method: 'PATCH',
+        body: { enabled },
+      }),
+      invalidatesTags: ['NotificationPreferences'],
+    }),
   }),
 });
 
@@ -28,4 +50,6 @@ export const {
   useGetNotificationsQuery,
   useMarkNotificationReadMutation,
   useMarkAllNotificationsReadMutation,
+  useGetNotificationPreferencesQuery,
+  useUpdateNotificationPreferenceMutation,
 } = notificationsApi;

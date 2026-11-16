@@ -4,6 +4,7 @@ import type { Absence, Database } from '../db/types.js';
 import { notFound } from '../http-error.js';
 import { createLogger } from '../logger.js';
 import type { AbsencePush, AbsenceQuery, AbsenceUpdate } from '../schemas/index.js';
+import { createNotificationInTx } from './notification-service.js';
 import {
   expandOccurrences,
   type OccurrenceExceptionRule,
@@ -367,22 +368,22 @@ async function removeOverlappingAssignmentsAndNotify(
     );
     const startText = occurrence.start.toISOString();
     for (const managerId of managerIds) {
-      await tx
-        .insertInto('notifications')
-        .values({
-          user_id: managerId,
-          organization_id: organizationId,
-          message_key: 'assignmentRemovedDueToAbsence',
-          params: {
-            userName,
-            eventTitle: occurrence.title,
-            start: startText,
-            absenceType: absence.type,
-            absenceStart: absence.startDate,
-            absenceEnd: absence.endDate,
-          },
-        })
-        .execute();
+      // Goes through the notification service so the manager's in-app
+      // preference for this message key is respected.
+      await createNotificationInTx(
+        tx,
+        managerId,
+        'assignmentRemovedDueToAbsence',
+        {
+          userName,
+          eventTitle: occurrence.title,
+          start: startText,
+          absenceType: absence.type,
+          absenceStart: absence.startDate,
+          absenceEnd: absence.endDate,
+        },
+        organizationId,
+      );
     }
   }
   return removed;

@@ -9,10 +9,6 @@ const enGB: LocaleBundle = {
       title: 'Welcome to Watodo',
       body: 'Your organisation has been set up. Explore the calendar and invite your team.',
     },
-    organizationCreated: {
-      title: 'New organisation ready',
-      body: '{{organizationName}} has been created. Start adding events.',
-    },
     upcomingEvent: {
       title: 'Upcoming event',
       body: '{{eventTitle}} is happening this month. Check the calendar for details.',
@@ -21,6 +17,10 @@ const enGB: LocaleBundle = {
       title: 'You have been assigned a work role',
       body: 'You are assigned to "{{role}}" for {{eventTitle}}.',
     },
+    workRoleUnassigned: {
+      title: 'Work role assignment removed',
+      body: 'You are no longer assigned to "{{role}}" for {{eventTitle}}.',
+    },
     newEventComment: {
       title: 'New event comment',
       body: 'Someone commented on {{eventTitle}}.',
@@ -28,6 +28,18 @@ const enGB: LocaleBundle = {
     roleAssigned: {
       title: 'Role assigned',
       body: 'You have been assigned the {{roleName}} role.',
+    },
+    eventCancelled: {
+      title: 'Event cancelled',
+      body: '{{eventTitle}} on {{start}} has been cancelled.',
+    },
+    eventRescheduled: {
+      title: 'Event rescheduled',
+      body: '{{eventTitle}} ({{start}}) has been rescheduled to {{newStart}} - {{newEnd}}.',
+    },
+    unfilledCriticalSlot: {
+      title: 'Critical role still unfilled',
+      body: 'Critical role(s) still unfilled for {{eventTitle}} on {{start}}: {{roles}}.',
     },
     assignmentRemovedDueToAbsence: {
       title: 'Assignment removed due to absence',

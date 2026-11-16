@@ -167,6 +167,7 @@ backend/src/
 │   ├── certifications.ts # Certification routes
 │   └── user-work-roles.ts # User work role / certification routes
 ├── controllers/          # Request handlers (parse input, call services, send response)
+├── jobs/                 # Scheduled jobs started from index.ts (e.g. critical-slot-alerts)
 └── services/             # Business logic (database queries via Kysely)
     └── auth-providers/   # OAuth provider logic, one file per provider
         ├── index.ts      # Provider registry + lookup (SUPPORTED_PROVIDERS, getProvider)
@@ -221,6 +222,8 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 - `DELETE /api/v1/users/@me` - Delete own account (auth required)
 - `GET /api/v1/users/@me/auth-accounts` - List connected login methods (auth required)
 - `DELETE /api/v1/users/@me/auth-accounts/:provider` - Disconnect a login method (auth required)
+- `GET /api/v1/users/@me/notification-preferences` - List the current user's notification preferences: every configurable catalog message key (all except `welcome`) crossed with every channel (`in_app`/`email`/`push`), stored rows or channel defaults, each entry carrying its settings `category` (`general` = sent to everyone, `management` = sent only to event/team managers; see `notificationMessageKeyCategories` in `src/i18n/messages.ts`) (auth required)
+- `PATCH /api/v1/users/@me/notification-preferences/:messageKey/:channel` - Set one preference, body `{ enabled }` (auth required)
 - `GET /api/v1/users/:userId` - Get user with permissions (`user-management:read`)
 - `PATCH /api/v1/users/:userId` - Update user (`user-management:write`)
 - `DELETE /api/v1/users/:userId` - Delete user (`user-management:write`)
@@ -435,7 +438,11 @@ frontend/src/
   validated by the zod registry in `src/i18n/messages.ts`). The in-app list is
   rendered client-side from the bundle served by `GET /api/v1/locales/:lng`;
   email/push delivery renders it server-side with `renderNotificationMessage`
-  in the recipient's `users.language`.
+  in the recipient's `users.language`. Per-user delivery toggles live in
+  `notification_preferences` (one row per user + message key + channel; absent
+  rows use the channel default: in-app and email on, push off). The in-app
+  channel is enforced when the notification row is inserted; email/push are
+  configured but not delivered yet.
   Events can be assigned to a site (optionally reserving the whole site)
   and/or a specific room within a site. Booking conflict detection: every
   write that can change a booking (series create/update, config update, split,

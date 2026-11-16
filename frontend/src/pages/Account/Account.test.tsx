@@ -4,7 +4,13 @@ import { getToken, setToken } from '../../api/index.js';
 import i18n from '../../i18n/index.js';
 import { type MockApi, mockApi } from '../../test/api-mock.js';
 import { renderWithProviders } from '../../test/test-utils.js';
-import type { AuthAccount, AuthProviderInfo, User, UserSelfUpdate } from '../../types/index.js';
+import type {
+  AuthAccount,
+  AuthProviderInfo,
+  NotificationPreferencesResponse,
+  User,
+  UserSelfUpdate,
+} from '../../types/index.js';
 import AccountPage from './Account.js';
 
 const mockUser: User = {
@@ -40,7 +46,29 @@ interface AccountRoutes {
   currentUser: User;
   authAccounts: AuthAccount[];
   accountDeleted: boolean;
+  preferences: NotificationPreferencesResponse;
 }
+
+/** Three notification types x three channels across both categories, with one stored override. */
+const mockPreferences: NotificationPreferencesResponse = {
+  channels: ['in_app', 'email', 'push'],
+  preferences: [
+    { messageKey: 'workRoleAssigned', channel: 'in_app', enabled: true, category: 'general' },
+    { messageKey: 'workRoleAssigned', channel: 'email', enabled: true, category: 'general' },
+    { messageKey: 'workRoleAssigned', channel: 'push', enabled: false, category: 'general' },
+    { messageKey: 'eventCancelled', channel: 'in_app', enabled: true, category: 'general' },
+    { messageKey: 'eventCancelled', channel: 'email', enabled: false, category: 'general' },
+    { messageKey: 'eventCancelled', channel: 'push', enabled: false, category: 'general' },
+    {
+      messageKey: 'unfilledCriticalSlot',
+      channel: 'in_app',
+      enabled: true,
+      category: 'management',
+    },
+    { messageKey: 'unfilledCriticalSlot', channel: 'email', enabled: true, category: 'management' },
+    { messageKey: 'unfilledCriticalSlot', channel: 'push', enabled: false, category: 'management' },
+  ],
+};
 
 /** Registers stateful routes: mutations update the served data. */
 function mockAccountRoutes(mock: MockApi, state: AccountRoutes) {
@@ -52,6 +80,23 @@ function mockAccountRoutes(mock: MockApi, state: AccountRoutes) {
   );
   mock.on('GET', '/api/v1/auth/providers', { providers: mockProviders });
   mock.on('GET', '/api/v1/users/@me/auth-accounts', () => state.authAccounts);
+  mock.on('GET', '/api/v1/users/@me/notification-preferences', () => state.preferences);
+  mock.on('PATCH', /\/api\/v1\/users\/@me\/notification-preferences\//, () => {
+    const last = mock.calls[mock.calls.length - 1];
+    const segment = last.url.split('/notification-preferences/')[1].split('?')[0];
+    const [messageKey, channel] = segment.split('/');
+    const body = last.body as { enabled: boolean };
+    state.preferences = {
+      ...state.preferences,
+      preferences: state.preferences.preferences.map(p =>
+        p.messageKey === messageKey && p.channel === channel ? { ...p, enabled: body.enabled } : p,
+      ),
+    };
+    const updated = state.preferences.preferences.find(
+      p => p.messageKey === messageKey && p.channel === channel,
+    );
+    return { messageKey, channel, enabled: body.enabled, category: updated?.category };
+  });
   mock.on('PATCH', '/api/v1/users/@me', () => {
     const body = mock.lastBody('PATCH', '/api/v1/users/@me') as UserSelfUpdate;
     state.currentUser = {
@@ -89,6 +134,10 @@ describe('AccountPage', () => {
       currentUser: mockUser,
       authAccounts: [...mockAuthAccounts],
       accountDeleted: false,
+      preferences: {
+        channels: [...mockPreferences.channels],
+        preferences: mockPreferences.preferences.map(p => ({ ...p })),
+      },
     };
     mockAccountRoutes(mock, state);
   });
@@ -400,6 +449,64 @@ describe('AccountPage', () => {
     renderPage('/account?linkError=Already%20connected%20to%20a%20different%20user');
 
     expect(await screen.findByText('Already connected to a different user')).toBeInTheDocument();
+  });
+
+  it('shows the notification settings card grouped into categories, without a welcome toggle', async () => {
+    renderPage();
+
+    expect(
+      await screen.findByRole('heading', { name: 'Notification settings' }),
+    ).toBeInTheDocument();
+    // The two category sections.
+    expect(await screen.findByRole('heading', { name: 'General' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Management' })).toBeInTheDocument();
+    // Channel column headers, once per category table.
+    expect(await screen.findAllByRole('columnheader', { name: 'In app' })).toHaveLength(2);
+    expect(screen.getAllByRole('columnheader', { name: 'Email' })).toHaveLength(2);
+    expect(screen.getAllByRole('columnheader', { name: 'Push' })).toHaveLength(2);
+    // One row per notification type; the welcome type has no toggle.
+    expect(screen.getByRole('cell', { name: /^Work role assigned$/ })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: /^Event cancelled$/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole('cell', { name: /^Unfilled critical role alert$/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('cell', { name: /^Welcome$/ })).not.toBeInTheDocument();
+    // Stored toggle states.
+    expect(screen.getByRole('switch', { name: 'Work role assigned - In app' })).toBeChecked();
+    expect(screen.getByRole('switch', { name: 'Work role assigned - Push' })).not.toBeChecked();
+    expect(screen.getByRole('switch', { name: 'Event cancelled - Email' })).not.toBeChecked();
+    expect(
+      screen.getByRole('switch', { name: 'Unfilled critical role alert - In app' }),
+    ).toBeChecked();
+  });
+
+  it('saves a toggled notification preference', async () => {
+    renderPage();
+
+    const toggle = await screen.findByRole('switch', { name: 'Work role assigned - Push' });
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(mock.callCount('PATCH', /notification-preferences/)).toBe(1);
+    });
+    expect(mock.lastBody('PATCH', /notification-preferences/)).toEqual({ enabled: true });
+    const lastPatch = mock.calls.filter(c => c.method === 'PATCH').at(-1);
+    expect(lastPatch?.url).toContain(
+      '/api/v1/users/@me/notification-preferences/workRoleAssigned/push',
+    );
+    // The list refetches and the toggle reflects the saved value.
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Work role assigned - Push' })).toBeChecked();
+    });
+  });
+
+  it('shows an error when saving a notification preference fails', async () => {
+    mock.on('PATCH', /notification-preferences/, { error: 'Validation error' }, 400);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('switch', { name: 'Event cancelled - In app' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Validation error');
   });
 
   it('deletes the account after confirmation', async () => {

@@ -335,6 +335,45 @@ const exceptionsOf = async (seed: Seed, seriesId: number): Promise<ExceptionResp
   return response.json() as ExceptionResponse[];
 };
 
+/** Connects a team to the series and makes leaderId/managerId its managers. */
+async function seedTeamWithManagers(
+  seed: Seed,
+  seriesId: number,
+  leaderId: string,
+  managerId: string,
+): Promise<string> {
+  const team = await db
+    .insertInto('teams')
+    .values({
+      name: `Team ${randomUUID()}`,
+      organization_id: seed.organizationId,
+      team_leader_id: leaderId,
+    })
+    .returningAll()
+    .executeTakeFirstOrThrow();
+  await db
+    .insertInto('team_members')
+    .values({ team_id: team.id, user_id: managerId, is_manager: true })
+    .execute();
+  await db
+    .insertInto('event_series_teams')
+    .values({ event_series_id: seriesId, team_id: team.id })
+    .execute();
+  return team.id;
+}
+
+interface NotificationRow {
+  id: number;
+  user_id: string;
+  organization_id: string | null;
+  message_key: string;
+  params: Record<string, unknown>;
+}
+
+/** All notifications of a user, straight from the database. */
+const notificationsFor = async (userId: string): Promise<NotificationRow[]> =>
+  db.selectFrom('notifications').selectAll().where('user_id', '=', userId).execute();
+
 const split = async (
   seed: Seed,
   seriesId: number,
@@ -1497,6 +1536,33 @@ describe('Events API', () => {
       });
       expect(response.statusCode).toBe(404);
     });
+
+    it('notifies the occurrence participants and the series managers', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
+      await assignToWorkRole(seed, series.id, slot.id, seed.memberUserId);
+      await seedTeamWithManagers(seed, series.id, seed.adminUserId, seed.readerUserId);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/occurrences/${encodeURIComponent('2026-10-28T17:00:00.000Z')}/cancel`,
+        headers: auth(seed.adminToken),
+      });
+      expect(response.statusCode).toBe(200);
+
+      for (const userId of [seed.memberUserId, seed.readerUserId]) {
+        const notifications = (await notificationsFor(userId)).filter(
+          n => n.message_key === 'eventCancelled',
+        );
+        expect(notifications).toHaveLength(1);
+        expect(notifications[0].params).toEqual({
+          eventTitle: 'Weekly sync',
+          start: '2026-10-28T17:00:00.000Z',
+        });
+        expect(notifications[0].organization_id).toBe(seed.organizationId);
+      }
+    });
   });
 
   describe('POST /api/v1/event-series/:seriesId/occurrences/:occurrenceStart/reschedule', () => {
@@ -1530,6 +1596,36 @@ describe('Events API', () => {
       expect(moved?.start).toBe('2026-11-03T10:00:00.000Z');
       expect(moved?.isRescheduled).toBe(true);
       expect(weekly.some(o => o.start === '2026-11-02T17:00:00.000Z')).toBe(false);
+    });
+
+    it('notifies the occurrence participants and the series managers about the new time', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
+      await assignToWorkRole(seed, series.id, slot.id, seed.memberUserId);
+      await seedTeamWithManagers(seed, series.id, seed.adminUserId, seed.readerUserId);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/occurrences/${encodeURIComponent('2026-11-02T17:00:00.000Z')}/reschedule`,
+        headers: auth(seed.adminToken),
+        payload: { start: '2026-11-03T10:00:00.000Z' },
+      });
+      expect(response.statusCode).toBe(200);
+
+      for (const userId of [seed.memberUserId, seed.readerUserId]) {
+        const notifications = (await notificationsFor(userId)).filter(
+          n => n.message_key === 'eventRescheduled',
+        );
+        expect(notifications).toHaveLength(1);
+        expect(notifications[0].params).toEqual({
+          eventTitle: 'Weekly sync',
+          start: '2026-11-02T17:00:00.000Z',
+          newStart: '2026-11-03T10:00:00.000Z',
+          newEnd: '2026-11-03T11:00:00.000Z',
+        });
+        expect(notifications[0].organization_id).toBe(seed.organizationId);
+      }
     });
 
     it('reports booking conflicts when the occurrence is rescheduled into another booking in the same room', async () => {
@@ -1830,6 +1926,49 @@ describe('Events API', () => {
       expect(assignment.userName).toBe('Reader User');
     });
 
+    it('notifies the assigned user about the new assignment', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
+      await assignToWorkRole(seed, series.id, slot.id, seed.readerUserId);
+
+      const notifications = await notificationsFor(seed.readerUserId);
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0].message_key).toBe('workRoleAssigned');
+      expect(notifications[0].params).toEqual({ eventTitle: 'Weekly sync', role: 'Setup crew' });
+      expect(notifications[0].organization_id).toBe(seed.organizationId);
+      // The assigner gets no notification.
+      expect(await notificationsFor(seed.adminUserId)).toHaveLength(0);
+    });
+
+    it('does not notify the assigned user when they disabled the type in-app', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
+      // The reader turns off in-app notifications for workRoleAssigned.
+      const preference = await app.inject({
+        method: 'PATCH',
+        url: '/api/v1/users/@me/notification-preferences/workRoleAssigned/in_app',
+        headers: auth(seed.readerToken),
+        payload: { enabled: false },
+      });
+      expect(preference.statusCode).toBe(200);
+
+      await assignToWorkRole(seed, series.id, slot.id, seed.readerUserId);
+      expect(await notificationsFor(seed.readerUserId)).toHaveLength(0);
+
+      // Re-enabling delivers again.
+      await app.inject({
+        method: 'PATCH',
+        url: '/api/v1/users/@me/notification-preferences/workRoleAssigned/in_app',
+        headers: auth(seed.readerToken),
+        payload: { enabled: true },
+      });
+      await assignToWorkRole(seed, series.id, slot.id, seed.memberUserId);
+      expect(await notificationsFor(seed.memberUserId)).toHaveLength(1);
+      expect(await notificationsFor(seed.readerUserId)).toHaveLength(0);
+    });
+
     it('rejects a duplicate assignment', async () => {
       const seed = await createEventsFixture();
       const series = await createSeries(seed, weeklyPayload);
@@ -1925,6 +2064,35 @@ describe('Events API', () => {
         results: { status: string }[];
       };
       expect(againBody.results[0].status).toBe('already-assigned');
+    });
+
+    it('notifies the assigned user once per occurrence, with the occurrence start', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
+
+      await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/work-roles/${slot.id}/assignments/bulk`,
+        headers: auth(seed.adminToken),
+        payload: {
+          userId: seed.memberUserId,
+          occurrenceStarts: ['2026-10-21T16:00:00.000Z', '2026-10-26T17:00:00.000Z'],
+        },
+      });
+
+      const notifications = await notificationsFor(seed.memberUserId);
+      expect(notifications).toHaveLength(2);
+      expect(notifications.every(n => n.message_key === 'workRoleAssigned')).toBe(true);
+      expect(notifications.map(n => n.params.start).sort()).toEqual([
+        '2026-10-21T16:00:00.000Z',
+        '2026-10-26T17:00:00.000Z',
+      ]);
+      expect(notifications[0].params).toMatchObject({
+        eventTitle: 'Weekly sync',
+        role: 'Setup crew',
+      });
+      expect(notifications[0].organization_id).toBe(seed.organizationId);
     });
 
     it('rejects an occurrence start that is not an occurrence of the series', async () => {
@@ -2311,6 +2479,30 @@ describe('Events API', () => {
       });
       expect(response.statusCode).toBe(404);
     });
+
+    it('notifies series participants and managers, but not the comment author', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
+      await assignToWorkRole(seed, series.id, slot.id, seed.memberUserId);
+      await seedTeamWithManagers(seed, series.id, seed.adminUserId, seed.readerUserId);
+
+      await createComment(seed, series.id, { body: 'Series-wide note' }, seed.adminToken);
+
+      for (const userId of [seed.memberUserId, seed.readerUserId]) {
+        const notifications = (await notificationsFor(userId)).filter(
+          n => n.message_key === 'newEventComment',
+        );
+        expect(notifications).toHaveLength(1);
+        expect(notifications[0].params).toEqual({ eventTitle: 'Weekly sync' });
+        expect(notifications[0].organization_id).toBe(seed.organizationId);
+      }
+      // The author (team leader here) is not notified about their own comment.
+      const own = (await notificationsFor(seed.adminUserId)).filter(
+        n => n.message_key === 'newEventComment',
+      );
+      expect(own).toHaveLength(0);
+    });
   });
 
   describe('GET /api/v1/event-series/:seriesId/occurrences/:occurrenceStart', () => {
@@ -2587,6 +2779,30 @@ describe('Events API', () => {
       expect(assignment.userId).toBe(seed.memberUserId);
     });
 
+    it('notifies the assigned user with the occurrence start', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, {
+        title: 'AV check',
+        occurrenceStart: '2026-10-21T16:00:00.000Z',
+      });
+      await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${slot.occurrenceId as number}/work-roles/${slot.id}/assignments`,
+        headers: auth(seed.adminToken),
+        payload: { userId: seed.memberUserId },
+      });
+
+      const notifications = await notificationsFor(seed.memberUserId);
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0].message_key).toBe('workRoleAssigned');
+      expect(notifications[0].params).toEqual({
+        eventTitle: 'Weekly sync',
+        role: 'AV check',
+        start: '2026-10-21T16:00:00.000Z',
+      });
+    });
+
     it('assigns to the inherited copy when the parent slot of a materialized occurrence is referenced', async () => {
       const seed = await createEventsFixture();
       const series = await createSeries(seed, weeklyPayload);
@@ -2770,6 +2986,44 @@ describe('Events API', () => {
         payload: { body: 'Hello' },
       });
       expect(response.statusCode).toBe(404);
+    });
+
+    it('notifies occurrence participants with the occurrence start, except the author', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, {
+        title: 'AV check',
+        occurrenceStart: '2026-10-21T16:00:00.000Z',
+      });
+      const occurrenceId = slot.occurrenceId as number;
+      // The member is assigned to the occurrence-level slot, so they are a participant.
+      await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${occurrenceId}/work-roles/${slot.id}/assignments`,
+        headers: auth(seed.adminToken),
+        payload: { userId: seed.memberUserId },
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${occurrenceId}/comments`,
+        headers: auth(seed.adminToken),
+        payload: { body: 'Please bring the keys' },
+      });
+      expect(response.statusCode).toBe(200);
+
+      const notifications = (await notificationsFor(seed.memberUserId)).filter(
+        n => n.message_key === 'newEventComment',
+      );
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0].params).toEqual({
+        eventTitle: 'Weekly sync',
+        start: '2026-10-21T16:00:00.000Z',
+      });
+      const own = (await notificationsFor(seed.adminUserId)).filter(
+        n => n.message_key === 'newEventComment',
+      );
+      expect(own).toHaveLength(0);
     });
   });
 
@@ -3196,6 +3450,28 @@ describe('Events API', () => {
         headers: auth(seed.adminToken),
       });
       expect(response.statusCode).toBe(200);
+    });
+
+    it('notifies the removed user about the unassignment', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
+      const assignment = await assignToWorkRole(seed, series.id, slot.id, seed.readerUserId);
+      await app.inject({
+        method: 'DELETE',
+        url: `/api/v1/event-series/${series.id}/work-roles/${slot.id}/assignments/${assignment.id}`,
+        headers: auth(seed.adminToken),
+      });
+
+      const notifications = await notificationsFor(seed.readerUserId);
+      // One from the assignment, one from the unassignment.
+      expect(notifications.map(n => n.message_key).sort()).toEqual([
+        'workRoleAssigned',
+        'workRoleUnassigned',
+      ]);
+      const unassigned = notifications.find(n => n.message_key === 'workRoleUnassigned');
+      expect(unassigned?.params).toEqual({ eventTitle: 'Weekly sync', role: 'Setup crew' });
+      expect(unassigned?.organization_id).toBe(seed.organizationId);
     });
   });
 

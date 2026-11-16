@@ -38,6 +38,7 @@ import type {
   WeekStart,
 } from '../../types/index.js';
 import { validateUserSelfUpdate } from '../../validation.js';
+import NotificationSettingsCard from './NotificationSettingsCard.js';
 
 /** Week start options offered in the preferences. */
 const WEEK_START_OPTIONS: WeekStart[] = ['sunday', 'monday'];
@@ -412,6 +413,8 @@ function AccountPage() {
           />
         </Stack>
       </Paper>
+
+      <NotificationSettingsCard />
 
       <Paper shadow="sm" p="lg" mt="lg">
         <Title order={5} mb="md">

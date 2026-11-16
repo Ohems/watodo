@@ -354,11 +354,42 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     organization_id: { type: 'uuid', references: 'organizations', onDelete: 'SET NULL' },
     message_key: { type: 'text', notNull: true },
     params: { type: 'jsonb', notNull: true, default: '{}' },
+    // Optional idempotency key for job-generated notifications (e.g. the
+    // unfilled-critical-slot alert): a non-null value may exist only once per
+    // user, so re-running the job does not duplicate the notification.
+    dedup_key: { type: 'text' },
     is_read: { type: 'boolean', notNull: true, default: false },
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
   pgm.createIndex('notifications', 'user_id');
   pgm.createIndex('notifications', 'organization_id');
+  // NULL dedup keys are distinct, so only non-null keys are deduplicated.
+  pgm.createIndex('notifications', ['user_id', 'dedup_key'], {
+    unique: true,
+    name: 'notifications_user_dedup_key_unique',
+  });
+
+  // Per-user notification preferences: one row per (user, message key,
+  // delivery channel) that the user has explicitly changed. Rows absent from
+  // this table use the channel's default (see notification-service).
+  pgm.createTable('notification_preferences', {
+    user_id: { type: 'uuid', notNull: true, references: 'users', onDelete: 'CASCADE' },
+    message_key: { type: 'text', notNull: true },
+    channel: { type: 'text', notNull: true },
+    enabled: { type: 'boolean', notNull: true, default: true },
+    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+    updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+  });
+  pgm.addConstraint(
+    'notification_preferences',
+    'notification_preferences_channel_check',
+    "CHECK (channel IN ('in_app', 'email', 'push'))",
+  );
+  pgm.addConstraint(
+    'notification_preferences',
+    'notification_preferences_user_message_channel_key',
+    'PRIMARY KEY (user_id, message_key, channel)',
+  );
 
   // Calendars
   pgm.createTable('calendars', {
@@ -688,6 +719,7 @@ export async function down(pgm: MigrationBuilder): Promise<void> {
   pgm.dropTable('event_types');
   pgm.dropTable('calendars');
   pgm.dropTable('absences');
+  pgm.dropTable('notification_preferences');
   pgm.dropTable('notifications');
   pgm.dropTable('certification_work_roles');
   pgm.dropTable('user_certifications');

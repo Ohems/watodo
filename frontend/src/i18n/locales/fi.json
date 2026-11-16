@@ -442,7 +442,33 @@
     "saveFailed": "Muutosten tallennus epäonnistui",
     "connectFailed": "Kirjautumistavan yhdistäminen epäonnistui",
     "disconnectFailed": "Kirjautumistavan yhteyden katkaiseminen epäonnistui",
-    "deleteFailed": "Tilin poistaminen epäonnistui"
+    "deleteFailed": "Tilin poistaminen epäonnistui",
+    "notificationSettings": {
+      "title": "Ilmoitusasetukset",
+      "description": "Valitse, mitä ilmoituksia saat, tyypin ja kanavan mukaan. Sähköposti- ja push-ilmoituksia ei ole vielä käytössä, mutta valintasi tallennetaan niiden käyttöönottoa varten.",
+      "type": "Ilmoitus",
+      "updateFailed": "Ilmoitusasetuksen tallennus epäonnistui",
+      "channels": {
+        "inApp": "Sovelluksessa",
+        "email": "Sähköposti",
+        "push": "Push-ilmoitukset"
+      },
+      "categories": {
+        "general": "Yleiset",
+        "management": "Hallinta"
+      },
+      "types": {
+        "upcomingEvent": "Tuleva tapahtuma",
+        "workRoleAssigned": "Työrooli määrätty",
+        "workRoleUnassigned": "Työroolimääritys poistettu",
+        "newEventComment": "Uusi tapahtumakommentti",
+        "roleAssigned": "Rooli määrätty",
+        "eventCancelled": "Tapahtuma peruttu",
+        "eventRescheduled": "Tapahtuma siirretty",
+        "unfilledCriticalSlot": "Kriittinen rooli täyttämättä -hälytys",
+        "assignmentRemovedDueToAbsence": "Määritys poistettu poissaolon vuoksi"
+      }
+    }
   },
   "errors": {
     "failedToFetchUsers": "Käyttäjien hakeminen epäonnistui",

@@ -262,6 +262,7 @@ const SUMMARY_TABLES = [
   'user_certifications',
   'certification_work_roles',
   'notifications',
+  'notification_preferences',
   'calendars',
   'event_types',
   'event_type_roles',
@@ -1621,6 +1622,34 @@ export async function seedTestData(tx: Tx): Promise<void> {
     { eventTitle: 'Weekly Community Meeting' },
     false,
   );
+  await addNotification(
+    tx,
+    mockUsersOne[1].id,
+    firstOrganization.id,
+    'eventCancelled',
+    { eventTitle: 'Summer Festival', start: '2026-08-15T09:00:00.000Z' },
+    false,
+  );
+  // Notification preferences: rows exist only for values that differ from the
+  // channel default (in-app and email on, push off). Here one user disables
+  // email for cancellations and another opts into push for assignments.
+  await tx
+    .insertInto('notification_preferences')
+    .values([
+      {
+        user_id: mockUsersOne[0].id,
+        message_key: 'eventCancelled',
+        channel: 'email',
+        enabled: false,
+      },
+      {
+        user_id: mockUsersOne[1].id,
+        message_key: 'workRoleAssigned',
+        channel: 'push',
+        enabled: true,
+      },
+    ])
+    .execute();
 
   logger.info(`Seeded event series for "${firstOrganization.name}"`);
 
@@ -2042,14 +2071,6 @@ export async function seedTestData(tx: Tx): Promise<void> {
   await assignTeamsToSeries(tx, seasonKickoff.id, [teamsTwo[1].id]);
 
   // Notifications for the second organization's users.
-  await addNotification(
-    tx,
-    realUser.id,
-    secondOrganization.id,
-    'organizationCreated',
-    { organizationName: 'Riverside Community Association' },
-    false,
-  );
   await addNotification(
     tx,
     mockUsersTwo[0].id,

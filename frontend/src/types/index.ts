@@ -690,6 +690,30 @@ export interface Notification {
   createdAt: string;
 }
 
+/** Delivery channels a notification can be sent through. */
+export type NotificationChannel = 'in_app' | 'email' | 'push';
+
+/**
+ * Settings category of a notification type: `general` notifications go to
+ * everyone concerned, `management` ones only to event/team managers.
+ */
+export type NotificationCategory = 'general' | 'management';
+
+/** One per-user toggle: a notification message key on a delivery channel. */
+export interface NotificationPreference {
+  messageKey: string;
+  channel: NotificationChannel;
+  enabled: boolean;
+  category: NotificationCategory;
+}
+
+/** Response of GET /api/v1/users/@me/notification-preferences. */
+export interface NotificationPreferencesResponse {
+  channels: NotificationChannel[];
+  /** Every catalog message key crossed with every channel, in catalog order. */
+  preferences: NotificationPreference[];
+}
+
 // --- Paginated responses ---
 
 export interface Paginated<T> {

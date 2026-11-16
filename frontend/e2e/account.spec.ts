@@ -5,6 +5,7 @@ import {
   interceptMutation,
   mockAuthAccounts,
   mockCommonApis,
+  mockNotificationPreferences,
   regularUser,
 } from './helpers.js';
 
@@ -235,6 +236,102 @@ test.describe('Account page', () => {
       await expect(page.getByRole('combobox', { name: 'Time format' })).toHaveValue(
         '12-hour clock (2:30 PM)',
       );
+    });
+  });
+
+  test.describe('notification settings', () => {
+    test('shows the notification settings card grouped into categories, without a welcome toggle', async ({
+      page,
+    }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, []);
+      // One stored override: email for cancellations is off.
+      await mockNotificationPreferences(page, [
+        { messageKey: 'eventCancelled', channel: 'email', enabled: false },
+      ]);
+      await gotoApp(page, '/account');
+
+      await expect(page.getByRole('heading', { name: 'Notification settings' })).toBeVisible();
+      // The settings are split into the General and Management categories.
+      await expect(page.getByRole('heading', { name: 'General' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Management' })).toBeVisible();
+      // Channel columns, once per category table.
+      await expect(page.getByRole('columnheader', { name: 'In app' })).toHaveCount(2);
+      await expect(page.getByRole('columnheader', { name: 'Email' })).toHaveCount(2);
+      await expect(page.getByRole('columnheader', { name: 'Push' })).toHaveCount(2);
+      // One row per notification type (exact match: the toggle cells contain
+      // the type name in their switch labels too). The welcome type has no
+      // toggle; manager-only alerts sit in the Management section.
+      await expect(
+        page.getByRole('cell', { name: 'Work role assigned', exact: true }),
+      ).toBeVisible();
+      await expect(page.getByRole('cell', { name: 'Event cancelled', exact: true })).toBeVisible();
+      await expect(
+        page.getByRole('cell', { name: 'Unfilled critical role alert', exact: true }),
+      ).toBeVisible();
+      await expect(page.getByRole('cell', { name: 'Welcome', exact: true })).toHaveCount(0);
+      // Defaults: in-app and email on, push off; the override is off.
+      await expect(page.getByRole('switch', { name: 'Work role assigned - In app' })).toBeChecked();
+      await expect(
+        page.getByRole('switch', { name: 'Work role assigned - Push' }),
+      ).not.toBeChecked();
+      await expect(page.getByRole('switch', { name: 'Event cancelled - Email' })).not.toBeChecked();
+      await expect(
+        page.getByRole('switch', { name: 'Unfilled critical role alert - In app' }),
+      ).toBeChecked();
+    });
+
+    test('toggling a switch calls PATCH with the type, channel and new value', async ({ page }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, []);
+      await gotoApp(page, '/account');
+
+      const toggle = page.getByRole('switch', { name: 'Work role assigned - Push' });
+      await expect(toggle).not.toBeChecked();
+
+      const patchRequest = page.waitForRequest(
+        req =>
+          req.url().includes('/api/v1/users/@me/notification-preferences/') &&
+          req.method() === 'PATCH',
+      );
+
+      // Click the switch's wrapping label: the visually hidden input itself
+      // never receives the hit (the track overlays it).
+      await page.locator('label', { has: toggle }).click();
+
+      const request = await patchRequest;
+      expect(request.url()).toContain(
+        '/api/v1/users/@me/notification-preferences/workRoleAssigned/push',
+      );
+      expect(request.postDataJSON()).toEqual({ enabled: true });
+      // The preferences refetch and the toggle reflects the saved value.
+      await expect(toggle).toBeChecked();
+    });
+
+    test('toggling an in-app notification off saves enabled=false', async ({ page }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, []);
+      await gotoApp(page, '/account');
+
+      const toggle = page.getByRole('switch', { name: 'Event cancelled - In app' });
+      await expect(toggle).toBeChecked();
+
+      const patchRequest = page.waitForRequest(
+        req =>
+          req.url().includes('/api/v1/users/@me/notification-preferences/') &&
+          req.method() === 'PATCH',
+      );
+
+      // Click the switch's wrapping label: the visually hidden input itself
+      // never receives the hit (the track overlays it).
+      await page.locator('label', { has: toggle }).click();
+
+      const request = await patchRequest;
+      expect(request.url()).toContain(
+        '/api/v1/users/@me/notification-preferences/eventCancelled/in_app',
+      );
+      expect(request.postDataJSON()).toEqual({ enabled: false });
+      await expect(toggle).not.toBeChecked();
     });
   });
 

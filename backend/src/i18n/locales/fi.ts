@@ -8,10 +8,6 @@ const fi: LocaleBundle = {
       title: 'Tervetuloa Watodoon',
       body: 'Organisaatiosi on nyt perustettu. Tutki kalenteria ja kutsu tiimisi mukaan.',
     },
-    organizationCreated: {
-      title: 'Uusi organisaatio valmis',
-      body: '{{organizationName}} on luotu. Ala lisätä tapahtumia.',
-    },
     upcomingEvent: {
       title: 'Tuleva tapahtuma',
       body: '{{eventTitle}} järjestetään tässä kuussa. Katso lisätiedot kalenterista.',
@@ -20,6 +16,10 @@ const fi: LocaleBundle = {
       title: 'Sinut on määrätty työrooliin',
       body: 'Sinut on määrätty rooliin "{{role}}" tapahtumaan {{eventTitle}}.',
     },
+    workRoleUnassigned: {
+      title: 'Työroolimääritys poistettu',
+      body: 'Sinua ei enää ole määrätty rooliin "{{role}}" tapahtumassa {{eventTitle}}.',
+    },
     newEventComment: {
       title: 'Uusi tapahtumakommentti',
       body: 'Joku kommentoi tapahtumaa {{eventTitle}}.',
@@ -27,6 +27,18 @@ const fi: LocaleBundle = {
     roleAssigned: {
       title: 'Rooli määrätty',
       body: 'Sinulle on määrätty rooli {{roleName}}.',
+    },
+    eventCancelled: {
+      title: 'Tapahtuma peruttu',
+      body: '{{eventTitle}} ({{start}}) on peruttu.',
+    },
+    eventRescheduled: {
+      title: 'Tapahtuma siirretty',
+      body: '{{eventTitle}} ({{start}}) on siirretty aikaan {{newStart}} - {{newEnd}}.',
+    },
+    unfilledCriticalSlot: {
+      title: 'Kriittinen rooli täyttämättä',
+      body: 'Kriittinen rooli/roolit ovat edelleen täyttämättä tapahtumassa {{eventTitle}} ({{start}}): {{roles}}.',
     },
     assignmentRemovedDueToAbsence: {
       title: 'Määritys poistettu poissaolon vuoksi',

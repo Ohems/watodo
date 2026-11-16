@@ -56,6 +56,7 @@ describe('seed-data script', () => {
       user_certifications: 6,
       certification_work_roles: 4,
       notifications: 7,
+      notification_preferences: 2,
       calendars: 4,
       event_types: 8,
       event_type_roles: 4,

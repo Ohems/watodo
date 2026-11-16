@@ -442,7 +442,33 @@
     "timeFormat": "Time format",
     "timeFormat_24h": "24-hour clock (14:30)",
     "timeFormat_12h": "12-hour clock (2:30 PM)",
-    "timeFormatUpdateFailed": "Failed to change the time format"
+    "timeFormatUpdateFailed": "Failed to change the time format",
+    "notificationSettings": {
+      "title": "Notification settings",
+      "description": "Choose which notifications you receive, per type and channel. Email and push delivery is not available yet, but your choices are saved for when it is.",
+      "type": "Notification",
+      "updateFailed": "Failed to save the notification setting",
+      "channels": {
+        "inApp": "In app",
+        "email": "Email",
+        "push": "Push"
+      },
+      "categories": {
+        "general": "General",
+        "management": "Management"
+      },
+      "types": {
+        "upcomingEvent": "Upcoming event",
+        "workRoleAssigned": "Work role assigned",
+        "workRoleUnassigned": "Work role unassigned",
+        "newEventComment": "New event comment",
+        "roleAssigned": "Role assigned",
+        "eventCancelled": "Event cancelled",
+        "eventRescheduled": "Event rescheduled",
+        "unfilledCriticalSlot": "Unfilled critical role alert",
+        "assignmentRemovedDueToAbsence": "Assignment removed due to absence"
+      }
+    }
   },
   "errors": {
     "failedToFetchUsers": "Failed to fetch users",

@@ -160,16 +160,86 @@ export async function mockNotifications(
   );
 }
 
+/**
+ * The configurable notification message keys of the backend catalog (all
+ * except `welcome`), in catalog order, with their settings category:
+ * `general` notifications go to everyone, `management` ones only to
+ * event/team managers.
+ */
+export const NOTIFICATION_MESSAGE_KEYS: { key: string; category: string }[] = [
+  { key: 'upcomingEvent', category: 'general' },
+  { key: 'workRoleAssigned', category: 'general' },
+  { key: 'workRoleUnassigned', category: 'general' },
+  { key: 'newEventComment', category: 'general' },
+  { key: 'roleAssigned', category: 'general' },
+  { key: 'eventCancelled', category: 'general' },
+  { key: 'eventRescheduled', category: 'general' },
+  { key: 'unfilledCriticalSlot', category: 'management' },
+  { key: 'assignmentRemovedDueToAbsence', category: 'management' },
+];
+
+const NOTIFICATION_CHANNELS = ['in_app', 'email', 'push'] as const;
+
+export interface MockNotificationPreference {
+  messageKey: string;
+  channel: string;
+  enabled: boolean;
+  category: string;
+}
+
+/**
+ * Mocks the notification preferences endpoints (Account page). Without
+ * overrides every key x channel is returned with the channel default (in-app
+ * and email on, push off). PATCH requests update the served state, so a
+ * refetch after a toggle reflects the saved value.
+ */
+export async function mockNotificationPreferences(
+  page: Page,
+  overrides: { messageKey: string; channel: string; enabled: boolean }[] = [],
+): Promise<void> {
+  const preferences: MockNotificationPreference[] = NOTIFICATION_MESSAGE_KEYS.flatMap(
+    ({ key, category }) =>
+      NOTIFICATION_CHANNELS.map(channel => {
+        const override = overrides.find(o => o.messageKey === key && o.channel === channel);
+        return {
+          messageKey: key,
+          channel,
+          enabled: override?.enabled ?? channel !== 'push',
+          category,
+        };
+      }),
+  );
+  await page.route(
+    url => url.pathname.startsWith('/api/v1/users/@me/notification-preferences'),
+    route => {
+      const request = route.request();
+      if (request.method() === 'PATCH') {
+        const segments = new URL(request.url()).pathname.split('/');
+        const messageKey = segments.at(-2) ?? '';
+        const channel = segments.at(-1) ?? '';
+        const body = request.postDataJSON() as { enabled?: boolean };
+        const enabled = body.enabled ?? true;
+        const existing = preferences.find(
+          p => p.messageKey === messageKey && p.channel === channel,
+        );
+        if (existing) existing.enabled = enabled;
+        return route.fulfill({
+          json: { messageKey, channel, enabled, category: existing?.category ?? 'general' },
+        });
+      }
+      return route.fulfill({
+        json: { channels: [...NOTIFICATION_CHANNELS], preferences },
+      });
+    },
+  );
+}
+
 // Notification message bundles mirroring the backend catalog (the frontend
 // fetches them from GET /api/v1/locales/:lng and renders messages with them).
 const NOTIFICATION_BUNDLE_EN = {
   welcome: {
     title: 'Welcome to Watodo',
     body: 'Your organisation has been set up. Explore the calendar and invite your team.',
-  },
-  organizationCreated: {
-    title: 'New organisation ready',
-    body: '{{organizationName}} has been created. Start adding events.',
   },
   upcomingEvent: {
     title: 'Upcoming event',
@@ -179,6 +249,10 @@ const NOTIFICATION_BUNDLE_EN = {
     title: 'You have been assigned a work role',
     body: 'You are assigned to "{{role}}" for {{eventTitle}}.',
   },
+  workRoleUnassigned: {
+    title: 'Work role assignment removed',
+    body: 'You are no longer assigned to "{{role}}" for {{eventTitle}}.',
+  },
   newEventComment: {
     title: 'New event comment',
     body: 'Someone commented on {{eventTitle}}.',
@@ -186,6 +260,18 @@ const NOTIFICATION_BUNDLE_EN = {
   roleAssigned: {
     title: 'Role assigned',
     body: 'You have been assigned the {{roleName}} role.',
+  },
+  eventCancelled: {
+    title: 'Event cancelled',
+    body: '{{eventTitle}} on {{start}} has been cancelled.',
+  },
+  eventRescheduled: {
+    title: 'Event rescheduled',
+    body: '{{eventTitle}} ({{start}}) has been rescheduled to {{newStart}} - {{newEnd}}.',
+  },
+  unfilledCriticalSlot: {
+    title: 'Critical role still unfilled',
+    body: 'Critical role(s) still unfilled for {{eventTitle}} on {{start}}: {{roles}}.',
   },
   assignmentRemovedDueToAbsence: {
     title: 'Assignment removed due to absence',
@@ -198,10 +284,6 @@ const NOTIFICATION_BUNDLE_FI = {
     title: 'Tervetuloa Watodoon',
     body: 'Organisaatiosi on nyt perustettu. Tutki kalenteria ja kutsu tiimisi mukaan.',
   },
-  organizationCreated: {
-    title: 'Uusi organisaatio valmis',
-    body: '{{organizationName}} on luotu. Ala lisätä tapahtumia.',
-  },
   upcomingEvent: {
     title: 'Tuleva tapahtuma',
     body: '{{eventTitle}} järjestetään tässä kuussa. Katso lisätiedot kalenterista.',
@@ -210,6 +292,10 @@ const NOTIFICATION_BUNDLE_FI = {
     title: 'Sinut on määrätty työrooliin',
     body: 'Sinut on määrätty rooliin "{{role}}" tapahtumaan {{eventTitle}}.',
   },
+  workRoleUnassigned: {
+    title: 'Työroolimääritys poistettu',
+    body: 'Sinua ei enää ole määrätty rooliin "{{role}}" tapahtumassa {{eventTitle}}.',
+  },
   newEventComment: {
     title: 'Uusi tapahtumakommentti',
     body: 'Joku kommentoi tapahtumaa {{eventTitle}}.',
@@ -217,6 +303,18 @@ const NOTIFICATION_BUNDLE_FI = {
   roleAssigned: {
     title: 'Rooli määrätty',
     body: 'Sinulle on määrätty rooli {{roleName}}.',
+  },
+  eventCancelled: {
+    title: 'Tapahtuma peruttu',
+    body: '{{eventTitle}} ({{start}}) on peruttu.',
+  },
+  eventRescheduled: {
+    title: 'Tapahtuma siirretty',
+    body: '{{eventTitle}} ({{start}}) on siirretty aikaan {{newStart}} - {{newEnd}}.',
+  },
+  unfilledCriticalSlot: {
+    title: 'Kriittinen rooli täyttämättä',
+    body: 'Kriittinen rooli/roolit ovat edelleen täyttämättä tapahtumassa {{eventTitle}} ({{start}}): {{roles}}.',
   },
   assignmentRemovedDueToAbsence: {
     title: 'Määritys poistettu poissaolon vuoksi',
@@ -262,6 +360,7 @@ export async function mockCommonApis(
   await mockAuthProviders(page);
   await mockLocaleBundles(page);
   await mockNotifications(page);
+  await mockNotificationPreferences(page);
   await mockOccurrences(page);
 }
 

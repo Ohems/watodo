@@ -230,8 +230,23 @@ export interface Notifications {
   message_key: string;
   /** Structured interpolation params for the message template (jsonb). */
   params: Generated<Record<string, unknown>>;
+  /** Optional idempotency key; unique per user when non-null (job-generated notifications). */
+  dedup_key: string | null;
   is_read: Generated<boolean>;
   created_at: Generated<Date>;
+}
+
+export type NotificationChannel = 'in_app' | 'email' | 'push';
+
+export interface NotificationPreferences {
+  user_id: string;
+  /** Key into the backend notification message catalog (see src/i18n). */
+  message_key: string;
+  /** Delivery channel this preference applies to. */
+  channel: NotificationChannel;
+  enabled: boolean;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
 }
 
 export interface Calendars {
@@ -378,6 +393,7 @@ export interface Database {
   certification_work_roles: CertificationWorkRoles;
   absences: Absences;
   notifications: Notifications;
+  notification_preferences: NotificationPreferences;
   calendars: Calendars;
   event_types: EventTypes;
   event_type_roles: EventTypeRoles;

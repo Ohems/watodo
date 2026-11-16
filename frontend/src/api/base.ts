@@ -105,6 +105,7 @@ export const api = createApi({
     'UserWorkRole',
     'UserCertification',
     'Notifications',
+    'NotificationPreferences',
     'OrganizationUsers',
     'EventSeriesManagement',
     'EventTypes',

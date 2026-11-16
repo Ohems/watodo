@@ -1,6 +1,8 @@
 import { addWeeks, max, startOfWeek } from 'date-fns';
+import type { Transaction } from 'kysely';
 import { db } from '../database.js';
 import type {
+  Database,
   EventComment,
   EventInfoSlot,
   EventOccurrenceRow,
@@ -23,6 +25,7 @@ import type {
   RescheduleOccurrenceInput,
 } from '../schemas/index.js';
 import { usersWithAbsenceInRange } from './absence-service.js';
+import { createNotificationInTx } from './notification-service.js';
 import {
   anchorRecurrenceAtStart,
   buildRruleString,
@@ -1388,10 +1391,127 @@ async function buildSeriesManagementContext(
   return context;
 }
 
+// --- Notification helpers ---
+
+/** The users managing a series: team leaders and manager members of connected teams. */
+export async function fetchSeriesManagerIds(seriesId: number): Promise<string[]> {
+  const teamRows = await db
+    .selectFrom('event_series_teams')
+    .select('team_id')
+    .where('event_series_id', '=', seriesId)
+    .execute();
+  if (teamRows.length === 0) return [];
+  const teamIds = teamRows.map(row => row.team_id);
+  const teams = await db
+    .selectFrom('teams')
+    .select(['id', 'team_leader_id'])
+    .where('id', 'in', teamIds)
+    .execute();
+  const managerRows = await db
+    .selectFrom('team_members')
+    .select('user_id')
+    .where('team_id', 'in', teamIds)
+    .where('is_manager', '=', true)
+    .execute();
+  const ids = new Set<string>();
+  for (const team of teams) {
+    if (team.team_leader_id) ids.add(team.team_leader_id);
+  }
+  for (const row of managerRows) {
+    ids.add(row.user_id);
+  }
+  return [...ids];
+}
+
 /**
- * Loads all slots of the given series (parent and occurrence-level) plus the
- * assignment count per slot, for building per-occurrence slot status lists.
+ * Users assigned to a slot visible for an occurrence: the occurrence-level
+ * slots of the materialized occurrence plus the parent (series-wide) slots,
+ * which cover every occurrence.
  */
+async function fetchOccurrenceParticipantIds(
+  seriesId: number,
+  occurrenceId: number | null,
+): Promise<string[]> {
+  const rows = await db
+    .selectFrom('event_work_roles')
+    .innerJoin(
+      'event_work_role_assignments',
+      'event_work_role_assignments.event_work_role_id',
+      'event_work_roles.id',
+    )
+    .select('event_work_role_assignments.user_id')
+    .where('event_work_roles.event_series_id', '=', seriesId)
+    .where(eb =>
+      eb.or([
+        eb('event_work_roles.event_occurrence_id', 'is', null),
+        eb('event_work_roles.event_occurrence_id', '=', occurrenceId ?? -1),
+      ]),
+    )
+    .execute();
+  return [...new Set(rows.map(row => row.user_id))];
+}
+
+/** All users assigned to any slot of the series. */
+async function fetchSeriesParticipantIds(seriesId: number): Promise<string[]> {
+  const rows = await db
+    .selectFrom('event_work_role_assignments')
+    .innerJoin(
+      'event_work_roles',
+      'event_work_roles.id',
+      'event_work_role_assignments.event_work_role_id',
+    )
+    .select('event_work_role_assignments.user_id')
+    .where('event_work_roles.event_series_id', '=', seriesId)
+    .execute();
+  return [...new Set(rows.map(row => row.user_id))];
+}
+
+/** Display name of a slot: the linked work role's name, falling back to the slot title. */
+async function getSlotRoleName(slot: {
+  title: string;
+  work_role_id: number | null;
+}): Promise<string> {
+  if (slot.work_role_id === null) return slot.title;
+  const row = await db
+    .selectFrom('work_roles')
+    .select('name')
+    .where('id', '=', slot.work_role_id)
+    .executeTakeFirst();
+  return row?.name ?? slot.title;
+}
+
+/** The occurrence start of a slot, when it is an occurrence-level slot. */
+async function getSlotOccurrenceStart(slot: {
+  event_occurrence_id: number | null;
+}): Promise<Date | null> {
+  if (slot.event_occurrence_id === null) return null;
+  const occ = await db
+    .selectFrom('event_occurrences')
+    .select('occurrence_start')
+    .where('id', '=', slot.event_occurrence_id)
+    .executeTakeFirst();
+  return occ?.occurrence_start ?? null;
+}
+
+/**
+ * Sends one notification per recipient inside the caller's transaction.
+ * Recipients are deduplicated; the author (when given) is excluded.
+ */
+async function notifyUsers(
+  tx: Transaction<Database>,
+  recipientIds: Iterable<string>,
+  excludeUserId: string | null,
+  key: string,
+  params: Record<string, unknown>,
+  organizationId: string,
+): Promise<void> {
+  const recipients = new Set(recipientIds);
+  if (excludeUserId) recipients.delete(excludeUserId);
+  for (const userId of recipients) {
+    await createNotificationInTx(tx, userId, key, params, organizationId);
+  }
+}
+
 /**
  * Fetches info slot rows (parent + occurrence-level) for the given series so
  * the occurrences list can report per-occurrence info slot summary counts
@@ -1438,6 +1558,10 @@ async function fetchInfoSlotSummaryData(seriesIds: number[]): Promise<{
   };
 }
 
+/**
+ * Loads all slots of the given series (parent and occurrence-level) plus the
+ * assignment count per slot, for building per-occurrence slot status lists.
+ */
 async function fetchSlotStatusData(seriesIds: number[]): Promise<{
   parentSlotsBySeries: Map<number, SlotStatusRow[]>;
   occurrenceSlotsByOccurrence: Map<number, SlotStatusRow[]>;
@@ -2602,7 +2726,7 @@ export async function cancelOccurrence(
   assertOccurrence(series, occurrenceStart);
 
   // Materialize the occurrence on write (an exception attaches data to it).
-  await ensureOccurrenceMaterialized(seriesId, occurrenceStart);
+  const occurrenceId = await ensureOccurrenceMaterialized(seriesId, occurrenceStart);
 
   const exception = await db
     .insertInto('event_occurrences')
@@ -2619,6 +2743,26 @@ export async function cancelOccurrence(
     .returningAll()
     .executeTakeFirstOrThrow();
 
+  // Notify the occurrence's participants and the series' managers.
+  const organization = await getCalendarOrganizationOrThrow(series.calendar_id);
+  const recipients = [
+    ...(await fetchOccurrenceParticipantIds(seriesId, occurrenceId)),
+    ...(await fetchSeriesManagerIds(seriesId)),
+  ];
+  await db.transaction().execute(async tx => {
+    await notifyUsers(
+      tx,
+      recipients,
+      null,
+      'eventCancelled',
+      {
+        eventTitle: series.title,
+        start: occurrenceStart.toISOString(),
+      },
+      organization.organizationId,
+    );
+  });
+
   return serializeException(exception);
 }
 
@@ -2632,7 +2776,7 @@ export async function rescheduleOccurrence(
   assertOccurrence(series, occurrenceStart);
 
   // Materialize the occurrence on write (an exception attaches data to it).
-  await ensureOccurrenceMaterialized(seriesId, occurrenceStart);
+  const occurrenceId = await ensureOccurrenceMaterialized(seriesId, occurrenceStart);
 
   const start = new Date(data.start);
   const end = data.end
@@ -2663,6 +2807,26 @@ export async function rescheduleOccurrence(
     .executeTakeFirstOrThrow();
 
   const organization = await getCalendarOrganizationOrThrow(series.calendar_id);
+  const recipients = [
+    ...(await fetchOccurrenceParticipantIds(seriesId, occurrenceId)),
+    ...(await fetchSeriesManagerIds(seriesId)),
+  ];
+  await db.transaction().execute(async tx => {
+    await notifyUsers(
+      tx,
+      recipients,
+      null,
+      'eventRescheduled',
+      {
+        eventTitle: series.title,
+        start: occurrenceStart.toISOString(),
+        newStart: start.toISOString(),
+        newEnd: end.toISOString(),
+      },
+      organization.organizationId,
+    );
+  });
+
   const conflicts = await findOccurrenceBookingConflicts(
     organization.organizationId,
     series,
@@ -2928,11 +3092,11 @@ export async function assignUserToWorkRole(
   userId: string,
 ): Promise<EventWorkRoleAssignmentResponse> {
   logger.trace('eventService.assignUserToWorkRole');
-  await getSeriesRowOrThrow(seriesId);
+  const series = await getSeriesRowOrThrow(seriesId);
 
   const slot = await db
     .selectFrom('event_work_roles')
-    .select(['id', 'event_occurrence_id'])
+    .select(['id', 'event_occurrence_id', 'title', 'work_role_id'])
     .where('id', '=', slotId)
     .where('event_series_id', '=', seriesId)
     .executeTakeFirst();
@@ -2949,19 +3113,37 @@ export async function assignUserToWorkRole(
     throw notFound(`User ${userId} not found!`);
   }
 
+  const organization = await getCalendarOrganizationOrThrow(series.calendar_id);
+  const role = await getSlotRoleName(slot);
+  const occurrenceStart = await getSlotOccurrenceStart(slot);
+
   try {
-    const assignment = await db
-      .insertInto('event_work_role_assignments')
-      .values({ event_work_role_id: slotId, user_id: userId })
-      .returningAll()
-      .executeTakeFirstOrThrow();
-    return {
-      id: assignment.id,
-      eventWorkRoleId: assignment.event_work_role_id,
-      userId: assignment.user_id,
-      userName: user.name,
-      createdAt: assignment.created_at.toISOString(),
-    };
+    return await db.transaction().execute(async tx => {
+      const assignment = await tx
+        .insertInto('event_work_role_assignments')
+        .values({ event_work_role_id: slotId, user_id: userId })
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      // Notify the assigned user about the new assignment.
+      await createNotificationInTx(
+        tx,
+        userId,
+        'workRoleAssigned',
+        {
+          eventTitle: series.title,
+          role,
+          ...(occurrenceStart ? { start: occurrenceStart.toISOString() } : {}),
+        },
+        organization.organizationId,
+      );
+      return {
+        id: assignment.id,
+        eventWorkRoleId: assignment.event_work_role_id,
+        userId: assignment.user_id,
+        userName: user.name,
+        createdAt: assignment.created_at.toISOString(),
+      };
+    });
   } catch (error) {
     if (isUniqueViolation(error)) {
       throw badRequest('User is already assigned to this work role slot!');
@@ -2976,7 +3158,7 @@ export async function unassignUserFromWorkRole(
   assignmentId: number,
 ): Promise<void> {
   logger.trace('eventService.unassignUserFromWorkRole');
-  await getSeriesRowOrThrow(seriesId);
+  const series = await getSeriesRowOrThrow(seriesId);
 
   const assignment = await db
     .selectFrom('event_work_role_assignments')
@@ -2988,7 +3170,11 @@ export async function unassignUserFromWorkRole(
     .select([
       'event_work_role_assignments.id',
       'event_work_role_assignments.event_work_role_id',
+      'event_work_role_assignments.user_id',
       'event_work_roles.event_series_id',
+      'event_work_roles.title',
+      'event_work_roles.work_role_id',
+      'event_work_roles.event_occurrence_id',
     ])
     .where('event_work_role_assignments.id', '=', assignmentId)
     .executeTakeFirst();
@@ -3000,7 +3186,25 @@ export async function unassignUserFromWorkRole(
     throw notFound(`Assignment ${assignmentId} not found in event series ${seriesId}!`);
   }
 
-  await db.deleteFrom('event_work_role_assignments').where('id', '=', assignmentId).execute();
+  const organization = await getCalendarOrganizationOrThrow(series.calendar_id);
+  const role = await getSlotRoleName(assignment);
+  const occurrenceStart = await getSlotOccurrenceStart(assignment);
+
+  await db.transaction().execute(async tx => {
+    await tx.deleteFrom('event_work_role_assignments').where('id', '=', assignmentId).execute();
+    // Notify the removed user about the unassignment.
+    await createNotificationInTx(
+      tx,
+      assignment.user_id,
+      'workRoleUnassigned',
+      {
+        eventTitle: series.title,
+        role,
+        ...(occurrenceStart ? { start: occurrenceStart.toISOString() } : {}),
+      },
+      organization.organizationId,
+    );
+  });
 }
 
 // --- Assignment candidates ---
@@ -3417,7 +3621,7 @@ export async function assignUserToWorkRoleBulk(
   const series = await getSeriesRowOrThrow(seriesId);
   const slot = await db
     .selectFrom('event_work_roles')
-    .select(['id', 'event_series_id'])
+    .select(['id', 'event_series_id', 'title', 'work_role_id'])
     .where('id', '=', slotId)
     .where('event_series_id', '=', seriesId)
     .executeTakeFirst();
@@ -3430,6 +3634,9 @@ export async function assignUserToWorkRoleBulk(
     .where('id', '=', userId)
     .executeTakeFirst();
   if (!user) throw notFound(`User ${userId} not found!`);
+
+  const organization = await getCalendarOrganizationOrThrow(series.calendar_id);
+  const role = await getSlotRoleName(slot);
 
   const results: BulkAssignmentResult[] = [];
   for (const startStr of occurrenceStarts) {
@@ -3462,10 +3669,20 @@ export async function assignUserToWorkRoleBulk(
       });
       continue;
     }
-    await db
-      .insertInto('event_work_role_assignments')
-      .values({ event_work_role_id: targetSlotId, user_id: userId })
-      .execute();
+    await db.transaction().execute(async tx => {
+      await tx
+        .insertInto('event_work_role_assignments')
+        .values({ event_work_role_id: targetSlotId, user_id: userId })
+        .execute();
+      // Notify the assigned user once per occurrence.
+      await createNotificationInTx(
+        tx,
+        userId,
+        'workRoleAssigned',
+        { eventTitle: series.title, role, start: occurrenceStart.toISOString() },
+        organization.organizationId,
+      );
+    });
     results.push({
       occurrenceStart: occurrenceStart.toISOString(),
       occurrenceId,
@@ -3652,6 +3869,115 @@ export async function computeReadiness(
   };
 }
 
+/** An upcoming occurrence that still has unfilled critical slots. */
+export interface UnfilledCriticalOccurrence {
+  seriesId: number;
+  title: string;
+  organizationId: string;
+  /** Original occurrence start (stable identity of the occurrence). */
+  occurrenceStart: Date;
+  /** Effective start (after reschedule overrides). */
+  start: Date;
+  /** Display names of the unfilled critical slots. */
+  roles: string[];
+}
+
+/**
+ * Finds the occurrences of all visible series in [rangeStart, rangeEnd) that
+ * still have unfilled critical slots, for the coordinator alert job. Cancelled
+ * occurrences are skipped by the expansion. Slot selection mirrors
+ * computeReadiness: occurrence-level slots when the occurrence is
+ * materialized, otherwise the parent (series-level) slots.
+ * @param rangeStart - Start of the look-ahead window.
+ * @param rangeEnd - End of the look-ahead window.
+ * @returns The occurrences with unfilled critical slots, sorted by start.
+ */
+export async function findUnfilledCriticalOccurrences(
+  rangeStart: Date,
+  rangeEnd: Date,
+): Promise<UnfilledCriticalOccurrence[]> {
+  logger.trace('eventService.findUnfilledCriticalOccurrences');
+  const seriesRows = await db
+    .selectFrom('event_series')
+    .selectAll()
+    .where('is_visible', '=', true)
+    .execute();
+  if (seriesRows.length === 0) return [];
+  const seriesIds = seriesRows.map(s => s.id);
+  const exceptionsBySeries = await fetchExceptionRules(seriesIds);
+  const calendarOrgs = await getCalendarOrganizations(seriesRows.map(s => s.calendar_id));
+
+  // All slots of these series with their work role names, plus assignment counts.
+  const slotRows = await db
+    .selectFrom('event_work_roles')
+    .leftJoin('work_roles', 'work_roles.id', 'event_work_roles.work_role_id')
+    .select([
+      'event_work_roles.id',
+      'event_work_roles.event_series_id',
+      'event_work_roles.event_occurrence_id',
+      'event_work_roles.title',
+      'event_work_roles.is_critical',
+      'work_roles.name as work_role_name',
+    ])
+    .where('event_work_roles.event_series_id', 'in', seriesIds)
+    .execute();
+  const assignmentCounts = new Map<number, number>();
+  const slotIds = slotRows.map(s => s.id);
+  if (slotIds.length > 0) {
+    const countRows = await db
+      .selectFrom('event_work_role_assignments')
+      .select(['event_work_role_id', db.fn.countAll().as('count')])
+      .where('event_work_role_id', 'in', slotIds)
+      .groupBy('event_work_role_id')
+      .execute();
+    for (const row of countRows) {
+      assignmentCounts.set(row.event_work_role_id, Number(row.count));
+    }
+  }
+
+  const result: UnfilledCriticalOccurrence[] = [];
+  for (const series of seriesRows) {
+    const organization = calendarOrgs.get(series.calendar_id);
+    if (!organization) continue;
+    const occurrences = expandOccurrences(
+      toRule(series),
+      exceptionsBySeries.get(series.id) ?? [],
+      rangeStart,
+      rangeEnd,
+    );
+    if (occurrences.length === 0) continue;
+    const occurrenceIds = await lookupOccurrenceIds(
+      occurrences.map(o => ({ seriesId: series.id, occurrenceStart: o.occurrenceStart })),
+    );
+    for (const occurrence of occurrences) {
+      const occurrenceId =
+        occurrenceIds.get(`${series.id}:${occurrence.occurrenceStart.toISOString()}`) ?? null;
+      let visible = slotRows.filter(
+        s => s.event_series_id === series.id && s.event_occurrence_id === occurrenceId,
+      );
+      if (visible.length === 0) {
+        visible = slotRows.filter(
+          s => s.event_series_id === series.id && s.event_occurrence_id === null,
+        );
+      }
+      const unfilled = visible.filter(
+        s => s.is_critical && (assignmentCounts.get(s.id) ?? 0) === 0,
+      );
+      if (unfilled.length === 0) continue;
+      result.push({
+        seriesId: series.id,
+        title: series.title,
+        organizationId: organization.organizationId,
+        occurrenceStart: occurrence.occurrenceStart,
+        start: occurrence.start,
+        roles: unfilled.map(s => s.work_role_name ?? s.title),
+      });
+    }
+  }
+  result.sort((a, b) => a.start.getTime() - b.start.getTime());
+  return result;
+}
+
 // --- Comments ---
 
 const commentSelect = [
@@ -3720,16 +4046,40 @@ export async function createEventComment(
     throw notFound(`User ${userId} not found!`);
   }
 
-  const comment = await db
-    .insertInto('event_comments')
-    .values({
-      event_series_id: seriesId,
-      event_occurrence_id: eventOccurrenceId,
-      user_id: userId,
-      body: data.body,
-    })
-    .returningAll()
-    .executeTakeFirstOrThrow();
+  // Notify the participants of the commented occurrence (or of the whole
+  // series for a series-wide comment) and the series' managers, except the
+  // comment author.
+  const organization = await getCalendarOrganizationOrThrow(series.calendar_id);
+  const participants = eventOccurrenceId
+    ? await fetchOccurrenceParticipantIds(seriesId, eventOccurrenceId)
+    : await fetchSeriesParticipantIds(seriesId);
+  const recipients = [...participants, ...(await fetchSeriesManagerIds(seriesId))];
+  const commentParams = {
+    eventTitle: series.title,
+    ...(occurrenceStart ? { start: occurrenceStart.toISOString() } : {}),
+  };
+
+  const comment = await db.transaction().execute(async tx => {
+    const inserted = await tx
+      .insertInto('event_comments')
+      .values({
+        event_series_id: seriesId,
+        event_occurrence_id: eventOccurrenceId,
+        user_id: userId,
+        body: data.body,
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    await notifyUsers(
+      tx,
+      recipients,
+      userId,
+      'newEventComment',
+      commentParams,
+      organization.organizationId,
+    );
+    return inserted;
+  });
 
   return serializeComment({ ...comment, user_name: user.name });
 }

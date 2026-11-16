@@ -32,6 +32,41 @@ describe('i18n message catalog', () => {
     expect(rendered.body).toBe('Potluck is happening this month. Check the calendar for details.');
   });
 
+  it('renders the event change and coordinator alert messages', () => {
+    const cancelled = renderNotificationMessage(
+      'eventCancelled',
+      { eventTitle: 'Sunday Service', start: '2026-11-15T10:00:00.000Z' },
+      'en-GB',
+    );
+    expect(cancelled.body).toBe('Sunday Service on 2026-11-15T10:00:00.000Z has been cancelled.');
+    const rescheduled = renderNotificationMessage(
+      'eventRescheduled',
+      {
+        eventTitle: 'Sunday Service',
+        start: '2026-11-15T10:00:00.000Z',
+        newStart: '2026-11-16T10:00:00.000Z',
+        newEnd: '2026-11-16T11:30:00.000Z',
+      },
+      'en-US',
+    );
+    expect(rescheduled.body).toBe(
+      'Sunday Service (2026-11-15T10:00:00.000Z) has been rescheduled to 2026-11-16T10:00:00.000Z - 2026-11-16T11:30:00.000Z.',
+    );
+    const alert = renderNotificationMessage(
+      'unfilledCriticalSlot',
+      { eventTitle: 'Sunday Service', start: '2026-11-15T10:00:00.000Z', roles: 'Sound desk' },
+      'fi',
+    );
+    expect(alert.title).toBe('Kriittinen rooli täyttämättä');
+    expect(alert.body).toContain('Sound desk');
+    const unassigned = renderNotificationMessage(
+      'workRoleUnassigned',
+      { eventTitle: 'Sunday Service', role: 'Sound desk' },
+      'en-GB',
+    );
+    expect(unassigned.body).toBe('You are no longer assigned to "Sound desk" for Sunday Service.');
+  });
+
   it('falls back to the default language for an unsupported language', () => {
     const rendered = renderNotificationMessage('welcome', {}, 'de');
     expect(rendered.title).toBe('Welcome to Watodo');
