@@ -50,7 +50,11 @@ function SiteConfigPage() {
   const siteArg =
     activeOrganizationId && siteId ? { organizationId: activeOrganizationId, siteId } : skipToken;
   const { data: site, isLoading: loading, error: siteError } = useGetSiteQuery(siteArg);
-  const { data: roomsData } = useGetRoomsBySiteQuery(
+  const {
+    data: roomsData,
+    isLoading: roomsLoading,
+    isError: roomsError,
+  } = useGetRoomsBySiteQuery(
     activeOrganizationId && siteId
       ? {
           organizationId: activeOrganizationId,
@@ -242,7 +246,8 @@ function SiteConfigPage() {
         total={roomsTotal}
         page={roomsPage}
         limit={roomsLimit}
-        loading={false}
+        loading={roomsLoading}
+        error={roomsError}
         canAdd={canWriteRoom}
         onAdd={() => setAddRoomModalOpen(true)}
         onPageChange={setRoomsPage}

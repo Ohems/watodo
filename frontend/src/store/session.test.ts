@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { api, getToken, setToken } from '../api/index.js';
+import { getToken, organizationsApi, setToken } from '../api/index.js';
 import { type MockApi, mockApi } from '../test/api-mock.js';
 import { createTestStore } from '../test/test-utils.js';
 import type { Organization } from '../types/index.js';
@@ -26,14 +26,20 @@ describe('session thunks', () => {
     setToken('test-token');
     mock.on('GET', '/api/v1/auth/logout', {});
     const store = createTestStore();
-    await store.dispatch(api.util.upsertQueryData('getMyOrganizations', undefined, [orgA]));
-    expect(api.endpoints.getMyOrganizations.select()(store.getState()).data).toEqual([orgA]);
+    await store.dispatch(
+      organizationsApi.util.upsertQueryData('getMyOrganizations', undefined, [orgA]),
+    );
+    expect(organizationsApi.endpoints.getMyOrganizations.select()(store.getState()).data).toEqual([
+      orgA,
+    ]);
 
     await store.dispatch(logout());
 
     expect(mock.callCount('GET', '/api/v1/auth/logout')).toBe(1);
     expect(getToken()).toBeNull();
-    expect(api.endpoints.getMyOrganizations.select()(store.getState()).data).toBeUndefined();
+    expect(
+      organizationsApi.endpoints.getMyOrganizations.select()(store.getState()).data,
+    ).toBeUndefined();
   });
 
   it('logout still clears the token when the server call fails', async () => {
@@ -50,13 +56,17 @@ describe('session thunks', () => {
     setToken('test-token');
     mock.on('DELETE', '/api/v1/users/@me', {});
     const store = createTestStore();
-    await store.dispatch(api.util.upsertQueryData('getMyOrganizations', undefined, [orgA]));
+    await store.dispatch(
+      organizationsApi.util.upsertQueryData('getMyOrganizations', undefined, [orgA]),
+    );
 
     await store.dispatch(deleteCurrentUser());
 
     expect(mock.callCount('DELETE', '/api/v1/users/@me')).toBe(1);
     expect(getToken()).toBeNull();
-    expect(api.endpoints.getMyOrganizations.select()(store.getState()).data).toBeUndefined();
+    expect(
+      organizationsApi.endpoints.getMyOrganizations.select()(store.getState()).data,
+    ).toBeUndefined();
   });
 
   it('deleteCurrentUser keeps the token when the server call fails', async () => {

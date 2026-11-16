@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import {
   adminUser,
+  gotoApp,
   interceptMutation,
   mockCommonApis,
   mockUsersList,
@@ -57,7 +58,7 @@ test.describe('Contacts page (UserList)', () => {
     test('shows all users with their names and emails', async ({ page }) => {
       await mockCommonApis(page, adminUser());
       await mockUsersList(page, mockUsers);
-      await page.goto('/users');
+      await gotoApp(page, '/users');
 
       await expect(page.getByRole('heading', { name: 'Contacts' })).toBeVisible();
       await expect(page.getByText('Alice Anderson')).toBeVisible();
@@ -71,7 +72,7 @@ test.describe('Contacts page (UserList)', () => {
     test('shows the "Add new user" card', async ({ page }) => {
       await mockCommonApis(page, adminUser());
       await mockUsersList(page, mockUsers);
-      await page.goto('/users');
+      await gotoApp(page, '/users');
 
       await expect(page.getByText('Add new user')).toBeVisible();
     });
@@ -79,7 +80,7 @@ test.describe('Contacts page (UserList)', () => {
     test('shows empty state when no users', async ({ page }) => {
       await mockCommonApis(page, adminUser());
       await mockUsersList(page, []);
-      await page.goto('/users');
+      await gotoApp(page, '/users');
 
       await expect(page.getByRole('heading', { name: 'Contacts' })).toBeVisible();
       // Only the "Add new user" card should be present
@@ -91,7 +92,7 @@ test.describe('Contacts page (UserList)', () => {
     test('clicking a user card navigates to their profile', async ({ page }) => {
       await mockCommonApis(page, adminUser());
       await mockUsersList(page, mockUsers);
-      await page.goto('/users');
+      await gotoApp(page, '/users');
 
       await page.getByText('Alice Anderson').click();
       await expect(page).toHaveURL('/users/user-1');
@@ -100,7 +101,7 @@ test.describe('Contacts page (UserList)', () => {
     test('clicking "Add new user" navigates to the new user page', async ({ page }) => {
       await mockCommonApis(page, adminUser());
       await mockUsersList(page, mockUsers);
-      await page.goto('/users');
+      await gotoApp(page, '/users');
 
       await page.getByText('Add new user').click();
       await expect(page).toHaveURL('/users/new');
@@ -111,7 +112,7 @@ test.describe('Contacts page (UserList)', () => {
     test('regular user (no permissions) can still view the contacts list', async ({ page }) => {
       await mockCommonApis(page, regularUser());
       await mockUsersList(page, mockUsers);
-      await page.goto('/users');
+      await gotoApp(page, '/users');
 
       await expect(page.getByText('Alice Anderson')).toBeVisible();
       await expect(page.getByText('Bob Brown')).toBeVisible();
@@ -124,7 +125,7 @@ test.describe('UserProfile page', () => {
     test('shows user details in read-only mode', async ({ page }) => {
       await mockCommonApis(page, adminUser());
       await mockUsersList(page, mockUsers);
-      await page.goto('/users/user-1');
+      await gotoApp(page, '/users/user-1');
 
       await expect(page.getByRole('heading', { name: 'Alice Anderson' })).toBeVisible();
       // Fields are shown as text (not inputs) in read-only mode
@@ -138,7 +139,7 @@ test.describe('UserProfile page', () => {
     test('shows "Not set" for empty description', async ({ page }) => {
       await mockCommonApis(page, adminUser());
       await mockUsersList(page, mockUsers);
-      await page.goto('/users/user-1');
+      await gotoApp(page, '/users/user-1');
 
       // Description is empty so "Not set" should be shown
       const descSection = page.locator('text=Description').locator('..');
@@ -148,7 +149,7 @@ test.describe('UserProfile page', () => {
     test('shows user state as Inactive for inactive users', async ({ page }) => {
       await mockCommonApis(page, adminUser());
       await mockUsersList(page, mockUsers);
-      await page.goto('/users/user-3');
+      await gotoApp(page, '/users/user-3');
 
       await expect(page.getByText('Inactive')).toBeVisible();
     });
@@ -156,7 +157,7 @@ test.describe('UserProfile page', () => {
     test('shows empty permissions as "None"', async ({ page }) => {
       await mockCommonApis(page, adminUser());
       await mockUsersList(page, mockUsers);
-      await page.goto('/users/user-2');
+      await gotoApp(page, '/users/user-2');
 
       const permSection = page.locator('text=Permissions').locator('..');
       await expect(permSection.getByText('None')).toBeVisible();
@@ -176,7 +177,7 @@ test.describe('UserProfile page', () => {
         updatedUser,
       );
 
-      await page.goto('/users/user-1');
+      await gotoApp(page, '/users/user-1');
       await expect(page.getByRole('heading', { name: 'Alice Anderson' })).toBeVisible();
 
       // Click Edit
@@ -199,7 +200,7 @@ test.describe('UserProfile page', () => {
     test('cancel discards changes', async ({ page }) => {
       await mockCommonApis(page, adminUser());
       await mockUsersList(page, mockUsers);
-      await page.goto('/users/user-1');
+      await gotoApp(page, '/users/user-1');
 
       await page.getByRole('button', { name: 'Edit' }).click();
       const nameInput = page.getByRole('textbox', { name: 'Name' });
@@ -215,7 +216,7 @@ test.describe('UserProfile page', () => {
     test('back to list button returns to contacts', async ({ page }) => {
       await mockCommonApis(page, adminUser());
       await mockUsersList(page, mockUsers);
-      await page.goto('/users/user-1');
+      await gotoApp(page, '/users/user-1');
 
       await page.getByRole('button', { name: 'Back to list' }).click();
       await expect(page).toHaveURL('/users');

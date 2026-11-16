@@ -1,24 +1,13 @@
-import {
-  Alert,
-  Box,
-  Button,
-  Center,
-  Group,
-  Loader,
-  Paper,
-  Stack,
-  Text,
-  Title,
-} from '@mantine/core';
+import { Box, Button, Center, Group, Loader, Paper, Stack, Text, Title } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  getApiErrorMessage,
   useGetCurrentUserQuery,
   useGetMyOrganizationsQuery,
   useUpdateOrganizationMutation,
 } from '../../api/index.js';
 import EditField from '../../components/EditField/EditField.js';
+import { QueryError } from '../../components/QueryState/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
 import { selectActiveOrganizationId } from '../../store/organization-slice.js';
 import type { FieldErrors, OrganizationUpdate } from '../../types/index.js';
@@ -45,8 +34,6 @@ function OrgGeneralPage() {
   const organization = organizations?.find(org => org.id === activeOrganizationId) ?? null;
   const canEdit =
     currentUser?.permissions.some(permission => EDIT_PERMISSIONS.includes(permission)) ?? false;
-  const error = queryError ? getApiErrorMessage(queryError) : null;
-
   useEffect(() => {
     if (organization) {
       setEditData({
@@ -104,6 +91,15 @@ function OrgGeneralPage() {
     );
   }
 
+  // A failed organizations query must not render as "no organization".
+  if (queryError) {
+    return (
+      <Box p="md">
+        <QueryError />
+      </Box>
+    );
+  }
+
   if (!organization) {
     return <NoOrganizationPage />;
   }
@@ -140,12 +136,6 @@ function OrgGeneralPage() {
             </Group>
           )}
         </Group>
-
-        {error && (
-          <Alert color="red" variant="light" mb="md">
-            {error}
-          </Alert>
-        )}
 
         <Stack gap="md">
           <Box>

@@ -148,6 +148,9 @@ interface EventSeriesResponse {
   recurrence: { freq: string } | null;
   start: string;
   durationMinutes: number;
+  siteId?: string | null;
+  roomId?: string | null;
+  conflicts?: BookingConflictResponse[];
 }
 
 interface OccurrenceResponse {
@@ -158,6 +161,17 @@ interface OccurrenceResponse {
   isRescheduled: boolean;
   isCancelled: boolean;
   exceptionId: number | null;
+  isParticipant: boolean;
+  isManager: boolean;
+  workRoleSlots: {
+    slotId: number;
+    title: string;
+    workRoleId: number | null;
+    workRoleName: string | null;
+    isCritical: boolean;
+    assigneeCount: number;
+  }[];
+  managedUnfilledCriticalSlots: string[];
 }
 
 interface ExceptionResponse {
@@ -166,6 +180,42 @@ interface ExceptionResponse {
   isCancelled: boolean;
   overrideStart: string | null;
   overrideEnd: string | null;
+  conflicts?: BookingConflictResponse[];
+}
+
+interface BookingConflictResponse {
+  seriesId: number;
+  title: string;
+  occurrenceStart: string;
+  start: string;
+  end: string;
+  siteId: string | null;
+  roomId: string | null;
+  reserveWholeSite: boolean;
+}
+
+/** Inserts a site with one room into the organization and returns both IDs. */
+async function createSiteAndRoom(
+  organizationId: string,
+  suffix: string,
+): Promise<{ siteId: string; roomId: string }> {
+  const siteId = randomUUID();
+  const roomId = randomUUID();
+  await db
+    .insertInto('sites')
+    .values({ id: siteId, name: `Site ${suffix}`, organization_id: organizationId })
+    .execute();
+  await db
+    .insertInto('rooms')
+    .values({
+      id: roomId,
+      name: `Room ${suffix}`,
+      description: '',
+      site_id: siteId,
+      organization_id: organizationId,
+    })
+    .execute();
+  return { siteId, roomId };
 }
 
 interface OccurrenceWithOrganization {
@@ -284,6 +334,45 @@ const exceptionsOf = async (seed: Seed, seriesId: number): Promise<ExceptionResp
   expect(response.statusCode).toBe(200);
   return response.json() as ExceptionResponse[];
 };
+
+/** Connects a team to the series and makes leaderId/managerId its managers. */
+async function seedTeamWithManagers(
+  seed: Seed,
+  seriesId: number,
+  leaderId: string,
+  managerId: string,
+): Promise<string> {
+  const team = await db
+    .insertInto('teams')
+    .values({
+      name: `Team ${randomUUID()}`,
+      organization_id: seed.organizationId,
+      team_leader_id: leaderId,
+    })
+    .returningAll()
+    .executeTakeFirstOrThrow();
+  await db
+    .insertInto('team_members')
+    .values({ team_id: team.id, user_id: managerId, is_manager: true })
+    .execute();
+  await db
+    .insertInto('event_series_teams')
+    .values({ event_series_id: seriesId, team_id: team.id })
+    .execute();
+  return team.id;
+}
+
+interface NotificationRow {
+  id: number;
+  user_id: string;
+  organization_id: string | null;
+  message_key: string;
+  params: Record<string, unknown>;
+}
+
+/** All notifications of a user, straight from the database. */
+const notificationsFor = async (userId: string): Promise<NotificationRow[]> =>
+  db.selectFrom('notifications').selectAll().where('user_id', '=', userId).execute();
 
 const split = async (
   seed: Seed,
@@ -409,6 +498,250 @@ describe('Events API', () => {
         },
       });
       expect(response.statusCode).toBe(404);
+    });
+
+    it('reports a booking conflict when the new series overlaps another series in the same room', async () => {
+      const seed = await createEventsFixture();
+      const { roomId } = await createSiteAndRoom(seed.organizationId, randomUUID());
+      await createSeries(seed, {
+        title: 'Existing booking',
+        start: '2026-10-21T10:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId,
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/event-series',
+        headers: auth(seed.adminToken),
+        payload: {
+          title: 'Overlapping booking',
+          calendarId: seed.calendarId,
+          start: '2026-10-21T10:30:00.000Z',
+          durationMinutes: 60,
+          timezone: 'UTC',
+          roomId,
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as EventSeriesResponse;
+      expect(body.conflicts).toHaveLength(1);
+      expect(body.conflicts?.[0].title).toBe('Existing booking');
+      expect(body.conflicts?.[0].start).toBe('2026-10-21T10:00:00.000Z');
+      expect(body.conflicts?.[0].end).toBe('2026-10-21T11:00:00.000Z');
+      expect(body.conflicts?.[0].roomId).toBe(roomId);
+    });
+
+    it('reports no conflict for the same time in a different room, and back-to-back bookings do not conflict', async () => {
+      const seed = await createEventsFixture();
+      const suffix = randomUUID();
+      const { roomId: roomAId } = await createSiteAndRoom(seed.organizationId, `${suffix}-a`);
+      const { roomId: roomBId } = await createSiteAndRoom(seed.organizationId, `${suffix}-b`);
+      await createSeries(seed, {
+        title: 'Room A booking',
+        start: '2026-10-21T10:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId: roomAId,
+      });
+
+      // Different room, same time: no conflict.
+      const otherRoom = await app.inject({
+        method: 'POST',
+        url: '/api/v1/event-series',
+        headers: auth(seed.adminToken),
+        payload: {
+          title: 'Room B booking',
+          calendarId: seed.calendarId,
+          start: '2026-10-21T10:00:00.000Z',
+          durationMinutes: 60,
+          timezone: 'UTC',
+          roomId: roomBId,
+        },
+      });
+      expect((otherRoom.json() as EventSeriesResponse).conflicts).toEqual([]);
+
+      // Same room, starting exactly when the other ends: no conflict.
+      const backToBack = await app.inject({
+        method: 'POST',
+        url: '/api/v1/event-series',
+        headers: auth(seed.adminToken),
+        payload: {
+          title: 'Back-to-back booking',
+          calendarId: seed.calendarId,
+          start: '2026-10-21T11:00:00.000Z',
+          durationMinutes: 60,
+          timezone: 'UTC',
+          roomId: roomAId,
+        },
+      });
+      expect((backToBack.json() as EventSeriesResponse).conflicts).toEqual([]);
+    });
+
+    it('reports a conflict when either side reserves the whole site', async () => {
+      const seed = await createEventsFixture();
+      const { siteId, roomId } = await createSiteAndRoom(seed.organizationId, randomUUID());
+      // Series A reserves the whole site (site only, no room).
+      await createSeries(seed, {
+        title: 'Whole site event',
+        start: '2026-10-21T10:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        siteId,
+        reserveWholeSite: true,
+      });
+
+      // A series targeting any room in the same site conflicts.
+      const inRoom = await app.inject({
+        method: 'POST',
+        url: '/api/v1/event-series',
+        headers: auth(seed.adminToken),
+        payload: {
+          title: 'Room booking',
+          calendarId: seed.calendarId,
+          start: '2026-10-21T10:30:00.000Z',
+          durationMinutes: 30,
+          timezone: 'UTC',
+          roomId,
+        },
+      });
+      const inRoomBody = inRoom.json() as EventSeriesResponse;
+      expect(inRoomBody.conflicts).toHaveLength(1);
+      expect(inRoomBody.conflicts?.[0].reserveWholeSite).toBe(true);
+
+      // And the reverse: a new whole-site reservation conflicts with a room booking.
+      await createSeries(seed, {
+        title: 'Another room booking',
+        start: '2026-10-22T10:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId,
+      });
+      const reserve = await app.inject({
+        method: 'POST',
+        url: '/api/v1/event-series',
+        headers: auth(seed.adminToken),
+        payload: {
+          title: 'New whole site event',
+          calendarId: seed.calendarId,
+          start: '2026-10-22T10:30:00.000Z',
+          durationMinutes: 30,
+          timezone: 'UTC',
+          siteId,
+          reserveWholeSite: true,
+        },
+      });
+      const reserveBody = reserve.json() as EventSeriesResponse;
+      expect(reserveBody.conflicts?.map(c => c.title)).toContain('Another room booking');
+    });
+
+    it('reports conflicts against individual occurrences of a recurring series only where they overlap', async () => {
+      const seed = await createEventsFixture();
+      const { roomId } = await createSiteAndRoom(seed.organizationId, randomUUID());
+      // Daily 10:00-11:00 in the room.
+      await createSeries(seed, {
+        title: 'Daily booking',
+        start: '2026-10-21T10:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId,
+        recurrence: { freq: 'DAILY' },
+      });
+
+      // One-off on a day when the daily booking exists: exactly one conflict.
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/event-series',
+        headers: auth(seed.adminToken),
+        payload: {
+          title: 'One-off',
+          calendarId: seed.calendarId,
+          start: '2026-10-23T10:30:00.000Z',
+          durationMinutes: 30,
+          timezone: 'UTC',
+          roomId,
+        },
+      });
+      const body = response.json() as EventSeriesResponse;
+      expect(body.conflicts).toHaveLength(1);
+      expect(body.conflicts?.[0].occurrenceStart).toBe('2026-10-23T10:00:00.000Z');
+    });
+
+    it('caps the reported conflicts for identical open-ended recurrences instead of looping forever', async () => {
+      const seed = await createEventsFixture();
+      const { roomId } = await createSiteAndRoom(seed.organizationId, randomUUID());
+      await createSeries(seed, {
+        title: 'Daily forever',
+        start: '2026-10-21T10:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId,
+        recurrence: { freq: 'DAILY' },
+      });
+
+      // Same time, same room, same open-ended recurrence: every occurrence
+      // overlaps. The 10-year expansion window yields ~3700 overlapping
+      // occurrences; the response must stay capped and the request finite.
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/event-series',
+        headers: auth(seed.adminToken),
+        payload: {
+          title: 'Daily forever copy',
+          calendarId: seed.calendarId,
+          start: '2026-10-21T10:00:00.000Z',
+          durationMinutes: 60,
+          timezone: 'UTC',
+          roomId,
+          recurrence: { freq: 'DAILY' },
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as EventSeriesResponse;
+      expect(body.conflicts).toHaveLength(100);
+      expect(body.conflicts?.[0].title).toBe('Daily forever');
+      expect(body.conflicts?.[0].occurrenceStart).toBe('2026-10-21T10:00:00.000Z');
+      // All entries are deduplicated occurrences of the one existing series.
+      const keys = new Set(body.conflicts?.map(c => `${c.seriesId}:${c.occurrenceStart}`));
+      expect(keys.size).toBe(100);
+    });
+
+    it('does not report conflicts across organizations', async () => {
+      const seed = await createEventsFixture();
+      const otherOrgId = await createOrganization(`Other Org ${randomUUID()}`, {
+        defaultTimezone: 'UTC',
+      });
+      const otherCalendarId = await createCalendar(otherOrgId, 'Other Calendar');
+      const { roomId: roomAId } = await createSiteAndRoom(seed.organizationId, randomUUID());
+      const { siteId: otherSiteId, roomId: otherRoomId } = await createSiteAndRoom(
+        otherOrgId,
+        randomUUID(),
+      );
+      await createSeries(seed, {
+        title: 'Org A booking',
+        start: '2026-10-21T10:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId: roomAId,
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/event-series',
+        headers: auth(seed.adminToken),
+        payload: {
+          title: 'Org B booking',
+          calendarId: otherCalendarId,
+          start: '2026-10-21T10:30:00.000Z',
+          durationMinutes: 60,
+          timezone: 'UTC',
+          siteId: otherSiteId,
+          roomId: otherRoomId,
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      expect((response.json() as EventSeriesResponse).conflicts).toEqual([]);
     });
   });
 
@@ -778,6 +1111,378 @@ describe('Events API', () => {
       const adminMine = await getOccurrences(seed.adminToken, '&scope=mine');
       expect(adminMine).toHaveLength(0);
     });
+
+    it('supports the involved scope with participant/manager flags and slot status', async () => {
+      const seed = await createEventsFixture();
+      const suffix = randomUUID();
+
+      // Series A: connected to a team the reader manages; has a critical
+      // slot linked to the team's work role with no assignee.
+      // Series B: the reader is assigned to a slot (participant).
+      // Series C: no connection to the reader at all.
+      const seriesAId = (
+        await createSeries(seed, {
+          title: `Involved A ${suffix}`,
+          start: '2026-10-21T16:00:00.000Z',
+          durationMinutes: 60,
+          timezone: 'UTC',
+        })
+      ).id;
+      const seriesBId = (
+        await createSeries(seed, {
+          title: `Involved B ${suffix}`,
+          start: '2026-10-22T16:00:00.000Z',
+          durationMinutes: 60,
+          timezone: 'UTC',
+        })
+      ).id;
+      const seriesCId = (
+        await createSeries(seed, {
+          title: `Involved C ${suffix}`,
+          start: '2026-10-23T16:00:00.000Z',
+          durationMinutes: 60,
+          timezone: 'UTC',
+        })
+      ).id;
+      const mySeriesIds = [seriesAId, seriesBId, seriesCId];
+
+      const workRoleId = (
+        await db
+          .insertInto('work_roles')
+          .values({ name: `Cook ${suffix}`, organization_id: seed.organizationId })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+      const teamId = (
+        await db
+          .insertInto('teams')
+          .values({
+            name: `Managed Team ${suffix}`,
+            description: '',
+            organization_id: seed.organizationId,
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+      // The reader is a manager member of the team; the team is connected to
+      // series A and assigned the work role.
+      await db
+        .insertInto('team_members')
+        .values({ team_id: teamId, user_id: seed.readerUserId, is_manager: true })
+        .execute();
+      await db
+        .insertInto('team_work_roles')
+        .values({ team_id: teamId, work_role_id: workRoleId })
+        .execute();
+      await db
+        .insertInto('event_series_teams')
+        .values({ event_series_id: seriesAId, team_id: teamId })
+        .execute();
+
+      // Series A: critical slot linked to the team's work role, unfilled; plus
+      // a filled non-critical slot.
+      const criticalSlot = await createWorkRole(seed, seriesAId, {
+        title: 'Critical cook',
+        isCritical: true,
+        workRoleId,
+      });
+      const filledSlot = await createWorkRole(seed, seriesAId, {
+        title: 'Helper',
+        isCritical: false,
+      });
+      await assignToWorkRole(seed, seriesAId, filledSlot.id, seed.memberUserId);
+
+      // Series B: the reader is assigned to a slot (participant).
+      const slotB = await createWorkRole(seed, seriesBId, { title: 'Reader slot' });
+      await assignToWorkRole(seed, seriesBId, slotB.id, seed.readerUserId);
+
+      const range = 'start=2026-10-21T00:00:00.000Z&end=2026-10-25T00:00:00.000Z';
+      const getOccurrences = async (token: string, query = '') => {
+        const response = await app.inject({
+          method: 'GET',
+          url: `/api/v1/event-series/occurrences?${range}${query}`,
+          headers: auth(token),
+        });
+        expect(response.statusCode).toBe(200);
+        return (response.json() as OccurrenceResponse[]).filter(o =>
+          mySeriesIds.includes(o.seriesId),
+        );
+      };
+
+      // Scope "involved": series A (manager via team) and series B
+      // (participant); series C is excluded.
+      const involved = await getOccurrences(seed.readerToken, '&scope=involved');
+      expect([...new Set(involved.map(o => o.seriesId))].sort((a, b) => a - b)).toEqual([
+        seriesAId,
+        seriesBId,
+      ]);
+
+      const occA = involved.find(o => o.seriesId === seriesAId);
+      expect(occA?.isManager).toBe(true);
+      expect(occA?.isParticipant).toBe(false);
+      // Slot status indicators include both slots with their assignee counts.
+      expect(occA?.workRoleSlots).toHaveLength(2);
+      const critical = occA?.workRoleSlots.find(s => s.slotId === criticalSlot.id);
+      expect(critical?.isCritical).toBe(true);
+      expect(critical?.assigneeCount).toBe(0);
+      expect(critical?.workRoleId).toBe(workRoleId);
+      expect(critical?.workRoleName).toBe(`Cook ${suffix}`);
+      const helper = occA?.workRoleSlots.find(s => s.slotId === filledSlot.id);
+      expect(helper?.assigneeCount).toBe(1);
+      // The unfilled critical slot of the managed work role is flagged.
+      expect(occA?.managedUnfilledCriticalSlots).toEqual(['Critical cook']);
+
+      const occB = involved.find(o => o.seriesId === seriesBId);
+      expect(occB?.isParticipant).toBe(true);
+      expect(occB?.isManager).toBe(false);
+      expect(occB?.managedUnfilledCriticalSlots).toEqual([]);
+      expect(occB?.workRoleSlots[0]?.assigneeCount).toBe(1);
+
+      // The member (events:read only) is a participant of series A (assigned
+      // to the helper slot) but not a manager of anything.
+      const memberRole = await createRole(seed.organizationId, 'Involved Member Role', [
+        'events:read',
+      ]);
+      await assignRole(seed.memberUserId, memberRole);
+      const memberInvolved = await getOccurrences(seed.memberToken, '&scope=involved');
+      expect(memberInvolved.map(o => o.seriesId)).toEqual([seriesAId]);
+      expect(memberInvolved[0]?.isParticipant).toBe(true);
+      expect(memberInvolved[0]?.isManager).toBe(false);
+      expect(memberInvolved[0]?.managedUnfilledCriticalSlots).toEqual([]);
+
+      // Without a scope, all three series are listed and the flags are set.
+      const all = await getOccurrences(seed.readerToken);
+      expect(all).toHaveLength(3);
+      expect(all.find(o => o.seriesId === seriesCId)?.isManager).toBe(false);
+      expect(all.find(o => o.seriesId === seriesCId)?.isParticipant).toBe(false);
+      expect(all.find(o => o.seriesId === seriesCId)?.workRoleSlots).toEqual([]);
+
+      // A team leader (not a manager member) also counts as manager.
+      await db
+        .updateTable('team_members')
+        .set({ is_manager: false })
+        .where('team_id', '=', teamId)
+        .execute();
+      await db
+        .updateTable('teams')
+        .set({ team_leader_id: seed.readerUserId })
+        .where('id', '=', teamId)
+        .execute();
+      const leaderInvolved = await getOccurrences(seed.readerToken, '&scope=involved');
+      const leaderOccA = leaderInvolved.find(o => o.seriesId === seriesAId);
+      expect(leaderOccA?.isManager).toBe(true);
+      expect(leaderOccA?.managedUnfilledCriticalSlots).toEqual(['Critical cook']);
+    });
+
+    it('supports unfilledOnly/criticalOnly filters and reports info slot summary counts', async () => {
+      const seed = await createEventsFixture();
+      const range = 'start=2026-10-21T00:00:00.000Z&end=2026-10-29T00:00:00.000Z';
+      // Series A: one filled slot and one unfilled critical slot.
+      const seriesA = await createSeries(seed, weeklyPayload);
+      const filledSlot = await createWorkRole(seed, seriesA.id, { title: 'Cook' });
+      await assignToWorkRole(seed, seriesA.id, filledSlot.id, seed.memberUserId);
+      await createWorkRole(seed, seriesA.id, { title: 'Dishwasher', isCritical: true });
+      // Series B: all slots filled (single occurrence in range).
+      const seriesB = await createSeries(seed, {
+        ...weeklyPayload,
+        title: 'Fully staffed',
+        start: '2026-10-28T16:00:00.000Z',
+      });
+      const slotB = await createWorkRole(seed, seriesB.id, { title: 'Cook' });
+      await assignToWorkRole(seed, seriesB.id, slotB.id, seed.memberUserId);
+      // Info slots on series A: one with a value, one without.
+      await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${seriesA.id}/info-slots`,
+        headers: auth(seed.adminToken),
+        payload: { title: 'Sermon topic', value: 'Grace' },
+      });
+      await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${seriesA.id}/info-slots`,
+        headers: auth(seed.adminToken),
+        payload: { title: 'Special notes' },
+      });
+
+      const all = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series/occurrences?${range}&organizationId=${seed.organizationId}`,
+        headers: auth(seed.readerToken),
+      });
+      const allBody = all.json() as {
+        seriesId: number;
+        infoSlotCount: number;
+        filledInfoSlotCount: number;
+      }[];
+      expect(allBody).toHaveLength(4); // 3 occurrences of series A + 1 of series B
+      const occA = allBody.find(o => o.seriesId === seriesA.id);
+      expect(occA?.infoSlotCount).toBe(2);
+      expect(occA?.filledInfoSlotCount).toBe(1);
+
+      const unfilled = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series/occurrences?${range}&organizationId=${seed.organizationId}&unfilledOnly=true`,
+        headers: auth(seed.readerToken),
+      });
+      const unfilledBody = unfilled.json() as { seriesId: number }[];
+      expect(unfilledBody).toHaveLength(3);
+      expect(unfilledBody.every(o => o.seriesId === seriesA.id)).toBe(true);
+
+      const critical = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series/occurrences?${range}&organizationId=${seed.organizationId}&criticalOnly=true`,
+        headers: auth(seed.readerToken),
+      });
+      const criticalBody = critical.json() as { seriesId: number }[];
+      expect(criticalBody).toHaveLength(3);
+      expect(criticalBody.every(o => o.seriesId === seriesA.id)).toBe(true);
+    });
+  });
+
+  describe('GET /api/v1/organizations/:organizationId/users/:userId/event-assignments', () => {
+    it('lists the occurrences the target user is assigned to, with roles, paginated and date-filtered', async () => {
+      const seed = await createEventsFixture();
+      const suffix = randomUUID();
+
+      const workRoleId = (
+        await db
+          .insertInto('work_roles')
+          .values({ name: `Cook ${suffix}`, organization_id: seed.organizationId })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+
+      // Series A: single event in range, critical slot linked to a work role,
+      // assigned to the reader.
+      const seriesAId = (
+        await createSeries(seed, {
+          title: `Assignments A ${suffix}`,
+          start: '2027-10-21T16:00:00.000Z',
+          durationMinutes: 60,
+          timezone: 'UTC',
+        })
+      ).id;
+      const slotA = await createWorkRole(seed, seriesAId, {
+        title: 'Cook the meal',
+        isCritical: true,
+        workRoleId,
+      });
+      await assignToWorkRole(seed, seriesAId, slotA.id, seed.readerUserId);
+
+      // Series B: single event in range, assigned to the member only.
+      const seriesBId = (
+        await createSeries(seed, {
+          title: `Assignments B ${suffix}`,
+          start: '2026-10-22T16:00:00.000Z',
+          durationMinutes: 60,
+          timezone: 'UTC',
+        })
+      ).id;
+      const slotB = await createWorkRole(seed, seriesBId, { title: 'Member slot' });
+      await assignToWorkRole(seed, seriesBId, slotB.id, seed.memberUserId);
+
+      // Series C: weekly recurring in range, series-wide slot assigned to the
+      // reader (3 occurrences in the range).
+      const seriesCId = (
+        await createSeries(seed, {
+          title: `Assignments C ${suffix}`,
+          start: '2027-10-20T16:00:00.000Z', // Wednesday
+          durationMinutes: 60,
+          timezone: 'UTC',
+          recurrence: { freq: 'WEEKLY', byWeekdays: [3] },
+        })
+      ).id;
+      const slotC = await createWorkRole(seed, seriesCId, { title: 'Weekly helper' });
+      await assignToWorkRole(seed, seriesCId, slotC.id, seed.readerUserId);
+
+      // Series D: single event three months after the range, assigned to the
+      // reader (only visible when the date span is extended explicitly).
+      const seriesDId = (
+        await createSeries(seed, {
+          title: `Assignments D ${suffix}`,
+          start: '2028-01-15T16:00:00.000Z',
+          durationMinutes: 60,
+          timezone: 'UTC',
+        })
+      ).id;
+      const slotD = await createWorkRole(seed, seriesDId, { title: 'Far future slot' });
+      await assignToWorkRole(seed, seriesDId, slotD.id, seed.readerUserId);
+
+      const baseUrl = `/api/v1/organizations/${seed.organizationId}/users/${seed.readerUserId}/event-assignments`;
+      const getAssignments = async (token: string, query = '') => {
+        const response = await app.inject({
+          method: 'GET',
+          url: `${baseUrl}?${query}`,
+          headers: auth(token),
+        });
+        return response;
+      };
+
+      // In range: series A (1) + series C (3) = 4 assignments; series B and D excluded.
+      const range = 'start=2027-10-20T00:00:00.000Z&end=2027-11-05T00:00:00.000Z';
+      const page0 = await getAssignments(seed.adminToken, `${range}&page=0&limit=2`);
+      expect(page0.statusCode).toBe(200);
+      const body0 = page0.json() as {
+        items: {
+          seriesId: number;
+          title: string;
+          start: string;
+          roles: { title: string; workRoleName: string | null; isCritical: boolean }[];
+        }[];
+        total: number;
+        page: number;
+        limit: number;
+      };
+      expect(body0.total).toBe(4);
+      expect(body0.page).toBe(0);
+      expect(body0.limit).toBe(2);
+      expect(body0.items).toHaveLength(2);
+      // Sorted by start: series C (Oct 20) first, then series A (Oct 21).
+      expect(body0.items[0].seriesId).toBe(seriesCId);
+      expect(body0.items[0].roles[0].title).toBe('Weekly helper');
+      const firstA = body0.items.find(i => i.seriesId === seriesAId);
+      expect(firstA).toBeDefined();
+      expect(firstA?.roles).toHaveLength(1);
+      expect(firstA?.roles[0]).toMatchObject({
+        title: 'Cook the meal',
+        workRoleId,
+        workRoleName: `Cook ${suffix}`,
+        isCritical: true,
+      });
+
+      // Page 1 returns the remaining two occurrences of series C.
+      const page1 = await getAssignments(seed.adminToken, `${range}&page=1&limit=2`);
+      const body1 = page1.json() as typeof body0;
+      expect(body1.items).toHaveLength(2);
+      expect(body1.items.every(i => i.seriesId === seriesCId)).toBe(true);
+
+      // Default span (no start/end): one month back and forward from now, so
+      // the 2026 fixtures are excluded and the result is empty.
+      const defaultSpan = await getAssignments(seed.adminToken);
+      expect(defaultSpan.statusCode).toBe(200);
+      expect((defaultSpan.json() as typeof body0).total).toBe(0);
+
+      // Extending the span explicitly includes series D.
+      const wide = await getAssignments(
+        seed.adminToken,
+        'start=2027-10-20T00:00:00.000Z&end=2028-02-01T00:00:00.000Z&limit=200',
+      );
+      const wideBody = wide.json() as typeof body0;
+      expect(wideBody.total).toBeGreaterThan(4);
+      expect(wideBody.items.some(i => i.seriesId === seriesDId)).toBe(true);
+
+      // The member has no events:read permission.
+      const forbidden = await getAssignments(seed.memberToken, range);
+      expect(forbidden.statusCode).toBe(403);
+
+      // A user outside the organization is rejected.
+      const outsider = await app.inject({
+        method: 'GET',
+        url: `/api/v1/organizations/${seed.organizationId}/users/${randomUUID()}/event-assignments?${range}`,
+        headers: auth(seed.adminToken),
+      });
+      expect(outsider.statusCode).toBe(404);
+    });
   });
 
   describe('POST /api/v1/event-series/:seriesId/occurrences/:occurrenceStart/cancel', () => {
@@ -831,6 +1536,33 @@ describe('Events API', () => {
       });
       expect(response.statusCode).toBe(404);
     });
+
+    it('notifies the occurrence participants and the series managers', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
+      await assignToWorkRole(seed, series.id, slot.id, seed.memberUserId);
+      await seedTeamWithManagers(seed, series.id, seed.adminUserId, seed.readerUserId);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/occurrences/${encodeURIComponent('2026-10-28T17:00:00.000Z')}/cancel`,
+        headers: auth(seed.adminToken),
+      });
+      expect(response.statusCode).toBe(200);
+
+      for (const userId of [seed.memberUserId, seed.readerUserId]) {
+        const notifications = (await notificationsFor(userId)).filter(
+          n => n.message_key === 'eventCancelled',
+        );
+        expect(notifications).toHaveLength(1);
+        expect(notifications[0].params).toEqual({
+          eventTitle: 'Weekly sync',
+          start: '2026-10-28T17:00:00.000Z',
+        });
+        expect(notifications[0].organization_id).toBe(seed.organizationId);
+      }
+    });
   });
 
   describe('POST /api/v1/event-series/:seriesId/occurrences/:occurrenceStart/reschedule', () => {
@@ -864,6 +1596,174 @@ describe('Events API', () => {
       expect(moved?.start).toBe('2026-11-03T10:00:00.000Z');
       expect(moved?.isRescheduled).toBe(true);
       expect(weekly.some(o => o.start === '2026-11-02T17:00:00.000Z')).toBe(false);
+    });
+
+    it('notifies the occurrence participants and the series managers about the new time', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
+      await assignToWorkRole(seed, series.id, slot.id, seed.memberUserId);
+      await seedTeamWithManagers(seed, series.id, seed.adminUserId, seed.readerUserId);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/occurrences/${encodeURIComponent('2026-11-02T17:00:00.000Z')}/reschedule`,
+        headers: auth(seed.adminToken),
+        payload: { start: '2026-11-03T10:00:00.000Z' },
+      });
+      expect(response.statusCode).toBe(200);
+
+      for (const userId of [seed.memberUserId, seed.readerUserId]) {
+        const notifications = (await notificationsFor(userId)).filter(
+          n => n.message_key === 'eventRescheduled',
+        );
+        expect(notifications).toHaveLength(1);
+        expect(notifications[0].params).toEqual({
+          eventTitle: 'Weekly sync',
+          start: '2026-11-02T17:00:00.000Z',
+          newStart: '2026-11-03T10:00:00.000Z',
+          newEnd: '2026-11-03T11:00:00.000Z',
+        });
+        expect(notifications[0].organization_id).toBe(seed.organizationId);
+      }
+    });
+
+    it('reports booking conflicts when the occurrence is rescheduled into another booking in the same room', async () => {
+      const seed = await createEventsFixture();
+      const { roomId } = await createSiteAndRoom(seed.organizationId, randomUUID());
+      const series = await createSeries(seed, {
+        ...weeklyPayload,
+        timezone: 'UTC',
+        start: '2026-10-21T10:00:00.000Z',
+        roomId,
+      });
+      await createSeries(seed, {
+        title: 'Other booking',
+        start: '2026-11-03T10:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId,
+      });
+
+      // 2026-11-02T10:00:00Z is a Monday occurrence of the weekly series.
+      const occurrenceStart = encodeURIComponent('2026-11-02T10:00:00.000Z');
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/occurrences/${occurrenceStart}/reschedule`,
+        headers: auth(seed.adminToken),
+        payload: { start: '2026-11-03T10:30:00.000Z' },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as ExceptionResponse;
+      expect(body.conflicts).toHaveLength(1);
+      expect(body.conflicts?.[0].title).toBe('Other booking');
+      expect(body.conflicts?.[0].start).toBe('2026-11-03T10:00:00.000Z');
+    });
+
+    it('reports a conflict with another occurrence of the same series when rescheduled onto it, but not with cancelled occurrences of other series', async () => {
+      const seed = await createEventsFixture();
+      const { roomId } = await createSiteAndRoom(seed.organizationId, randomUUID());
+      const series = await createSeries(seed, {
+        ...weeklyPayload,
+        timezone: 'UTC',
+        start: '2026-10-21T10:00:00.000Z', // Wednesday
+        roomId,
+      });
+      const other = await createSeries(seed, {
+        title: 'Cancelled other',
+        start: '2026-11-05T10:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId,
+      });
+      // Cancel the other series' only occurrence.
+      await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${other.id}/occurrences/${encodeURIComponent('2026-11-05T10:00:00.000Z')}/cancel`,
+        headers: auth(seed.adminToken),
+      });
+
+      // Reschedule the Wednesday 2026-11-04 occurrence onto Monday 2026-11-02T10:00
+      // (another occurrence of the same series): conflict with the same series.
+      const ontoSelf = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/occurrences/${encodeURIComponent('2026-11-04T10:00:00.000Z')}/reschedule`,
+        headers: auth(seed.adminToken),
+        payload: { start: '2026-11-02T10:00:00.000Z' },
+      });
+      expect(ontoSelf.statusCode).toBe(200);
+      const selfBody = ontoSelf.json() as ExceptionResponse;
+      expect(selfBody.conflicts).toHaveLength(1);
+      expect(selfBody.conflicts?.[0].seriesId).toBe(series.id);
+      expect(selfBody.conflicts?.[0].occurrenceStart).toBe('2026-11-02T10:00:00.000Z');
+
+      // Rescheduling onto the cancelled occurrence of the other series: no conflict.
+      const ontoCancelled = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/occurrences/${encodeURIComponent('2026-11-04T10:00:00.000Z')}/reschedule`,
+        headers: auth(seed.adminToken),
+        payload: { start: '2026-11-05T10:00:00.000Z' },
+      });
+      expect((ontoCancelled.json() as ExceptionResponse).conflicts).toEqual([]);
+    });
+  });
+
+  describe('POST /api/v1/event-occurrences/:occurrenceRef/materialize', () => {
+    it('returns the stable ID and the booking conflicts of the occurrence', async () => {
+      const seed = await createEventsFixture();
+      const { roomId } = await createSiteAndRoom(seed.organizationId, randomUUID());
+      const series = await createSeries(seed, {
+        ...weeklyPayload,
+        timezone: 'UTC',
+        start: '2026-10-21T10:00:00.000Z',
+        roomId,
+      });
+      await createSeries(seed, {
+        title: 'Other booking',
+        start: '2026-10-21T10:30:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId,
+      });
+
+      const ref = encodeURIComponent(`tmp:${series.id}:2026-10-21T10:00:00.000Z`);
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${ref}/materialize`,
+        headers: auth(seed.adminToken),
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as {
+        occurrenceId: number;
+        conflicts: BookingConflictResponse[];
+      };
+      expect(typeof body.occurrenceId).toBe('number');
+      expect(body.conflicts).toHaveLength(1);
+      expect(body.conflicts[0].title).toBe('Other booking');
+    });
+
+    it('reports no conflicts for an occurrence without overlapping bookings', async () => {
+      const seed = await createEventsFixture();
+      const { roomId } = await createSiteAndRoom(seed.organizationId, randomUUID());
+      const series = await createSeries(seed, {
+        ...weeklyPayload,
+        timezone: 'UTC',
+        start: '2026-10-21T10:00:00.000Z',
+        roomId,
+      });
+
+      const ref = encodeURIComponent(`tmp:${series.id}:2026-10-28T10:00:00.000Z`);
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${ref}/materialize`,
+        headers: auth(seed.adminToken),
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as {
+        occurrenceId: number;
+        conflicts: BookingConflictResponse[];
+      };
+      expect(body.conflicts).toEqual([]);
     });
   });
 
@@ -935,6 +1835,86 @@ describe('Events API', () => {
       });
       expect(response.statusCode).toBe(404);
     });
+
+    it('inherits the description from a linked work role of the same organization', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const workRoleId = (
+        await db
+          .insertInto('work_roles')
+          .values({
+            name: 'Kitchen Helper',
+            description: 'Help prepare and serve food.',
+            organization_id: seed.organizationId,
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/work-roles`,
+        headers: auth(seed.adminToken),
+        payload: { title: 'Kitchen Helper', workRoleId },
+      });
+      expect(response.statusCode).toBe(200);
+      const slot = response.json() as { description: string; workRoleName: string | null };
+      expect(slot.description).toBe('Help prepare and serve food.');
+      expect(slot.workRoleName).toBe('Kitchen Helper');
+    });
+
+    it('rejects a work role from another organization', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const otherOrgId = await createOrganization(`Other Org ${randomUUID()}`, {
+        defaultTimezone: 'UTC',
+      });
+      const otherWorkRoleId = (
+        await db
+          .insertInto('work_roles')
+          .values({ name: 'Other Org Role', organization_id: otherOrgId })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/work-roles`,
+        headers: auth(seed.adminToken),
+        payload: { title: 'Cross-org slot', workRoleId: otherWorkRoleId },
+      });
+      expect(response.statusCode).toBe(404);
+    });
+  });
+
+  describe('GET /api/v1/event-series/:seriesId/work-roles', () => {
+    it('returns all slots by default and only parent slots with parentOnly=true', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      await createWorkRole(seed, series.id, { title: 'Setup crew' });
+      await createWorkRole(seed, series.id, {
+        title: 'AV check',
+        occurrenceStart: '2026-10-21T16:00:00.000Z',
+      });
+
+      const all = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series/${series.id}/work-roles`,
+        headers: auth(seed.readerToken),
+      });
+      expect(all.statusCode).toBe(200);
+      // Parent slot + inherited occurrence copy + the occurrence-scoped slot.
+      expect(all.json() as { occurrenceId: number | null }[]).toHaveLength(3);
+
+      const parents = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series/${series.id}/work-roles?parentOnly=true`,
+        headers: auth(seed.readerToken),
+      });
+      expect(parents.statusCode).toBe(200);
+      const parentSlots = parents.json() as { title: string; occurrenceId: number | null }[];
+      expect(parentSlots).toHaveLength(1);
+      expect(parentSlots[0].title).toBe('Setup crew');
+      expect(parentSlots[0].occurrenceId).toBeNull();
+    });
   });
 
   describe('POST /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments', () => {
@@ -944,6 +1924,49 @@ describe('Events API', () => {
       const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
       const assignment = await assignToWorkRole(seed, series.id, slot.id, seed.readerUserId);
       expect(assignment.userName).toBe('Reader User');
+    });
+
+    it('notifies the assigned user about the new assignment', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
+      await assignToWorkRole(seed, series.id, slot.id, seed.readerUserId);
+
+      const notifications = await notificationsFor(seed.readerUserId);
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0].message_key).toBe('workRoleAssigned');
+      expect(notifications[0].params).toEqual({ eventTitle: 'Weekly sync', role: 'Setup crew' });
+      expect(notifications[0].organization_id).toBe(seed.organizationId);
+      // The assigner gets no notification.
+      expect(await notificationsFor(seed.adminUserId)).toHaveLength(0);
+    });
+
+    it('does not notify the assigned user when they disabled the type in-app', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
+      // The reader turns off in-app notifications for workRoleAssigned.
+      const preference = await app.inject({
+        method: 'PATCH',
+        url: '/api/v1/users/@me/notification-preferences/workRoleAssigned/in_app',
+        headers: auth(seed.readerToken),
+        payload: { enabled: false },
+      });
+      expect(preference.statusCode).toBe(200);
+
+      await assignToWorkRole(seed, series.id, slot.id, seed.readerUserId);
+      expect(await notificationsFor(seed.readerUserId)).toHaveLength(0);
+
+      // Re-enabling delivers again.
+      await app.inject({
+        method: 'PATCH',
+        url: '/api/v1/users/@me/notification-preferences/workRoleAssigned/in_app',
+        headers: auth(seed.readerToken),
+        payload: { enabled: true },
+      });
+      await assignToWorkRole(seed, series.id, slot.id, seed.memberUserId);
+      expect(await notificationsFor(seed.memberUserId)).toHaveLength(1);
+      expect(await notificationsFor(seed.readerUserId)).toHaveLength(0);
     });
 
     it('rejects a duplicate assignment', async () => {
@@ -969,6 +1992,443 @@ describe('Events API', () => {
         url: `/api/v1/event-series/${series.id}/work-roles/${slot.id}/assignments`,
         headers: auth(seed.adminToken),
         payload: { userId: randomUUID() },
+      });
+      expect(response.statusCode).toBe(404);
+    });
+  });
+
+  describe('POST /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments/bulk', () => {
+    it('assigns the user to the inherited slot of each listed occurrence, materializing them', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/work-roles/${slot.id}/assignments/bulk`,
+        headers: auth(seed.adminToken),
+        payload: {
+          userId: seed.memberUserId,
+          occurrenceStarts: ['2026-10-21T16:00:00.000Z', '2026-10-26T17:00:00.000Z'],
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as {
+        results: { occurrenceStart: string; occurrenceId: number; status: string }[];
+      };
+      expect(body.results).toHaveLength(2);
+      expect(body.results.every(r => r.status === 'assigned')).toBe(true);
+
+      // Both occurrences are materialized and carry an assignment on their
+      // own inherited copy, never on the parent slot.
+      const occRows = await db
+        .selectFrom('event_occurrences')
+        .select(['id', 'occurrence_start'])
+        .where('event_series_id', '=', series.id)
+        .execute();
+      expect(occRows).toHaveLength(2);
+      for (const occ of occRows) {
+        const copy = await db
+          .selectFrom('event_work_roles')
+          .select('id')
+          .where('event_occurrence_id', '=', occ.id)
+          .where('inherited_from_work_role_id', '=', slot.id)
+          .executeTakeFirstOrThrow();
+        const assignment = await db
+          .selectFrom('event_work_role_assignments')
+          .selectAll()
+          .where('event_work_role_id', '=', copy.id)
+          .where('user_id', '=', seed.memberUserId)
+          .executeTakeFirst();
+        expect(assignment).toBeDefined();
+      }
+      const parentAssignments = await db
+        .selectFrom('event_work_role_assignments')
+        .selectAll()
+        .where('event_work_role_id', '=', slot.id)
+        .execute();
+      expect(parentAssignments).toHaveLength(0);
+
+      // Repeating the call reports already-assigned instead of duplicating.
+      const again = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/work-roles/${slot.id}/assignments/bulk`,
+        headers: auth(seed.adminToken),
+        payload: {
+          userId: seed.memberUserId,
+          occurrenceStarts: ['2026-10-21T16:00:00.000Z'],
+        },
+      });
+      expect(again.statusCode).toBe(200);
+      const againBody = again.json() as {
+        results: { status: string }[];
+      };
+      expect(againBody.results[0].status).toBe('already-assigned');
+    });
+
+    it('notifies the assigned user once per occurrence, with the occurrence start', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
+
+      await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/work-roles/${slot.id}/assignments/bulk`,
+        headers: auth(seed.adminToken),
+        payload: {
+          userId: seed.memberUserId,
+          occurrenceStarts: ['2026-10-21T16:00:00.000Z', '2026-10-26T17:00:00.000Z'],
+        },
+      });
+
+      const notifications = await notificationsFor(seed.memberUserId);
+      expect(notifications).toHaveLength(2);
+      expect(notifications.every(n => n.message_key === 'workRoleAssigned')).toBe(true);
+      expect(notifications.map(n => n.params.start).sort()).toEqual([
+        '2026-10-21T16:00:00.000Z',
+        '2026-10-26T17:00:00.000Z',
+      ]);
+      expect(notifications[0].params).toMatchObject({
+        eventTitle: 'Weekly sync',
+        role: 'Setup crew',
+      });
+      expect(notifications[0].organization_id).toBe(seed.organizationId);
+    });
+
+    it('rejects an occurrence start that is not an occurrence of the series', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/work-roles/${slot.id}/assignments/bulk`,
+        headers: auth(seed.adminToken),
+        payload: { userId: seed.memberUserId, occurrenceStarts: ['2026-10-22T16:00:00.000Z'] },
+      });
+      expect(response.statusCode).toBe(404);
+    });
+  });
+
+  describe('GET /api/v1/organizations/:organizationId/staffing/workload', () => {
+    it('returns per-user assignment counts, hours and weekly buckets for the range', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload); // Mon/Wed 18:00 Berlin, 60 min
+      const slot = await createWorkRole(seed, series.id, {
+        title: 'Setup crew',
+        isCritical: true,
+      });
+      await assignToWorkRole(seed, series.id, slot.id, seed.memberUserId);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/organizations/${seed.organizationId}/staffing/workload?start=2026-10-21T00:00:00.000Z&end=2026-10-29T00:00:00.000Z`,
+        headers: auth(seed.readerToken),
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as {
+        items: {
+          userId: string;
+          assignmentCount: number;
+          hours: number;
+          criticalAssignmentCount: number;
+          hasAbsence: boolean;
+          weeks: { start: string; count: number; hours: number }[];
+        }[];
+      };
+      const member = body.items.find(i => i.userId === seed.memberUserId);
+      const admin = body.items.find(i => i.userId === seed.adminUserId);
+      // Wed 2026-10-21, Mon 2026-10-26 and Wed 2026-10-28 fall in the range
+      // (3 occurrences x 1h; after the DST change the local 18:00 is 17:00Z).
+      expect(member?.assignmentCount).toBe(3);
+      expect(member?.hours).toBe(3);
+      expect(member?.criticalAssignmentCount).toBe(3);
+      expect(member?.hasAbsence).toBe(false);
+      expect(member?.weeks.length).toBe(2);
+      expect(member?.weeks.reduce((sum, w) => sum + w.count, 0)).toBe(3);
+      expect(admin?.assignmentCount).toBe(0);
+
+      // A site filter that matches nothing yields zero counts.
+      const filtered = await app.inject({
+        method: 'GET',
+        url: `/api/v1/organizations/${seed.organizationId}/staffing/workload?start=2026-10-21T00:00:00.000Z&end=2026-10-29T00:00:00.000Z&siteId=${randomUUID()}`,
+        headers: auth(seed.readerToken),
+      });
+      const filteredMember = (filtered.json() as typeof body).items.find(
+        i => i.userId === seed.memberUserId,
+      );
+      expect(filteredMember?.assignmentCount).toBe(0);
+    });
+
+    it('returns 404 for an unknown organization', async () => {
+      const seed = await createEventsFixture();
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/organizations/${randomUUID()}/staffing/workload?start=2026-10-21T00:00:00.000Z&end=2026-10-29T00:00:00.000Z`,
+        headers: auth(seed.adminToken),
+      });
+      expect(response.statusCode).toBe(404);
+    });
+  });
+
+  describe('GET /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignment-candidates', () => {
+    interface CandidateItem {
+      id: string;
+      name: string;
+      hasAbsence: boolean;
+      hasWorkRole: boolean;
+      isQualified: boolean;
+      missingCertifications: {
+        certificationId: number;
+        name: string;
+        expiredDate: string | null;
+      }[];
+      assignmentCount: number;
+      workloadHours: number;
+    }
+
+    it('includes assignmentCount and workloadHours for the requested range', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
+      // The member is assigned to the parent slot, covering all three
+      // occurrences in the range (Wed 10-21, Mon 10-26, Wed 10-28; 60 min each).
+      await assignToWorkRole(seed, series.id, slot.id, seed.memberUserId);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series/${series.id}/work-roles/${slot.id}/assignment-candidates?start=2026-10-21T00:00:00.000Z&end=2026-10-29T00:00:00.000Z`,
+        headers: auth(seed.readerToken),
+      });
+      expect(response.statusCode).toBe(200);
+      const candidates = response.json() as CandidateItem[];
+      const member = candidates.find(c => c.id === seed.memberUserId);
+      const admin = candidates.find(c => c.id === seed.adminUserId);
+      expect(member?.assignmentCount).toBe(3);
+      expect(member?.workloadHours).toBe(3);
+      expect(admin?.assignmentCount).toBe(0);
+      expect(admin?.workloadHours).toBe(0);
+    });
+
+    /** Builds a series with a slot linked to a work role that requires one certification. */
+    async function createSlotWithWorkRole(seed: Seed) {
+      const suffix = randomUUID();
+      const series = await createSeries(seed, weeklyPayload);
+      const workRoleId = (
+        await db
+          .insertInto('work_roles')
+          .values({ name: `Cook ${suffix}`, organization_id: seed.organizationId })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+      const certificationId = (
+        await db
+          .insertInto('certifications')
+          .values({ name: `Food Safety ${suffix}`, organization_id: seed.organizationId })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+      await db
+        .insertInto('certification_work_roles')
+        .values({ work_role_id: workRoleId, certification_id: certificationId })
+        .execute();
+      const slot = await createWorkRole(seed, series.id, {
+        title: 'Cook',
+        workRoleId,
+        isCritical: true,
+      });
+      return { series, workRoleId, certificationId, slot };
+    }
+
+    const candidatesOf = async (
+      seed: Seed,
+      seriesId: number,
+      slotId: number,
+      query = '',
+      token = seed.readerToken,
+    ): Promise<CandidateItem[]> => {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series/${seriesId}/work-roles/${slotId}/assignment-candidates${query}`,
+        headers: auth(token),
+      });
+      expect(response.statusCode).toBe(200);
+      return response.json() as CandidateItem[];
+    };
+
+    it('returns 403 for a member without events:read', async () => {
+      const seed = await createEventsFixture();
+      const { series, slot } = await createSlotWithWorkRole(seed);
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series/${series.id}/work-roles/${slot.id}/assignment-candidates`,
+        headers: auth(seed.memberToken),
+      });
+      expect(response.statusCode).toBe(403);
+    });
+
+    it('returns 404 for an unknown slot', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series/${series.id}/work-roles/99999/assignment-candidates`,
+        headers: auth(seed.readerToken),
+      });
+      expect(response.statusCode).toBe(404);
+    });
+
+    it('computes hasWorkRole, isQualified and missing/expired certifications against the slot work role', async () => {
+      const seed = await createEventsFixture();
+      const { series, workRoleId, certificationId, slot } = await createSlotWithWorkRole(seed);
+
+      // Admin: declared the role and is qualified, holds a valid certification.
+      await db
+        .insertInto('user_work_roles')
+        .values({ user_id: seed.adminUserId, work_role_id: workRoleId, is_qualified: true })
+        .execute();
+      await db
+        .insertInto('user_certifications')
+        .values({
+          user_id: seed.adminUserId,
+          certification_id: certificationId,
+          valid_until_date: new Date('2999-01-01T00:00:00.000Z'),
+        })
+        .execute();
+      // Reader: declared the role but not qualified, certification expired.
+      await db
+        .insertInto('user_work_roles')
+        .values({ user_id: seed.readerUserId, work_role_id: workRoleId, is_qualified: false })
+        .execute();
+      await db
+        .insertInto('user_certifications')
+        .values({
+          user_id: seed.readerUserId,
+          certification_id: certificationId,
+          valid_until_date: new Date('2020-01-01T00:00:00.000Z'),
+        })
+        .execute();
+      // Member: no role, no certification.
+
+      const candidates = await candidatesOf(seed, series.id, slot.id);
+      expect(candidates.map(c => c.name)).toEqual(['Admin User', 'Member User', 'Reader User']);
+
+      const admin = candidates.find(c => c.id === seed.adminUserId);
+      expect(admin).toMatchObject({
+        hasWorkRole: true,
+        isQualified: true,
+        hasAbsence: false,
+      });
+      expect(admin?.missingCertifications).toEqual([]);
+
+      const reader = candidates.find(c => c.id === seed.readerUserId);
+      expect(reader).toMatchObject({ hasWorkRole: true, isQualified: false });
+      expect(reader?.missingCertifications).toEqual([
+        {
+          certificationId,
+          name: expect.stringContaining('Food Safety'),
+          expiredDate: '2020-01-01',
+        },
+      ]);
+
+      const member = candidates.find(c => c.id === seed.memberUserId);
+      expect(member).toMatchObject({ hasWorkRole: false, isQualified: false });
+      expect(member?.missingCertifications).toEqual([
+        { certificationId, name: expect.stringContaining('Food Safety'), expiredDate: null },
+      ]);
+    });
+
+    it('treats a certification without expiry as valid and one expiring today as still valid', async () => {
+      const seed = await createEventsFixture();
+      const { series, workRoleId, certificationId, slot } = await createSlotWithWorkRole(seed);
+
+      const noExpiryUser = await createUser('No Expiry User');
+      const todayUser = await createUser('Today Expiry User');
+      await db
+        .insertInto('user_work_roles')
+        .values([
+          { user_id: noExpiryUser.id, work_role_id: workRoleId, is_qualified: true },
+          { user_id: todayUser.id, work_role_id: workRoleId, is_qualified: true },
+        ])
+        .execute();
+      const today = new Date().toISOString().slice(0, 10);
+      await db
+        .insertInto('user_certifications')
+        .values([
+          { user_id: noExpiryUser.id, certification_id: certificationId, valid_until_date: null },
+          {
+            user_id: todayUser.id,
+            certification_id: certificationId,
+            valid_until_date: new Date(`${today}T00:00:00.000Z`),
+          },
+        ])
+        .execute();
+
+      const candidates = await candidatesOf(seed, series.id, slot.id);
+      for (const id of [noExpiryUser.id, todayUser.id]) {
+        expect(candidates.find(c => c.id === id)?.missingCertifications).toEqual([]);
+      }
+    });
+
+    it('flags hasAbsence when a range is given and returns neutral flags for a slot without work role', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const plainSlot = await createWorkRole(seed, series.id, { title: 'Anyone' });
+
+      // The member is absent on 2026-10-21 (inclusive day range).
+      await db
+        .insertInto('absences')
+        .values({
+          user_id: seed.memberUserId,
+          type: 'away',
+          start_date: new Date('2026-10-21T00:00:00.000Z'),
+          end_date: new Date('2026-10-21T00:00:00.000Z'),
+        })
+        .execute();
+
+      const withRange = await candidatesOf(
+        seed,
+        series.id,
+        plainSlot.id,
+        '?start=2026-10-21T10:00:00.000Z&end=2026-10-21T11:00:00.000Z',
+      );
+      const member = withRange.find(c => c.id === seed.memberUserId);
+      expect(member?.hasAbsence).toBe(true);
+      expect(member?.hasWorkRole).toBe(false);
+      expect(member?.isQualified).toBe(false);
+      expect(member?.missingCertifications).toEqual([]);
+      expect(withRange.find(c => c.id === seed.adminUserId)?.hasAbsence).toBe(false);
+
+      // Without a range no absence flags are computed.
+      const withoutRange = await candidatesOf(seed, series.id, plainSlot.id);
+      expect(withoutRange.every(c => !c.hasAbsence)).toBe(true);
+    });
+
+    it('returns 404 when the slot work role belongs to another organization', async () => {
+      const seed = await createEventsFixture();
+      const otherOrgId = await createOrganization(`Other Org ${randomUUID()}`, {
+        defaultTimezone: 'UTC',
+      });
+      const otherWorkRoleId = (
+        await db
+          .insertInto('work_roles')
+          .values({ name: `Other Role ${randomUUID()}`, organization_id: otherOrgId })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+      const series = await createSeries(seed, weeklyPayload);
+      // Insert a slot pointing at the foreign work role directly (the API
+      // validates on write, so bypass it here to test the read guard).
+      const slot = await createWorkRole(seed, series.id, { title: 'Foreign role slot' });
+      await db
+        .updateTable('event_work_roles')
+        .set({ work_role_id: otherWorkRoleId })
+        .where('id', '=', slot.id)
+        .execute();
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series/${series.id}/work-roles/${slot.id}/assignment-candidates`,
+        headers: auth(seed.readerToken),
       });
       expect(response.statusCode).toBe(404);
     });
@@ -1018,6 +2478,30 @@ describe('Events API', () => {
         payload: { body: 'Nope', occurrenceStart: '2026-10-22T16:00:00.000Z' },
       });
       expect(response.statusCode).toBe(404);
+    });
+
+    it('notifies series participants and managers, but not the comment author', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
+      await assignToWorkRole(seed, series.id, slot.id, seed.memberUserId);
+      await seedTeamWithManagers(seed, series.id, seed.adminUserId, seed.readerUserId);
+
+      await createComment(seed, series.id, { body: 'Series-wide note' }, seed.adminToken);
+
+      for (const userId of [seed.memberUserId, seed.readerUserId]) {
+        const notifications = (await notificationsFor(userId)).filter(
+          n => n.message_key === 'newEventComment',
+        );
+        expect(notifications).toHaveLength(1);
+        expect(notifications[0].params).toEqual({ eventTitle: 'Weekly sync' });
+        expect(notifications[0].organization_id).toBe(seed.organizationId);
+      }
+      // The author (team leader here) is not notified about their own comment.
+      const own = (await notificationsFor(seed.adminUserId)).filter(
+        n => n.message_key === 'newEventComment',
+      );
+      expect(own).toHaveLength(0);
     });
   });
 
@@ -1117,6 +2601,841 @@ describe('Events API', () => {
       expect(response.statusCode).toBe(200);
       expect((response.json() as { title: string }).title).toBe('Setup crew (updated)');
     });
+
+    it('toggles the required (critical) flag and updates the description', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-series/${series.id}/work-roles/${slot.id}`,
+        headers: auth(seed.adminToken),
+        payload: { isCritical: true, description: 'Arrive 30 minutes early' },
+      });
+      expect(response.statusCode).toBe(200);
+      const updated = response.json() as { isCritical: boolean; description: string };
+      expect(updated.isCritical).toBe(true);
+      expect(updated.description).toBe('Arrive 30 minutes early');
+
+      // Toggle back to not required.
+      const back = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-series/${series.id}/work-roles/${slot.id}`,
+        headers: auth(seed.adminToken),
+        payload: { isCritical: false },
+      });
+      expect(back.statusCode).toBe(200);
+      expect((back.json() as { isCritical: boolean }).isCritical).toBe(false);
+    });
+
+    it('rejects a work role from another organization', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
+      const otherOrgId = await createOrganization(`Other Org ${randomUUID()}`, {
+        defaultTimezone: 'UTC',
+      });
+      const otherWorkRoleId = (
+        await db
+          .insertInto('work_roles')
+          .values({ name: 'Other Org Role', organization_id: otherOrgId })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-series/${series.id}/work-roles/${slot.id}`,
+        headers: auth(seed.adminToken),
+        payload: { workRoleId: otherWorkRoleId },
+      });
+      expect(response.statusCode).toBe(404);
+    });
+  });
+
+  describe('PATCH /api/v1/event-occurrences/:eventOccurrenceId/work-roles/:workRoleId', () => {
+    it('toggles required and edits the description of an occurrence-level slot', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, {
+        title: 'AV check',
+        occurrenceStart: '2026-10-21T16:00:00.000Z',
+      });
+      expect(slot.occurrenceId).not.toBeNull();
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-occurrences/${slot.occurrenceId as number}/work-roles/${slot.id}`,
+        headers: auth(seed.adminToken),
+        payload: { isCritical: true, description: 'Only for this occurrence' },
+      });
+      expect(response.statusCode).toBe(200);
+      const updated = response.json() as {
+        id: number;
+        occurrenceId: number;
+        isCritical: boolean;
+        description: string;
+      };
+      expect(updated.occurrenceId).toBe(slot.occurrenceId);
+      expect(updated.isCritical).toBe(true);
+      expect(updated.description).toBe('Only for this occurrence');
+
+      // Toggle back to not required.
+      const back = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-occurrences/${slot.occurrenceId as number}/work-roles/${slot.id}`,
+        headers: auth(seed.adminToken),
+        payload: { isCritical: false },
+      });
+      expect(back.statusCode).toBe(200);
+      expect((back.json() as { isCritical: boolean }).isCritical).toBe(false);
+    });
+
+    it('resolves a parent slot reference to its inherited occurrence copy', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const parentSlot = await createWorkRole(seed, series.id, {
+        title: 'Setup crew',
+        description: 'Parent description',
+      });
+      // Materialize the occurrence by adding an occurrence-scoped slot; the
+      // parent slot is inherited into the occurrence on materialization.
+      const occurrenceSlot = await createWorkRole(seed, series.id, {
+        title: 'Extra helper',
+        occurrenceStart: '2026-10-21T16:00:00.000Z',
+      });
+      const occurrenceId = occurrenceSlot.occurrenceId as number;
+      expect(occurrenceId).not.toBeNull();
+
+      // Reference the parent slot through the occurrence endpoint.
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-occurrences/${occurrenceId}/work-roles/${parentSlot.id}`,
+        headers: auth(seed.adminToken),
+        payload: { isCritical: true },
+      });
+      expect(response.statusCode).toBe(200);
+      const updated = response.json() as {
+        id: number;
+        isCritical: boolean;
+        inheritedFromWorkRoleId: number | null;
+      };
+      expect(updated.id).not.toBe(parentSlot.id);
+      expect(updated.inheritedFromWorkRoleId).toBe(parentSlot.id);
+      expect(updated.isCritical).toBe(true);
+
+      // The parent slot itself is unchanged.
+      const listResponse = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series/${series.id}/work-roles`,
+        headers: auth(seed.readerToken),
+      });
+      expect(listResponse.statusCode).toBe(200);
+      const parent = (listResponse.json() as { id: number; isCritical: boolean }[]).find(
+        s => s.id === parentSlot.id,
+      );
+      expect(parent?.isCritical).toBe(false);
+    });
+
+    it('returns 404 when the slot does not exist in the occurrence', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, {
+        title: 'AV check',
+        occurrenceStart: '2026-10-21T16:00:00.000Z',
+      });
+      const otherSeries = await createSeries(seed, {
+        title: 'Other series',
+        start: '2026-10-23T16:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+      });
+      const otherSlot = await createWorkRole(seed, otherSeries.id, { title: 'Other slot' });
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-occurrences/${slot.occurrenceId as number}/work-roles/${otherSlot.id}`,
+        headers: auth(seed.adminToken),
+        payload: { isCritical: true },
+      });
+      expect(response.statusCode).toBe(404);
+    });
+  });
+
+  describe('POST /api/v1/event-occurrences/:eventOccurrenceId/work-roles/:workRoleId/assignments', () => {
+    it('assigns a user to an occurrence-level slot referenced by its own ID', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, {
+        title: 'AV check',
+        occurrenceStart: '2026-10-21T16:00:00.000Z',
+      });
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${slot.occurrenceId as number}/work-roles/${slot.id}/assignments`,
+        headers: auth(seed.adminToken),
+        payload: { userId: seed.memberUserId },
+      });
+      expect(response.statusCode).toBe(200);
+      const assignment = response.json() as { eventWorkRoleId: number; userId: string };
+      expect(assignment.eventWorkRoleId).toBe(slot.id);
+      expect(assignment.userId).toBe(seed.memberUserId);
+    });
+
+    it('notifies the assigned user with the occurrence start', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, {
+        title: 'AV check',
+        occurrenceStart: '2026-10-21T16:00:00.000Z',
+      });
+      await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${slot.occurrenceId as number}/work-roles/${slot.id}/assignments`,
+        headers: auth(seed.adminToken),
+        payload: { userId: seed.memberUserId },
+      });
+
+      const notifications = await notificationsFor(seed.memberUserId);
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0].message_key).toBe('workRoleAssigned');
+      expect(notifications[0].params).toEqual({
+        eventTitle: 'Weekly sync',
+        role: 'AV check',
+        start: '2026-10-21T16:00:00.000Z',
+      });
+    });
+
+    it('assigns to the inherited copy when the parent slot of a materialized occurrence is referenced', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const parentSlot = await createWorkRole(seed, series.id, { title: 'Kitchen Helper' });
+
+      // Materialize the occurrence the way the occurrence page does for a tmp ref.
+      const ref = encodeURIComponent(`tmp:${series.id}:2026-10-21T16:00:00.000Z`);
+      const materialize = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${ref}/materialize`,
+        headers: auth(seed.adminToken),
+      });
+      expect(materialize.statusCode).toBe(200);
+      const { occurrenceId } = materialize.json() as { occurrenceId: number };
+
+      // The occurrence page shows the parent slots until the occurrence is
+      // materialized, so the assign call references the parent slot ID.
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${occurrenceId}/work-roles/${parentSlot.id}/assignments`,
+        headers: auth(seed.adminToken),
+        payload: { userId: seed.memberUserId },
+      });
+      expect(response.statusCode).toBe(200);
+      const assignment = response.json() as { eventWorkRoleId: number; userId: string };
+      expect(assignment.userId).toBe(seed.memberUserId);
+      expect(assignment.eventWorkRoleId).not.toBe(parentSlot.id);
+
+      // The assignment landed on the occurrence-level copy inherited from the
+      // parent slot.
+      const copy = await db
+        .selectFrom('event_work_roles')
+        .select(['id', 'event_occurrence_id', 'inherited_from_work_role_id'])
+        .where('id', '=', assignment.eventWorkRoleId)
+        .executeTakeFirstOrThrow();
+      expect(copy.event_occurrence_id).toBe(occurrenceId);
+      expect(copy.inherited_from_work_role_id).toBe(parentSlot.id);
+
+      // The parent slot itself got no assignment.
+      const parentAssignments = await db
+        .selectFrom('event_work_role_assignments')
+        .selectAll()
+        .where('event_work_role_id', '=', parentSlot.id)
+        .execute();
+      expect(parentAssignments).toHaveLength(0);
+    });
+
+    it('returns 404 when the slot does not exist in the occurrence', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, {
+        title: 'AV check',
+        occurrenceStart: '2026-10-21T16:00:00.000Z',
+      });
+      const otherSeries = await createSeries(seed, {
+        title: 'Other series',
+        start: '2026-10-23T16:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+      });
+      const otherSlot = await createWorkRole(seed, otherSeries.id, { title: 'Other slot' });
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${slot.occurrenceId as number}/work-roles/${otherSlot.id}/assignments`,
+        headers: auth(seed.adminToken),
+        payload: { userId: seed.memberUserId },
+      });
+      expect(response.statusCode).toBe(404);
+    });
+  });
+
+  describe('DELETE /api/v1/event-occurrences/:eventOccurrenceId/work-roles/:workRoleId/assignments/:assignmentId', () => {
+    it('unassigns via the parent slot reference using the parent assignment ID', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const parentSlot = await createWorkRole(seed, series.id, { title: 'Kitchen Helper' });
+      const parentAssignment = await assignToWorkRole(
+        seed,
+        series.id,
+        parentSlot.id,
+        seed.memberUserId,
+      );
+
+      // Materialize: the parent slot and its assignment are copied to the occurrence.
+      const ref = encodeURIComponent(`tmp:${series.id}:2026-10-21T16:00:00.000Z`);
+      const materialize = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${ref}/materialize`,
+        headers: auth(seed.adminToken),
+      });
+      expect(materialize.statusCode).toBe(200);
+      const { occurrenceId } = materialize.json() as { occurrenceId: number };
+
+      // The occurrence page lists the parent assignments before materialization,
+      // so the unassign call references the parent slot and assignment IDs.
+      const response = await app.inject({
+        method: 'DELETE',
+        url: `/api/v1/event-occurrences/${occurrenceId}/work-roles/${parentSlot.id}/assignments/${parentAssignment.id}`,
+        headers: auth(seed.adminToken),
+      });
+      expect(response.statusCode).toBe(200);
+
+      // The inherited copy's assignment is gone, the parent assignment is intact.
+      const copySlot = await db
+        .selectFrom('event_work_roles')
+        .select('id')
+        .where('event_occurrence_id', '=', occurrenceId)
+        .where('inherited_from_work_role_id', '=', parentSlot.id)
+        .executeTakeFirstOrThrow();
+      const copyAssignments = await db
+        .selectFrom('event_work_role_assignments')
+        .selectAll()
+        .where('event_work_role_id', '=', copySlot.id)
+        .execute();
+      expect(copyAssignments).toHaveLength(0);
+      const remainingParent = await db
+        .selectFrom('event_work_role_assignments')
+        .selectAll()
+        .where('id', '=', parentAssignment.id)
+        .execute();
+      expect(remainingParent).toHaveLength(1);
+    });
+  });
+
+  describe('GET /api/v1/event-occurrences/:eventOccurrenceId/comments', () => {
+    it('lists series-wide and occurrence-scoped comments', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      await createComment(seed, series.id, { body: 'Series-wide comment' });
+      const slot = await createWorkRole(seed, series.id, {
+        title: 'AV check',
+        occurrenceStart: '2026-10-21T16:00:00.000Z',
+      });
+      const occurrenceId = slot.occurrenceId as number;
+      const created = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${occurrenceId}/comments`,
+        headers: auth(seed.adminToken),
+        payload: { body: 'Occurrence comment' },
+      });
+      expect(created.statusCode).toBe(200);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-occurrences/${occurrenceId}/comments`,
+        headers: auth(seed.readerToken),
+      });
+      expect(response.statusCode).toBe(200);
+      const bodies = (response.json() as { body: string }[]).map(c => c.body);
+      expect(bodies).toContain('Series-wide comment');
+      expect(bodies).toContain('Occurrence comment');
+    });
+  });
+
+  describe('POST /api/v1/event-occurrences/:eventOccurrenceId/comments', () => {
+    it('creates an occurrence-scoped comment attributed to the current user', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, {
+        title: 'AV check',
+        occurrenceStart: '2026-10-21T16:00:00.000Z',
+      });
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${slot.occurrenceId as number}/comments`,
+        headers: auth(seed.adminToken),
+        payload: { body: 'Please bring the keys' },
+      });
+      expect(response.statusCode).toBe(200);
+      const comment = response.json() as { userId: string; userName: string; body: string };
+      expect(comment.userId).toBe(seed.adminUserId);
+      expect(comment.body).toBe('Please bring the keys');
+    });
+
+    it('returns 404 for an unknown occurrence', async () => {
+      const seed = await createEventsFixture();
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/event-occurrences/999/comments',
+        headers: auth(seed.adminToken),
+        payload: { body: 'Hello' },
+      });
+      expect(response.statusCode).toBe(404);
+    });
+
+    it('notifies occurrence participants with the occurrence start, except the author', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, {
+        title: 'AV check',
+        occurrenceStart: '2026-10-21T16:00:00.000Z',
+      });
+      const occurrenceId = slot.occurrenceId as number;
+      // The member is assigned to the occurrence-level slot, so they are a participant.
+      await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${occurrenceId}/work-roles/${slot.id}/assignments`,
+        headers: auth(seed.adminToken),
+        payload: { userId: seed.memberUserId },
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${occurrenceId}/comments`,
+        headers: auth(seed.adminToken),
+        payload: { body: 'Please bring the keys' },
+      });
+      expect(response.statusCode).toBe(200);
+
+      const notifications = (await notificationsFor(seed.memberUserId)).filter(
+        n => n.message_key === 'newEventComment',
+      );
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0].params).toEqual({
+        eventTitle: 'Weekly sync',
+        start: '2026-10-21T16:00:00.000Z',
+      });
+      const own = (await notificationsFor(seed.adminUserId)).filter(
+        n => n.message_key === 'newEventComment',
+      );
+      expect(own).toHaveLength(0);
+    });
+  });
+
+  describe('PATCH /api/v1/event-occurrences/:eventOccurrenceId/comments/:commentId', () => {
+    it('lets the author edit the comment and rejects other users', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, {
+        title: 'AV check',
+        occurrenceStart: '2026-10-21T16:00:00.000Z',
+      });
+      const occurrenceId = slot.occurrenceId as number;
+      const created = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${occurrenceId}/comments`,
+        headers: auth(seed.adminToken),
+        payload: { body: 'Original' },
+      });
+      const commentId = (created.json() as { id: number }).id;
+
+      const forbiddenResponse = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-occurrences/${occurrenceId}/comments/${commentId}`,
+        headers: auth(seed.readerToken),
+        payload: { body: 'Hijacked' },
+      });
+      expect(forbiddenResponse.statusCode).toBe(403);
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-occurrences/${occurrenceId}/comments/${commentId}`,
+        headers: auth(seed.adminToken),
+        payload: { body: 'Edited' },
+      });
+      expect(response.statusCode).toBe(200);
+      expect((response.json() as { body: string }).body).toBe('Edited');
+    });
+  });
+
+  describe('DELETE /api/v1/event-occurrences/:eventOccurrenceId/comments/:commentId', () => {
+    it('lets the author delete the comment and rejects other users', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, {
+        title: 'AV check',
+        occurrenceStart: '2026-10-21T16:00:00.000Z',
+      });
+      const occurrenceId = slot.occurrenceId as number;
+      const created = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${occurrenceId}/comments`,
+        headers: auth(seed.adminToken),
+        payload: { body: 'To be deleted' },
+      });
+      const commentId = (created.json() as { id: number }).id;
+
+      const forbiddenResponse = await app.inject({
+        method: 'DELETE',
+        url: `/api/v1/event-occurrences/${occurrenceId}/comments/${commentId}`,
+        headers: auth(seed.readerToken),
+      });
+      expect(forbiddenResponse.statusCode).toBe(403);
+
+      const response = await app.inject({
+        method: 'DELETE',
+        url: `/api/v1/event-occurrences/${occurrenceId}/comments/${commentId}`,
+        headers: auth(seed.adminToken),
+      });
+      expect(response.statusCode).toBe(200);
+
+      const list = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-occurrences/${occurrenceId}/comments`,
+        headers: auth(seed.readerToken),
+      });
+      expect((list.json() as { id: number }[]).map(c => c.id)).not.toContain(commentId);
+    });
+  });
+
+  describe('POST /api/v1/event-series/:seriesId/info-slots', () => {
+    it('creates a parent info slot and lists it via the series endpoint', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const created = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/info-slots`,
+        headers: auth(seed.adminToken),
+        payload: { title: 'Sermon topic', description: 'Text of the sermon', value: null },
+      });
+      expect(created.statusCode).toBe(200);
+      const slot = created.json() as {
+        id: number;
+        occurrenceId: number | null;
+        title: string;
+        value: string | null;
+      };
+      expect(slot.occurrenceId).toBeNull();
+      expect(slot.title).toBe('Sermon topic');
+
+      const list = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series/${series.id}/info-slots`,
+        headers: auth(seed.readerToken),
+      });
+      expect(list.statusCode).toBe(200);
+      const items = list.json() as { id: number; title: string }[];
+      expect(items.map(s => s.title)).toContain('Sermon topic');
+    });
+  });
+
+  describe('PATCH /api/v1/event-series/:seriesId/info-slots/:infoSlotId', () => {
+    it('updates title, description and default value of a parent info slot', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const created = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/info-slots`,
+        headers: auth(seed.adminToken),
+        payload: { title: 'Band composition' },
+      });
+      const slotId = (created.json() as { id: number }).id;
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-series/${series.id}/info-slots/${slotId}`,
+        headers: auth(seed.adminToken),
+        payload: { title: 'Band', description: 'Who plays', value: 'Full band' },
+      });
+      expect(response.statusCode).toBe(200);
+      const updated = response.json() as { title: string; description: string; value: string };
+      expect(updated.title).toBe('Band');
+      expect(updated.description).toBe('Who plays');
+      expect(updated.value).toBe('Full band');
+    });
+  });
+
+  describe('DELETE /api/v1/event-series/:seriesId/info-slots/:infoSlotId', () => {
+    it('deletes a parent info slot but keeps occurrence copies', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const created = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/info-slots`,
+        headers: auth(seed.adminToken),
+        payload: { title: 'Special notes' },
+      });
+      const parentId = (created.json() as { id: number }).id;
+
+      // Materialize the occurrence: the parent info slot is inherited.
+      const ref = encodeURIComponent(`tmp:${series.id}:2026-10-21T16:00:00.000Z`);
+      const mat = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${ref}/materialize`,
+        headers: auth(seed.adminToken),
+      });
+      const { occurrenceId } = mat.json() as { occurrenceId: number };
+
+      const response = await app.inject({
+        method: 'DELETE',
+        url: `/api/v1/event-series/${series.id}/info-slots/${parentId}`,
+        headers: auth(seed.adminToken),
+      });
+      expect(response.statusCode).toBe(200);
+
+      // The occurrence copy still exists (inherited reference set to NULL).
+      const occSlots = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-occurrences/${occurrenceId}/info-slots`,
+        headers: auth(seed.readerToken),
+      });
+      const slots = occSlots.json() as { title: string; inheritedFromInfoSlotId: number | null }[];
+      expect(slots).toHaveLength(1);
+      expect(slots[0].title).toBe('Special notes');
+      expect(slots[0].inheritedFromInfoSlotId).toBeNull();
+    });
+  });
+
+  describe('GET /api/v1/event-occurrences/:eventOccurrenceId/info-slots', () => {
+    it('returns the inherited copies with the parent value as default after materialization', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const parent = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/info-slots`,
+        headers: auth(seed.adminToken),
+        payload: { title: 'Sermon topic', value: 'Default topic' },
+      });
+      const parentId = (parent.json() as { id: number }).id;
+
+      const ref = encodeURIComponent(`tmp:${series.id}:2026-10-21T16:00:00.000Z`);
+      const mat = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${ref}/materialize`,
+        headers: auth(seed.adminToken),
+      });
+      const { occurrenceId } = mat.json() as { occurrenceId: number };
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-occurrences/${occurrenceId}/info-slots`,
+        headers: auth(seed.readerToken),
+      });
+      expect(response.statusCode).toBe(200);
+      const slots = response.json() as {
+        id: number;
+        occurrenceId: number;
+        inheritedFromInfoSlotId: number;
+        value: string | null;
+      }[];
+      expect(slots).toHaveLength(1);
+      expect(slots[0].occurrenceId).toBe(occurrenceId);
+      expect(slots[0].inheritedFromInfoSlotId).toBe(parentId);
+      expect(slots[0].value).toBe('Default topic');
+    });
+  });
+
+  describe('PATCH /api/v1/event-occurrences/:eventOccurrenceId/info-slots/:infoSlotId', () => {
+    it('sets the value via the occurrence slot ID and via the parent slot ID', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const parent = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/info-slots`,
+        headers: auth(seed.adminToken),
+        payload: { title: 'Sermon topic' },
+      });
+      const parentId = (parent.json() as { id: number }).id;
+
+      const ref = encodeURIComponent(`tmp:${series.id}:2026-10-21T16:00:00.000Z`);
+      const mat = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${ref}/materialize`,
+        headers: auth(seed.adminToken),
+      });
+      const { occurrenceId } = mat.json() as { occurrenceId: number };
+
+      const occSlots = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-occurrences/${occurrenceId}/info-slots`,
+        headers: auth(seed.readerToken),
+      });
+      const copyId = (occSlots.json() as { id: number }[])[0].id;
+
+      // Reference the occurrence-level copy directly.
+      const direct = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-occurrences/${occurrenceId}/info-slots/${copyId}`,
+        headers: auth(seed.adminToken),
+        payload: { value: 'The Good Samaritan' },
+      });
+      expect(direct.statusCode).toBe(200);
+      expect((direct.json() as { value: string }).value).toBe('The Good Samaritan');
+
+      // Reference the parent slot: resolves to the inherited occurrence copy.
+      const viaParent = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-occurrences/${occurrenceId}/info-slots/${parentId}`,
+        headers: auth(seed.adminToken),
+        payload: { value: 'Updated topic' },
+      });
+      expect(viaParent.statusCode).toBe(200);
+      const updated = viaParent.json() as { id: number; value: string };
+      expect(updated.id).toBe(copyId);
+      expect(updated.value).toBe('Updated topic');
+
+      // The parent slot's value is unchanged.
+      const seriesSlots = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-series/${series.id}/info-slots`,
+        headers: auth(seed.readerToken),
+      });
+      const parentSlot = (seriesSlots.json() as { id: number; value: string | null }[]).find(
+        s => s.id === parentId,
+      );
+      expect(parentSlot?.value).toBeNull();
+    });
+
+    it('returns 404 when the info slot does not exist in the occurrence', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, {
+        title: 'AV check',
+        occurrenceStart: '2026-10-21T16:00:00.000Z',
+      });
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-occurrences/${slot.occurrenceId as number}/info-slots/999`,
+        headers: auth(seed.adminToken),
+        payload: { value: 'x' },
+      });
+      expect(response.statusCode).toBe(404);
+    });
+  });
+
+  describe('POST /api/v1/event-occurrences/:occurrenceRef/import-info-slots', () => {
+    it('syncs info slots added to the series after materialization into the occurrence', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/info-slots`,
+        headers: auth(seed.adminToken),
+        payload: { title: 'Sermon topic' },
+      });
+
+      const ref = encodeURIComponent(`tmp:${series.id}:2026-10-21T16:00:00.000Z`);
+      const mat = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${ref}/materialize`,
+        headers: auth(seed.adminToken),
+      });
+      const { occurrenceId } = mat.json() as { occurrenceId: number };
+
+      // A new info slot is added to the series after the occurrence was materialized.
+      await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/info-slots`,
+        headers: auth(seed.adminToken),
+        payload: { title: 'Special notes', value: 'Default notes' },
+      });
+
+      const before = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-occurrences/${occurrenceId}/info-slots`,
+        headers: auth(seed.readerToken),
+      });
+      expect((before.json() as unknown[]).length).toBe(1);
+
+      const imported = await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${occurrenceId}/import-info-slots`,
+        headers: auth(seed.adminToken),
+      });
+      expect(imported.statusCode).toBe(200);
+      const importedSlots = imported.json() as { title: string; value: string | null }[];
+      expect(importedSlots.map(s => s.title)).toEqual(['Special notes']);
+      expect(importedSlots[0].value).toBe('Default notes');
+
+      // Importing again does not duplicate.
+      await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${occurrenceId}/import-info-slots`,
+        headers: auth(seed.adminToken),
+      });
+      const after = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-occurrences/${occurrenceId}/info-slots`,
+        headers: auth(seed.readerToken),
+      });
+      expect((after.json() as unknown[]).length).toBe(2);
+    });
+  });
+
+  describe('GET /api/v1/event-occurrences/:occurrenceRef', () => {
+    it('includes info slots and missing parent info slots in the detail', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/info-slots`,
+        headers: auth(seed.adminToken),
+        payload: { title: 'Sermon topic' },
+      });
+
+      // Not yet materialized: the parent info slots are shown.
+      const ref = encodeURIComponent(`tmp:${series.id}:2026-10-21T16:00:00.000Z`);
+      const detail = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-occurrences/${ref}`,
+        headers: auth(seed.readerToken),
+      });
+      expect(detail.statusCode).toBe(200);
+      const body = detail.json() as {
+        infoSlots: { title: string }[];
+        parentInfoSlots: { title: string }[];
+        occurrenceInfoSlots: unknown[];
+        missingParentInfoSlots: unknown[];
+      };
+      expect(body.infoSlots.map(s => s.title)).toEqual(['Sermon topic']);
+      expect(body.occurrenceInfoSlots).toHaveLength(0);
+
+      // After materialization plus a new parent slot, the new slot is "missing".
+      await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-occurrences/${ref}/materialize`,
+        headers: auth(seed.adminToken),
+      });
+      await app.inject({
+        method: 'POST',
+        url: `/api/v1/event-series/${series.id}/info-slots`,
+        headers: auth(seed.adminToken),
+        payload: { title: 'Band composition' },
+      });
+      const { occurrenceId } = (
+        await app.inject({
+          method: 'POST',
+          url: `/api/v1/event-occurrences/${ref}/materialize`,
+          headers: auth(seed.adminToken),
+        })
+      ).json() as { occurrenceId: number };
+      const detail2 = await app.inject({
+        method: 'GET',
+        url: `/api/v1/event-occurrences/${occurrenceId}`,
+        headers: auth(seed.readerToken),
+      });
+      const body2 = detail2.json() as {
+        infoSlots: { title: string }[];
+        missingParentInfoSlots: { title: string }[];
+      };
+      expect(body2.infoSlots.map(s => s.title)).toEqual(['Sermon topic']);
+      expect(body2.missingParentInfoSlots.map(s => s.title)).toEqual(['Band composition']);
+    });
   });
 
   describe('DELETE /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments/:assignmentId', () => {
@@ -1131,6 +3450,28 @@ describe('Events API', () => {
         headers: auth(seed.adminToken),
       });
       expect(response.statusCode).toBe(200);
+    });
+
+    it('notifies the removed user about the unassignment', async () => {
+      const seed = await createEventsFixture();
+      const series = await createSeries(seed, weeklyPayload);
+      const slot = await createWorkRole(seed, series.id, { title: 'Setup crew' });
+      const assignment = await assignToWorkRole(seed, series.id, slot.id, seed.readerUserId);
+      await app.inject({
+        method: 'DELETE',
+        url: `/api/v1/event-series/${series.id}/work-roles/${slot.id}/assignments/${assignment.id}`,
+        headers: auth(seed.adminToken),
+      });
+
+      const notifications = await notificationsFor(seed.readerUserId);
+      // One from the assignment, one from the unassignment.
+      expect(notifications.map(n => n.message_key).sort()).toEqual([
+        'workRoleAssigned',
+        'workRoleUnassigned',
+      ]);
+      const unassigned = notifications.find(n => n.message_key === 'workRoleUnassigned');
+      expect(unassigned?.params).toEqual({ eventTitle: 'Weekly sync', role: 'Setup crew' });
+      expect(unassigned?.organization_id).toBe(seed.organizationId);
     });
   });
 
@@ -1218,6 +3559,141 @@ describe('Events API', () => {
       expect((updated.json() as EventSeriesResponse).rrule).toBe('RRULE:FREQ=DAILY');
 
       expect(await exceptionsOf(seed, series.id)).toEqual([]);
+    });
+
+    it('reports booking conflicts when the series time is moved into an overlapping booking', async () => {
+      const seed = await createEventsFixture();
+      const { roomId } = await createSiteAndRoom(seed.organizationId, randomUUID());
+      await createSeries(seed, {
+        title: 'Existing booking',
+        start: '2026-10-21T10:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId,
+      });
+      const series = await createSeries(seed, {
+        title: 'Movable booking',
+        start: '2026-10-21T14:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId,
+      });
+
+      // Moving into the existing booking's time reports the conflict.
+      const moved = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-series/${series.id}`,
+        headers: auth(seed.adminToken),
+        payload: { start: '2026-10-21T10:30:00.000Z' },
+      });
+      expect(moved.statusCode).toBe(200);
+      const movedBody = moved.json() as EventSeriesResponse;
+      expect(movedBody.conflicts).toHaveLength(1);
+      expect(movedBody.conflicts?.[0].title).toBe('Existing booking');
+
+      // Moving away again reports no conflicts.
+      const movedAway = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-series/${series.id}`,
+        headers: auth(seed.adminToken),
+        payload: { start: '2026-10-21T14:00:00.000Z' },
+      });
+      expect((movedAway.json() as EventSeriesResponse).conflicts).toEqual([]);
+    });
+
+    it('reports booking conflicts when the room is changed via the update endpoint', async () => {
+      const seed = await createEventsFixture();
+      const suffix = randomUUID();
+      const { roomId: roomAId } = await createSiteAndRoom(seed.organizationId, `${suffix}-a`);
+      const { roomId: roomBId } = await createSiteAndRoom(seed.organizationId, `${suffix}-b`);
+      await createSeries(seed, {
+        title: 'Room A booking',
+        start: '2026-10-21T10:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId: roomAId,
+      });
+      const series = await createSeries(seed, {
+        title: 'Room B booking',
+        start: '2026-10-21T10:30:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId: roomBId,
+      });
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-series/${series.id}`,
+        headers: auth(seed.adminToken),
+        payload: { roomId: roomAId },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as EventSeriesResponse;
+      expect(body.roomId).toBe(roomAId);
+      expect(body.conflicts?.map(c => c.title)).toContain('Room A booking');
+    });
+  });
+
+  describe('PATCH /api/v1/event-series/:seriesId/config', () => {
+    it('reports booking conflicts when a room is assigned to a series that overlaps another series in it', async () => {
+      const seed = await createEventsFixture();
+      const { roomId } = await createSiteAndRoom(seed.organizationId, randomUUID());
+      await createSeries(seed, {
+        title: 'Existing booking',
+        start: '2026-10-21T10:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId,
+      });
+      const series = await createSeries(seed, {
+        title: 'Unlocated booking',
+        start: '2026-10-21T10:30:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+      });
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-series/${series.id}/config`,
+        headers: auth(seed.adminToken),
+        payload: { roomId },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as EventSeriesResponse;
+      expect(body.roomId).toBe(roomId);
+      expect(body.conflicts).toHaveLength(1);
+      expect(body.conflicts?.[0].title).toBe('Existing booking');
+    });
+
+    it('reports no conflicts when the location is cleared', async () => {
+      const seed = await createEventsFixture();
+      const { roomId } = await createSiteAndRoom(seed.organizationId, randomUUID());
+      await createSeries(seed, {
+        title: 'Existing booking',
+        start: '2026-10-21T10:00:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId,
+      });
+      const series = await createSeries(seed, {
+        title: 'Located booking',
+        start: '2026-10-21T10:30:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId,
+      });
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/event-series/${series.id}/config`,
+        headers: auth(seed.adminToken),
+        payload: { siteId: null, roomId: null },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as EventSeriesResponse;
+      expect(body.siteId).toBeNull();
+      expect(body.roomId).toBeNull();
+      expect(body.conflicts).toEqual([]);
     });
   });
 
@@ -1467,6 +3943,30 @@ describe('Events API', () => {
       expect(body.rrule).toBeNull();
       expect(body.durationMinutes).toBe(90);
       expect(body.start).toBe('2026-12-01T10:00:00.000Z');
+    });
+
+    it('reports booking conflicts of the new series created by the split', async () => {
+      const seed = await createEventsFixture();
+      const { roomId } = await createSiteAndRoom(seed.organizationId, randomUUID());
+      const weekly = await createSeries(seed, { ...splitWeeklyPayload, roomId });
+      // Another booking in the same room overlapping an occurrence after the split point.
+      await createSeries(seed, {
+        title: 'Other booking',
+        start: '2026-11-04T10:30:00.000Z',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        roomId,
+      });
+
+      const response = await split(seed, weekly.id, '2026-11-04T10:00:00.000Z', {
+        title: 'Weekly sync (split)',
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as EventSeriesResponse;
+      expect(body.id).not.toBe(weekly.id);
+      expect(body.conflicts).toHaveLength(1);
+      expect(body.conflicts?.[0].title).toBe('Other booking');
+      expect(body.conflicts?.[0].occurrenceStart).toBe('2026-11-04T10:30:00.000Z');
     });
 
     it('re-anchors an inherited recurrence so the new start is an occurrence', async () => {

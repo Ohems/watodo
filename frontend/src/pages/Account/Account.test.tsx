@@ -1,9 +1,16 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { getToken, setToken } from '../../api/index.js';
+import i18n from '../../i18n/index.js';
 import { type MockApi, mockApi } from '../../test/api-mock.js';
 import { renderWithProviders } from '../../test/test-utils.js';
-import type { AuthAccount, AuthProviderInfo, User, UserSelfUpdate } from '../../types/index.js';
+import type {
+  AuthAccount,
+  AuthProviderInfo,
+  NotificationPreferencesResponse,
+  User,
+  UserSelfUpdate,
+} from '../../types/index.js';
 import AccountPage from './Account.js';
 
 const mockUser: User = {
@@ -12,6 +19,10 @@ const mockUser: User = {
   email: 'alice@example.com',
   description: 'About Alice',
   phoneNumber: '+358401234567',
+  language: 'en-GB',
+  weekStart: 'sunday',
+  dateFormat: 'ymd',
+  timeFormat: '24h',
   permissions: [],
   state: 'active',
   isEmployed: false,
@@ -35,7 +46,29 @@ interface AccountRoutes {
   currentUser: User;
   authAccounts: AuthAccount[];
   accountDeleted: boolean;
+  preferences: NotificationPreferencesResponse;
 }
+
+/** Three notification types x three channels across both categories, with one stored override. */
+const mockPreferences: NotificationPreferencesResponse = {
+  channels: ['in_app', 'email', 'push'],
+  preferences: [
+    { messageKey: 'workRoleAssigned', channel: 'in_app', enabled: true, category: 'general' },
+    { messageKey: 'workRoleAssigned', channel: 'email', enabled: true, category: 'general' },
+    { messageKey: 'workRoleAssigned', channel: 'push', enabled: false, category: 'general' },
+    { messageKey: 'eventCancelled', channel: 'in_app', enabled: true, category: 'general' },
+    { messageKey: 'eventCancelled', channel: 'email', enabled: false, category: 'general' },
+    { messageKey: 'eventCancelled', channel: 'push', enabled: false, category: 'general' },
+    {
+      messageKey: 'unfilledCriticalSlot',
+      channel: 'in_app',
+      enabled: true,
+      category: 'management',
+    },
+    { messageKey: 'unfilledCriticalSlot', channel: 'email', enabled: true, category: 'management' },
+    { messageKey: 'unfilledCriticalSlot', channel: 'push', enabled: false, category: 'management' },
+  ],
+};
 
 /** Registers stateful routes: mutations update the served data. */
 function mockAccountRoutes(mock: MockApi, state: AccountRoutes) {
@@ -47,6 +80,23 @@ function mockAccountRoutes(mock: MockApi, state: AccountRoutes) {
   );
   mock.on('GET', '/api/v1/auth/providers', { providers: mockProviders });
   mock.on('GET', '/api/v1/users/@me/auth-accounts', () => state.authAccounts);
+  mock.on('GET', '/api/v1/users/@me/notification-preferences', () => state.preferences);
+  mock.on('PATCH', /\/api\/v1\/users\/@me\/notification-preferences\//, () => {
+    const last = mock.calls[mock.calls.length - 1];
+    const segment = last.url.split('/notification-preferences/')[1].split('?')[0];
+    const [messageKey, channel] = segment.split('/');
+    const body = last.body as { enabled: boolean };
+    state.preferences = {
+      ...state.preferences,
+      preferences: state.preferences.preferences.map(p =>
+        p.messageKey === messageKey && p.channel === channel ? { ...p, enabled: body.enabled } : p,
+      ),
+    };
+    const updated = state.preferences.preferences.find(
+      p => p.messageKey === messageKey && p.channel === channel,
+    );
+    return { messageKey, channel, enabled: body.enabled, category: updated?.category };
+  });
   mock.on('PATCH', '/api/v1/users/@me', () => {
     const body = mock.lastBody('PATCH', '/api/v1/users/@me') as UserSelfUpdate;
     state.currentUser = {
@@ -56,6 +106,10 @@ function mockAccountRoutes(mock: MockApi, state: AccountRoutes) {
       description: body.description ?? state.currentUser.description,
       phoneNumber:
         body.phoneNumber === undefined ? state.currentUser.phoneNumber : body.phoneNumber,
+      language: body.language ?? state.currentUser.language,
+      weekStart: body.weekStart ?? state.currentUser.weekStart,
+      dateFormat: body.dateFormat ?? state.currentUser.dateFormat,
+      timeFormat: body.timeFormat ?? state.currentUser.timeFormat,
     };
     return state.currentUser;
   });
@@ -75,10 +129,15 @@ describe('AccountPage', () => {
   beforeEach(() => {
     mock = mockApi();
     localStorage.clear();
+    void i18n.changeLanguage('en-GB');
     state = {
       currentUser: mockUser,
       authAccounts: [...mockAuthAccounts],
       accountDeleted: false,
+      preferences: {
+        channels: [...mockPreferences.channels],
+        preferences: mockPreferences.preferences.map(p => ({ ...p })),
+      },
     };
     mockAccountRoutes(mock, state);
   });
@@ -205,6 +264,134 @@ describe('AccountPage', () => {
     expect(screen.queryByText('Name is required')).not.toBeInTheDocument();
   });
 
+  it('shows the language preference with the current language', async () => {
+    renderPage();
+
+    const select = await screen.findByRole('combobox', { name: 'Language' });
+    expect(select).toHaveValue('English (UK)');
+  });
+
+  it('saves a changed language and switches the UI language', async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Language' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Suomi', hidden: true }));
+
+    await waitFor(() => {
+      expect(mock.lastBody('PATCH', '/api/v1/users/@me')).toEqual({ language: 'fi' });
+    });
+    await waitFor(() => {
+      expect(i18n.language).toBe('fi');
+    });
+    // The page re-renders in Finnish.
+    expect(await screen.findByRole('heading', { name: 'Tili' })).toBeInTheDocument();
+  });
+
+  it('shows an error when changing the language fails', async () => {
+    mock.on('PATCH', '/api/v1/users/@me', { error: 'Validation error' }, 400);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Language' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'English (US)', hidden: true }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Validation error');
+    expect(i18n.language).toBe('en-GB');
+  });
+
+  it('shows the week start preference with the current week start', async () => {
+    renderPage();
+
+    const select = await screen.findByRole('combobox', { name: 'Week starts on' });
+    expect(select).toHaveValue('Sunday');
+  });
+
+  it('saves a changed week start', async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Week starts on' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Monday', hidden: true }));
+
+    await waitFor(() => {
+      expect(mock.lastBody('PATCH', '/api/v1/users/@me')).toEqual({ weekStart: 'monday' });
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'Week starts on' })).toHaveValue('Monday');
+    });
+  });
+
+  it('shows an error when changing the week start fails', async () => {
+    mock.on('PATCH', '/api/v1/users/@me', { error: 'Validation error' }, 400);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Week starts on' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Monday', hidden: true }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Validation error');
+    expect(screen.getByRole('combobox', { name: 'Week starts on' })).toHaveValue('Sunday');
+  });
+
+  it('shows the date and time format preferences with the current values', async () => {
+    renderPage();
+
+    expect(await screen.findByRole('combobox', { name: 'Date format' })).toHaveValue(
+      'YYYY-MM-DD (year-month-day)',
+    );
+    expect(screen.getByRole('combobox', { name: 'Time format' })).toHaveValue(
+      '24-hour clock (14:30)',
+    );
+  });
+
+  it('saves a changed date format', async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Date format' }));
+    fireEvent.click(
+      await screen.findByRole('option', { name: 'DD/MM/YYYY (day-month-year)', hidden: true }),
+    );
+
+    await waitFor(() => {
+      expect(mock.lastBody('PATCH', '/api/v1/users/@me')).toEqual({ dateFormat: 'dmy' });
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'Date format' })).toHaveValue(
+        'DD/MM/YYYY (day-month-year)',
+      );
+    });
+  });
+
+  it('saves a changed time format', async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Time format' }));
+    fireEvent.click(
+      await screen.findByRole('option', { name: '12-hour clock (2:30 PM)', hidden: true }),
+    );
+
+    await waitFor(() => {
+      expect(mock.lastBody('PATCH', '/api/v1/users/@me')).toEqual({ timeFormat: '12h' });
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'Time format' })).toHaveValue(
+        '12-hour clock (2:30 PM)',
+      );
+    });
+  });
+
+  it('shows an error when changing the time format fails', async () => {
+    mock.on('PATCH', '/api/v1/users/@me', { error: 'Validation error' }, 400);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Time format' }));
+    fireEvent.click(
+      await screen.findByRole('option', { name: '12-hour clock (2:30 PM)', hidden: true }),
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Validation error');
+    expect(screen.getByRole('combobox', { name: 'Time format' })).toHaveValue(
+      '24-hour clock (14:30)',
+    );
+  });
+
   it('lists connected login methods and offers to connect the others', async () => {
     renderPage();
 
@@ -262,6 +449,64 @@ describe('AccountPage', () => {
     renderPage('/account?linkError=Already%20connected%20to%20a%20different%20user');
 
     expect(await screen.findByText('Already connected to a different user')).toBeInTheDocument();
+  });
+
+  it('shows the notification settings card grouped into categories, without a welcome toggle', async () => {
+    renderPage();
+
+    expect(
+      await screen.findByRole('heading', { name: 'Notification settings' }),
+    ).toBeInTheDocument();
+    // The two category sections.
+    expect(await screen.findByRole('heading', { name: 'General' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Management' })).toBeInTheDocument();
+    // Channel column headers, once per category table.
+    expect(await screen.findAllByRole('columnheader', { name: 'In app' })).toHaveLength(2);
+    expect(screen.getAllByRole('columnheader', { name: 'Email' })).toHaveLength(2);
+    expect(screen.getAllByRole('columnheader', { name: 'Push' })).toHaveLength(2);
+    // One row per notification type; the welcome type has no toggle.
+    expect(screen.getByRole('cell', { name: /^Work role assigned$/ })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: /^Event cancelled$/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole('cell', { name: /^Unfilled critical role alert$/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('cell', { name: /^Welcome$/ })).not.toBeInTheDocument();
+    // Stored toggle states.
+    expect(screen.getByRole('switch', { name: 'Work role assigned - In app' })).toBeChecked();
+    expect(screen.getByRole('switch', { name: 'Work role assigned - Push' })).not.toBeChecked();
+    expect(screen.getByRole('switch', { name: 'Event cancelled - Email' })).not.toBeChecked();
+    expect(
+      screen.getByRole('switch', { name: 'Unfilled critical role alert - In app' }),
+    ).toBeChecked();
+  });
+
+  it('saves a toggled notification preference', async () => {
+    renderPage();
+
+    const toggle = await screen.findByRole('switch', { name: 'Work role assigned - Push' });
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(mock.callCount('PATCH', /notification-preferences/)).toBe(1);
+    });
+    expect(mock.lastBody('PATCH', /notification-preferences/)).toEqual({ enabled: true });
+    const lastPatch = mock.calls.filter(c => c.method === 'PATCH').at(-1);
+    expect(lastPatch?.url).toContain(
+      '/api/v1/users/@me/notification-preferences/workRoleAssigned/push',
+    );
+    // The list refetches and the toggle reflects the saved value.
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Work role assigned - Push' })).toBeChecked();
+    });
+  });
+
+  it('shows an error when saving a notification preference fails', async () => {
+    mock.on('PATCH', /notification-preferences/, { error: 'Validation error' }, 400);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('switch', { name: 'Event cancelled - In app' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Validation error');
   });
 
   it('deletes the account after confirmation', async () => {

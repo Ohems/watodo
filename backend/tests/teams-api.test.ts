@@ -13,8 +13,8 @@ import {
   resetDatabase,
 } from './helpers/fixtures.js';
 
-// Integration tests for the team endpoints, focused on the team purpose
-// fields (team type, team leader, linked event type / work role) and the
+// Integration tests for the team endpoints, focused on the team links
+// (team leader, assigned work roles, assigned event series) and the
 // event types list endpoint. Every test resets the database (beforeEach) and
 // rebuilds the fixture, so tests are independent.
 
@@ -31,8 +31,10 @@ interface Seed {
   plainMemberId: string;
   plainMemberToken: string;
   eventTypeId: number;
-  otherEventTypeId: number;
+  eventSeriesId: number;
+  otherEventSeriesId: number;
   workRoleId: number;
+  workRole2Id: number;
   otherWorkRoleId: number;
 }
 
@@ -78,14 +80,34 @@ async function seed(): Promise<Seed> {
     .values({ name: 'Weekly Meeting', calendar_id: calendarId })
     .returning('id')
     .executeTakeFirstOrThrow();
-  const otherEventType = await db
-    .insertInto('event_types')
-    .values({ name: 'Other Meeting', calendar_id: otherCalendarId })
+  const eventSeries = await db
+    .insertInto('event_series')
+    .values({
+      title: 'Weekly Meeting',
+      calendar_id: calendarId,
+      start: new Date(),
+      duration_minutes: 60,
+    })
+    .returning('id')
+    .executeTakeFirstOrThrow();
+  const otherEventSeries = await db
+    .insertInto('event_series')
+    .values({
+      title: 'Other Meeting',
+      calendar_id: otherCalendarId,
+      start: new Date(),
+      duration_minutes: 60,
+    })
     .returning('id')
     .executeTakeFirstOrThrow();
   const workRole = await db
     .insertInto('work_roles')
     .values({ name: 'Setup', organization_id: organizationId })
+    .returning('id')
+    .executeTakeFirstOrThrow();
+  const workRole2 = await db
+    .insertInto('work_roles')
+    .values({ name: 'Cleanup', organization_id: organizationId })
     .returning('id')
     .executeTakeFirstOrThrow();
   const otherWorkRole = await db
@@ -107,8 +129,10 @@ async function seed(): Promise<Seed> {
     plainMemberId: plainMember.id,
     plainMemberToken: plainMember.token,
     eventTypeId: eventType.id,
-    otherEventTypeId: otherEventType.id,
+    eventSeriesId: eventSeries.id,
+    otherEventSeriesId: otherEventSeries.id,
     workRoleId: workRole.id,
+    workRole2Id: workRole2.id,
     otherWorkRoleId: otherWorkRole.id,
   };
 }
@@ -160,7 +184,7 @@ describe('Teams API', () => {
   });
 
   describe('GET /api/v1/organizations/:organizationId/teams', () => {
-    it('lists teams with their type, leader and links', async () => {
+    it('lists teams with their leader, work roles and event series', async () => {
       await app.inject({
         method: 'POST',
         url: `/api/v1/organizations/${seedData.organizationId}/teams`,
@@ -168,9 +192,9 @@ describe('Teams API', () => {
         payload: {
           name: 'Setup Crew',
           organizationId: seedData.organizationId,
-          teamType: 'role_group',
           teamLeaderId: seedData.leaderId,
-          workRoleId: seedData.workRoleId,
+          workRoleIds: [seedData.workRoleId, seedData.workRole2Id],
+          eventSeriesIds: [seedData.eventSeriesId],
         },
       });
 
@@ -184,12 +208,13 @@ describe('Teams API', () => {
       const body = response.json();
       expect(body.total).toBe(1);
       const team = body.items[0];
-      expect(team.teamType).toBe('role_group');
       expect(team.teamLeaderId).toBe(seedData.leaderId);
       expect(team.teamLeaderName).toBe('Team Leader');
-      expect(team.workRoleId).toBe(seedData.workRoleId);
-      expect(team.workRoleName).toBe('Setup');
-      expect(team.eventTypeId).toBeNull();
+      expect(team.workRoles).toEqual([
+        { id: seedData.workRole2Id, name: 'Cleanup' },
+        { id: seedData.workRoleId, name: 'Setup' },
+      ]);
+      expect(team.eventSeries).toEqual([{ id: seedData.eventSeriesId, title: 'Weekly Meeting' }]);
     });
 
     it('denies listing without team-management:read', async () => {
@@ -232,7 +257,7 @@ describe('Teams API', () => {
   });
 
   describe('POST /api/v1/organizations/:organizationId/teams', () => {
-    it('creates a general team by default', async () => {
+    it('creates a plain team by default', async () => {
       const response = await app.inject({
         method: 'POST',
         url: `/api/v1/organizations/${seedData.organizationId}/teams`,
@@ -242,13 +267,12 @@ describe('Teams API', () => {
 
       expect(response.statusCode).toBe(200);
       const team = response.json();
-      expect(team.teamType).toBe('general');
       expect(team.teamLeaderId).toBeNull();
-      expect(team.eventTypeId).toBeNull();
-      expect(team.workRoleId).toBeNull();
+      expect(team.workRoles).toEqual([]);
+      expect(team.eventSeries).toEqual([]);
     });
 
-    it('creates an event organizer team linked to an event type', async () => {
+    it('creates a team with a leader, work roles and event series', async () => {
       const response = await app.inject({
         method: 'POST',
         url: `/api/v1/organizations/${seedData.organizationId}/teams`,
@@ -256,68 +280,24 @@ describe('Teams API', () => {
         payload: {
           name: 'Events Team',
           organizationId: seedData.organizationId,
-          teamType: 'event_organizers',
           teamLeaderId: seedData.leaderId,
-          eventTypeId: seedData.eventTypeId,
+          workRoleIds: [seedData.workRoleId, seedData.workRole2Id],
+          eventSeriesIds: [seedData.eventSeriesId],
         },
       });
 
       expect(response.statusCode).toBe(200);
       const team = response.json();
-      expect(team.teamType).toBe('event_organizers');
-      expect(team.eventTypeId).toBe(seedData.eventTypeId);
-      expect(team.eventTypeName).toBe('Weekly Meeting');
+      expect(team.teamLeaderId).toBe(seedData.leaderId);
       expect(team.teamLeaderName).toBe('Team Leader');
-      expect(team.workRoleId).toBeNull();
+      expect(team.workRoles).toEqual([
+        { id: seedData.workRole2Id, name: 'Cleanup' },
+        { id: seedData.workRoleId, name: 'Setup' },
+      ]);
+      expect(team.eventSeries).toEqual([{ id: seedData.eventSeriesId, title: 'Weekly Meeting' }]);
     });
 
-    it('rejects an event organizer team without an event type', async () => {
-      const response = await app.inject({
-        method: 'POST',
-        url: `/api/v1/organizations/${seedData.organizationId}/teams`,
-        headers: auth(seedData.writerToken),
-        payload: {
-          name: 'Broken Team',
-          organizationId: seedData.organizationId,
-          teamType: 'event_organizers',
-        },
-      });
-
-      expect(response.statusCode).toBe(400);
-    });
-
-    it('rejects a role group team without a work role', async () => {
-      const response = await app.inject({
-        method: 'POST',
-        url: `/api/v1/organizations/${seedData.organizationId}/teams`,
-        headers: auth(seedData.writerToken),
-        payload: {
-          name: 'Broken Team',
-          organizationId: seedData.organizationId,
-          teamType: 'role_group',
-        },
-      });
-
-      expect(response.statusCode).toBe(400);
-    });
-
-    it('rejects a general team with an event type link', async () => {
-      const response = await app.inject({
-        method: 'POST',
-        url: `/api/v1/organizations/${seedData.organizationId}/teams`,
-        headers: auth(seedData.writerToken),
-        payload: {
-          name: 'Broken Team',
-          organizationId: seedData.organizationId,
-          teamType: 'general',
-          eventTypeId: seedData.eventTypeId,
-        },
-      });
-
-      expect(response.statusCode).toBe(400);
-    });
-
-    it('rejects an event type from another organization', async () => {
+    it('rejects an event series from another organization', async () => {
       const response = await app.inject({
         method: 'POST',
         url: `/api/v1/organizations/${seedData.organizationId}/teams`,
@@ -325,8 +305,7 @@ describe('Teams API', () => {
         payload: {
           name: 'Cross Org Team',
           organizationId: seedData.organizationId,
-          teamType: 'event_organizers',
-          eventTypeId: seedData.otherEventTypeId,
+          eventSeriesIds: [seedData.otherEventSeriesId],
         },
       });
 
@@ -341,8 +320,7 @@ describe('Teams API', () => {
         payload: {
           name: 'Cross Org Team',
           organizationId: seedData.organizationId,
-          teamType: 'role_group',
-          workRoleId: seedData.otherWorkRoleId,
+          workRoleIds: [seedData.otherWorkRoleId],
         },
       });
 
@@ -388,7 +366,7 @@ describe('Teams API', () => {
       return response.json().id;
     }
 
-    it('changes a general team into a role group with a work role', async () => {
+    it('assigns work roles and event series to a team', async () => {
       const teamId = await createTeamViaApi({});
 
       const response = await app.inject({
@@ -396,37 +374,45 @@ describe('Teams API', () => {
         url: `/api/v1/organizations/${seedData.organizationId}/teams/${teamId}`,
         headers: auth(seedData.adminToken),
         payload: {
-          teamType: 'role_group',
-          workRoleId: seedData.workRoleId,
+          workRoleIds: [seedData.workRoleId, seedData.workRole2Id],
+          eventSeriesIds: [seedData.eventSeriesId],
           teamLeaderId: seedData.leaderId,
         },
       });
 
       expect(response.statusCode).toBe(200);
       const team = response.json();
-      expect(team.teamType).toBe('role_group');
-      expect(team.workRoleId).toBe(seedData.workRoleId);
-      expect(team.workRoleName).toBe('Setup');
+      expect(team.workRoles).toEqual([
+        { id: seedData.workRole2Id, name: 'Cleanup' },
+        { id: seedData.workRoleId, name: 'Setup' },
+      ]);
+      expect(team.eventSeries).toEqual([{ id: seedData.eventSeriesId, title: 'Weekly Meeting' }]);
       expect(team.teamLeaderId).toBe(seedData.leaderId);
     });
 
-    it('rejects changing to event_organizers without an event type', async () => {
-      const teamId = await createTeamViaApi({});
+    it('replaces the assigned work roles on update', async () => {
+      const teamId = await createTeamViaApi({
+        workRoleIds: [seedData.workRoleId],
+        eventSeriesIds: [seedData.eventSeriesId],
+      });
 
       const response = await app.inject({
         method: 'PATCH',
         url: `/api/v1/organizations/${seedData.organizationId}/teams/${teamId}`,
         headers: auth(seedData.adminToken),
-        payload: { teamType: 'event_organizers' },
+        payload: { workRoleIds: [seedData.workRole2Id], eventSeriesIds: [] },
       });
 
-      expect(response.statusCode).toBe(400);
+      expect(response.statusCode).toBe(200);
+      const team = response.json();
+      expect(team.workRoles).toEqual([{ id: seedData.workRole2Id, name: 'Cleanup' }]);
+      expect(team.eventSeries).toEqual([]);
     });
 
-    it('keeps the existing event type when only the leader changes', async () => {
+    it('keeps the existing links when only the leader changes', async () => {
       const teamId = await createTeamViaApi({
-        teamType: 'event_organizers',
-        eventTypeId: seedData.eventTypeId,
+        workRoleIds: [seedData.workRoleId],
+        eventSeriesIds: [seedData.eventSeriesId],
       });
 
       const response = await app.inject({
@@ -438,8 +424,8 @@ describe('Teams API', () => {
 
       expect(response.statusCode).toBe(200);
       const team = response.json();
-      expect(team.teamType).toBe('event_organizers');
-      expect(team.eventTypeId).toBe(seedData.eventTypeId);
+      expect(team.workRoles).toEqual([{ id: seedData.workRoleId, name: 'Setup' }]);
+      expect(team.eventSeries).toEqual([{ id: seedData.eventSeriesId, title: 'Weekly Meeting' }]);
       expect(team.teamLeaderId).toBe(seedData.leaderId);
     });
 

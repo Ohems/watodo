@@ -5,6 +5,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it } from 'vitest';
 import App from './App.js';
 import { api, clearToken } from './api/index.js';
+import { loadBackendBundle } from './i18n/index.js';
 import { store } from './store/index.js';
 import { type MockApi, mockApi } from './test/api-mock.js';
 import type {
@@ -21,6 +22,10 @@ const mockUser: User = {
   email: 'test@example.com',
   description: '',
   phoneNumber: null,
+  language: 'en-GB',
+  weekStart: 'sunday',
+  dateFormat: 'ymd',
+  timeFormat: '24h',
   permissions: ['admin'],
   state: 'active',
   isEmployed: true,
@@ -75,10 +80,27 @@ function renderApp(route = '/', strict = false) {
   return render(strict ? <StrictMode>{tree}</StrictMode> : tree);
 }
 
+/** The en-GB notification message bundle served by GET /api/v1/locales/:lng. */
+const NOTIFICATION_BUNDLE_EN_GB = {
+  welcome: { title: 'Welcome to Watodo', body: 'Your organisation has been set up.' },
+  workRoleAssigned: {
+    title: 'You have been assigned a work role',
+    body: 'You are assigned to "{{role}}" for {{eventTitle}}.',
+  },
+  upcomingEvent: {
+    title: 'Upcoming event',
+    body: '{{eventTitle}} is happening this month. Check the calendar for details.',
+  },
+};
+
 /** Mocks the endpoints used by the app shell and the Home page. */
 function mockShellRoutes(mock: MockApi) {
   mock.on('GET', '/api/v1/users/@me', mockUser);
   mock.on('GET', '/api/v1/organizations', [mockOrganization]);
+  mock.on('GET', '/api/v1/locales/en-GB', {
+    lng: 'en-GB',
+    notifications: NOTIFICATION_BUNDLE_EN_GB,
+  });
   mock.on('GET', '/api/v1/notifications', {
     items: [],
     total: 0,
@@ -109,6 +131,10 @@ function makeOccurrence(partial: Partial<EventOccurrence> & { seriesId: number }
     isRescheduled: false,
     isCancelled: false,
     exceptionId: null,
+    isParticipant: false,
+    isManager: false,
+    workRoleSlots: [],
+    managedUnfilledCriticalSlots: [],
     ...partial,
   } satisfies EventOccurrence;
 }
@@ -131,13 +157,61 @@ beforeEach(() => {
 });
 
 describe('App', () => {
-  it('shows the login page when the user is unauthenticated', async () => {
+  it('shows the login page with the mocked providers when the user is unauthenticated', async () => {
+    mock.on('GET', '/api/v1/users/@me', { error: 'Unauthorized' }, 401);
+    mock.on('GET', '/api/v1/auth/providers', {
+      providers: [
+        { id: 'discord', name: 'Discord', configured: true },
+        { id: 'google', name: 'Google', configured: true },
+        { id: 'microsoft', name: 'Microsoft', configured: true },
+      ],
+    });
+
+    renderApp();
+
+    expect(await screen.findByText('Sign in to continue')).toBeInTheDocument();
+    expect(await screen.findByText('Sign in with Discord')).toBeInTheDocument();
+    expect(screen.getByText('Sign in with Google')).toBeInTheDocument();
+    expect(screen.getByText('Sign in with Microsoft')).toBeInTheDocument();
+  });
+
+  it('shows the no-providers message when the provider list is empty', async () => {
     mock.on('GET', '/api/v1/users/@me', { error: 'Unauthorized' }, 401);
     mock.on('GET', '/api/v1/auth/providers', { providers: [] });
 
     renderApp();
 
     expect(await screen.findByText('Sign in to continue')).toBeInTheDocument();
+    expect(
+      await screen.findByText('No login methods are configured on this server.'),
+    ).toBeInTheDocument();
+  });
+
+  it('shows a service-unavailable message when the providers endpoint returns an error', async () => {
+    mock.on('GET', '/api/v1/users/@me', { error: 'Unauthorized' }, 401);
+    mock.on('GET', '/api/v1/auth/providers', { error: 'Internal Server Error' }, 500);
+
+    renderApp();
+
+    expect(await screen.findByText(/The service is currently unavailable/)).toBeInTheDocument();
+    expect(
+      screen.queryByText('No login methods are configured on this server.'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows a service-unavailable message when the backend is unreachable', async () => {
+    mock.on('GET', '/api/v1/users/@me', { error: 'Unauthorized' }, 401);
+    // A rejecting fetch simulates the backend being down (FETCH_ERROR).
+    mock.on('GET', '/api/v1/auth/providers', () => {
+      throw new Error('connection refused');
+    });
+
+    renderApp();
+
+    expect(await screen.findByText(/The service is currently unavailable/)).toBeInTheDocument();
+    expect(
+      screen.queryByText('No login methods are configured on this server.'),
+    ).not.toBeInTheDocument();
   });
 
   it('renders the app shell once the user is authenticated', async () => {
@@ -159,7 +233,7 @@ describe('App', () => {
     expect(screen.getAllByText('Home').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Events').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Teams').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Organization').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Organisation').length).toBeGreaterThan(0);
   });
 
   it('renders the Home page on home route once the user is authenticated', async () => {
@@ -176,7 +250,7 @@ describe('App', () => {
     renderApp();
 
     expect(
-      await screen.findByRole('combobox', { name: 'Select organization' }),
+      await screen.findByRole('combobox', { name: 'Select organisation' }),
     ).toBeInTheDocument();
     expect((await screen.findAllByText('Community Org')).length).toBeGreaterThan(0);
   });
@@ -220,13 +294,15 @@ describe('App', () => {
 describe('Home', () => {
   it('shows upcoming events from all organizations, each labeled with its organization', async () => {
     mockShellRoutes(mock);
+    // Load the server-owned notification templates into i18n.
+    await loadBackendBundle('en-GB');
     const notification: Notification = {
       id: 1,
       userId: '1',
       organizationId: 'org-2',
       organizationName: 'Other Org',
-      title: 'You have been assigned a work role',
-      body: 'You are assigned to "Room setup".',
+      messageKey: 'workRoleAssigned',
+      params: { role: 'Room setup', eventTitle: 'Weekly Community Meeting' },
       isRead: false,
       createdAt: new Date().toISOString(),
     };
@@ -261,10 +337,41 @@ describe('Home', () => {
     expect(screen.getAllByText('Community Org').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Other Org').length).toBeGreaterThanOrEqual(2);
     expect(await screen.findByText('You have been assigned a work role')).toBeInTheDocument();
+    // The body is rendered from the message key + params in the current language.
+    expect(
+      await screen.findByText('You are assigned to "Room setup" for Weekly Community Meeting.'),
+    ).toBeInTheDocument();
     // The Home page is the only view without an organization filter.
     const url = lastCallUrl(mock, '/api/v1/event-series/occurrences');
     expect(url).toBeDefined();
     expect(new URL(url as string).searchParams.has('organizationId')).toBe(false);
+  });
+
+  it('shows an error message instead of empty cards when the backend is unreachable', async () => {
+    mockShellRoutes(mock);
+    // Later registrations win over the shell mocks; a rejecting fetch
+    // simulates the backend being down (FETCH_ERROR).
+    mock.on('GET', '/api/v1/notifications', () => {
+      throw new Error('connection refused');
+    });
+    mock.on('GET', '/api/v1/event-series/occurrences', () => {
+      throw new Error('connection refused');
+    });
+
+    renderApp('/');
+
+    // Both Home cards communicate that their data is unavailable.
+    expect((await screen.findAllByText(/could not be loaded/)).length).toBe(2);
+    expect(screen.queryByText('No notifications')).not.toBeInTheDocument();
+  });
+
+  it('shows an error message instead of an empty list when the backend returns an error', async () => {
+    mockShellRoutes(mock);
+    mock.on('GET', '/api/v1/notifications', { error: 'Internal Server Error' }, 500);
+
+    renderApp('/');
+
+    expect(await screen.findByText(/could not be loaded/)).toBeInTheDocument();
   });
 });
 
@@ -336,7 +443,7 @@ describe('EventConfigPage', () => {
     expect(await screen.findByRole('heading', { name: 'Summer Festival' })).toBeInTheDocument();
     // The organization label (also present in the navigation) and the
     // organization name of the event (also the active one in the nav bar).
-    expect(screen.getAllByText('Organization').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('Organisation').length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText('Community Org').length).toBeGreaterThanOrEqual(2);
   });
 });

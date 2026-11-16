@@ -17,6 +17,12 @@ export const config = {
   microsoftClientId: process.env.MICROSOFT_CLIENT_ID ?? '',
   microsoftClientSecret: process.env.MICROSOFT_CLIENT_SECRET ?? '',
   baseUrl: process.env.BASE_URL ?? 'http://localhost:3000',
+  // Critical-slot alert job: look-ahead window in days and run interval in minutes.
+  criticalSlotAlertDays: Number.parseInt(process.env.CRITICAL_SLOT_ALERT_DAYS ?? '7', 10),
+  criticalSlotAlertIntervalMinutes: Number.parseInt(
+    process.env.CRITICAL_SLOT_ALERT_INTERVAL_MINUTES ?? '60',
+    10,
+  ),
 } as const;
 
 export type Config = typeof config;

@@ -37,6 +37,7 @@ function NavBar() {
       children: [
         { label: t('nav.eventsCalendar'), path: '/events/calendar' },
         { label: t('nav.eventsManagement'), path: '/events/management' },
+        { label: t('nav.eventsStaffing'), path: '/events/staffing' },
       ],
     },
     { label: t('nav.teams'), path: '/teams' },
@@ -54,6 +55,7 @@ function NavBar() {
   const settings = [
     { key: 'profile', label: t('nav.profile') },
     { key: 'account', label: t('nav.account') },
+    { key: 'absences', label: t('nav.absences') },
     { key: 'logout', label: t('nav.logout') },
   ];
 
@@ -69,6 +71,8 @@ function NavBar() {
       navigate('/account');
     } else if (setting === 'profile') {
       navigate('/profile');
+    } else if (setting === 'absences') {
+      navigate('/absences');
     }
   };
 

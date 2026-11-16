@@ -1,4 +1,4 @@
-import { Badge, Select, TextInput } from '@mantine/core';
+import { Badge, Select } from '@mantine/core';
 import { skipToken } from '@reduxjs/toolkit/query/react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -11,18 +11,29 @@ import {
   useGetTeamsQuery,
 } from '../../api/index.js';
 import DataTable, { type DataTableColumn } from '../../components/DataTable/DataTable.js';
+import DateField from '../../components/DateField/index.js';
+import { QueryError } from '../../components/QueryState/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
-import { selectActiveOrganizationId } from '../../store/organization-slice.js';
+import { useFormatters } from '../../hooks/use-formatters.js';
+import {
+  selectActiveOrganizationId,
+  selectIsOrganizationLoaded,
+  selectOrganizationsError,
+} from '../../store/organization-slice.js';
 import type { EventSeriesManagement } from '../../types/index.js';
 
 function EventManagementPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
+  const organizationsLoaded = useAppSelector(selectIsOrganizationLoaded);
+  const organizationsError = useAppSelector(selectOrganizationsError);
   const { data: currentUser } = useGetCurrentUserQuery();
   const canWrite =
     currentUser?.permissions?.includes('admin') === true ||
     currentUser?.permissions?.includes('events:write') === true;
+
+  const { formatDateTime } = useFormatters();
 
   const [page, setPage] = useState(0);
   const [limit, setLimit] = useState(50);
@@ -36,18 +47,27 @@ function EventManagementPage() {
   const [teamId, setTeamId] = useState<string | null>(null);
   const [hasTeam, setHasTeam] = useState<boolean | undefined>(undefined);
 
-  const { data: sites = [] } = useGetAllSitesQuery(activeOrganizationId ?? skipToken);
-  const { data: rooms = [] } = useGetAllRoomsQuery(activeOrganizationId ?? skipToken);
-  const { data: teamsData } = useGetTeamsQuery(
+  const { data: sites = [], isError: sitesError } = useGetAllSitesQuery(
+    activeOrganizationId ?? skipToken,
+  );
+  const { data: rooms = [], isError: roomsError } = useGetAllRoomsQuery(
+    activeOrganizationId ?? skipToken,
+  );
+  const { data: teamsData, isError: teamsError } = useGetTeamsQuery(
     activeOrganizationId
       ? { organizationId: activeOrganizationId, query: { limit: 200 } }
       : skipToken,
   );
   const teams = teamsData?.items ?? [];
+  const filtersError = sitesError || roomsError || teamsError;
 
   // The management list only shows the active organization's series (the
   // Home page aggregates all organizations).
-  const { data, isLoading: loading } = useGetEventSeriesManagementListQuery(
+  const {
+    data,
+    isLoading: loading,
+    isError,
+  } = useGetEventSeriesManagementListQuery(
     activeOrganizationId
       ? {
           page,
@@ -81,9 +101,26 @@ function EventManagementPage() {
       render: item => <span style={{ fontWeight: 500 }}>{item.title}</span>,
     },
     {
+      key: 'description',
+      label: t('common.description'),
+      render: item =>
+        item.description ? (
+          <span
+            style={{ color: 'var(--mantine-color-gray-6)', maxWidth: 320 }}
+            title={item.description}
+          >
+            {item.description.length > 100
+              ? `${item.description.slice(0, 100)}\u2026`
+              : item.description}
+          </span>
+        ) : (
+          <span style={{ color: 'var(--mantine-color-gray-5)' }}>-</span>
+        ),
+    },
+    {
       key: 'start',
       label: t('events.start'),
-      render: item => new Date(item.start).toLocaleString(),
+      render: item => formatDateTime(item.start),
     },
     {
       key: 'location',
@@ -123,7 +160,8 @@ function EventManagementPage() {
       total={data?.total ?? 0}
       page={page}
       limit={limit}
-      loading={loading}
+      loading={loading || (!activeOrganizationId && !organizationsLoaded)}
+      error={isError || organizationsError}
       canAdd={canWrite}
       onAdd={() => navigate('/events/new')}
       onPageChange={setPage}
@@ -132,20 +170,19 @@ function EventManagementPage() {
       onRowClick={item => navigate(`/events/${item.id}`)}
       extraFilters={
         <>
-          <TextInput
+          {filtersError && <QueryError />}
+          <DateField
             size="sm"
-            type="date"
             placeholder={t('events.filterDateFrom')}
             value={dateFrom}
-            onChange={e => setDateFrom(e.target.value)}
+            onChange={setDateFrom}
             style={{ minWidth: 150 }}
           />
-          <TextInput
+          <DateField
             size="sm"
-            type="date"
             placeholder={t('events.filterDateTo')}
             value={dateTo}
-            onChange={e => setDateTo(e.target.value)}
+            onChange={setDateTo}
             style={{ minWidth: 150 }}
           />
           <Select

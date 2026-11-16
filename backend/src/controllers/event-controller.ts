@@ -2,9 +2,15 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { db } from '../database.js';
 import { getAuth } from '../middleware/auth.js';
 import {
+  assignmentCandidatesQuerySchema,
+  bulkAssignmentSchema,
   eventCommentPushSchema,
   eventCommentsQuerySchema,
   eventCommentUpdateSchema,
+  eventInfoSlotPushSchema,
+  eventInfoSlotsQuerySchema,
+  eventInfoSlotUpdateSchema,
+  eventInfoSlotValueSchema,
   eventSeriesPushSchema,
   eventSeriesQuerySchema,
   eventSeriesUpdateSchema,
@@ -14,34 +20,46 @@ import {
   eventWorkRoleUpdateSchema,
   occurrenceRangeQuerySchema,
   occurrenceStartSchema,
+  organizationUserParamsSchema,
   rescheduleOccurrenceSchema,
+  staffingWorkloadQuerySchema,
+  userEventAssignmentsQuerySchema,
 } from '../schemas/index.js';
 import {
   assignUserToOccurrenceWorkRole,
   assignUserToWorkRole,
+  assignUserToWorkRoleBulk,
   cancelOccurrence,
   createEventComment,
+  createEventInfoSlot,
   createEventSeries,
   createEventWorkRole,
   createOccurrenceComment,
   createOccurrenceWorkRole,
   deleteEventComment,
+  deleteEventInfoSlot,
   deleteEventSeries,
   deleteEventWorkRole,
   deleteException,
   deleteOccurrenceComment,
   deleteOccurrenceWorkRole,
+  getAssignmentCandidates,
   getEventSeries,
   getOccurrenceDetail,
   getOccurrenceDetailByRef,
   getOccurrences,
   getSeriesOccurrences,
+  getStaffingWorkload,
+  getUserEventAssignments,
+  importParentInfoSlots,
   importParentSlots,
   listEventComments,
+  listEventInfoSlots,
   listEventSeries,
   listEventWorkRoles,
   listExceptions,
   listOccurrenceComments,
+  listOccurrenceInfoSlots,
   listOccurrenceWorkRoles,
   materializeOccurrenceByRef,
   rescheduleOccurrence,
@@ -50,9 +68,11 @@ import {
   unassignUserFromOccurrenceWorkRole,
   unassignUserFromWorkRole,
   updateEventComment,
+  updateEventInfoSlot,
   updateEventSeries,
   updateEventWorkRole,
   updateOccurrenceComment,
+  updateOccurrenceInfoSlotValue,
   updateOccurrenceWorkRole,
 } from '../services/event-service.js';
 
@@ -66,6 +86,14 @@ interface OccurrenceParams {
 
 interface WorkRoleParams {
   Params: { seriesId: string; workRoleId: string };
+}
+
+interface InfoSlotParams {
+  Params: { seriesId: string; infoSlotId: string };
+}
+
+interface OccurrenceInfoSlotParams {
+  Params: { eventOccurrenceId: string; infoSlotId: string };
 }
 
 interface WorkRoleAssignmentParams {
@@ -165,12 +193,43 @@ export async function getSeriesOccurrencesHandler(
   reply: FastifyReply,
 ): Promise<void> {
   const query = occurrenceRangeQuerySchema.parse(request.query);
+  const user = requireAuthUser(request);
   const occurrences = await getSeriesOccurrences(
     parseId(request.params.seriesId, 'seriesId'),
     new Date(query.start),
     new Date(query.end),
+    user.id,
   );
   return reply.status(200).send(occurrences);
+}
+
+/**
+ * Lists the event occurrences a specific organization user is assigned to
+ * (with the roles/slots), within an optional date span. The span defaults to
+ * one month back and forward from the current date.
+ */
+export async function getUserEventAssignmentsHandler(
+  request: FastifyRequest<{ Params: { organizationId: string; userId: string } }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const { organizationId, userId } = organizationUserParamsSchema.parse(request.params);
+  const query = userEventAssignmentsQuerySchema.parse(request.query);
+  const now = new Date();
+  const rangeStart = query.start
+    ? new Date(query.start)
+    : new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+  const rangeEnd = query.end
+    ? new Date(query.end)
+    : new Date(now.getFullYear(), now.getMonth() + 1, now.getDate());
+  const result = await getUserEventAssignments(
+    organizationId,
+    userId,
+    rangeStart,
+    rangeEnd,
+    query.page ?? 0,
+    query.limit ?? 10,
+  );
+  return reply.status(200).send(result);
 }
 
 export async function getOccurrenceDetailHandler(
@@ -261,6 +320,7 @@ export async function listEventWorkRolesHandler(
   const query = eventWorkRolesQuerySchema.parse(request.query);
   const slots = await listEventWorkRoles(parseId(request.params.seriesId, 'seriesId'), {
     occurrenceStart: query.occurrenceStart ? new Date(query.occurrenceStart) : undefined,
+    parentOnly: query.parentOnly,
   });
   return reply.status(200).send(slots);
 }
@@ -299,6 +359,84 @@ export async function deleteEventWorkRoleHandler(
   return reply.status(200).send({ success: true });
 }
 
+// --- Event info slots ---
+
+export async function listEventInfoSlotsHandler(
+  request: FastifyRequest<SeriesParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const query = eventInfoSlotsQuerySchema.parse(request.query);
+  const slots = await listEventInfoSlots(parseId(request.params.seriesId, 'seriesId'), {
+    occurrenceStart: query.occurrenceStart ? new Date(query.occurrenceStart) : undefined,
+  });
+  return reply.status(200).send(slots);
+}
+
+export async function createEventInfoSlotHandler(
+  request: FastifyRequest<SeriesParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const data = eventInfoSlotPushSchema.parse(request.body);
+  const slot = await createEventInfoSlot(parseId(request.params.seriesId, 'seriesId'), data);
+  return reply.status(200).send(slot);
+}
+
+export async function updateEventInfoSlotHandler(
+  request: FastifyRequest<InfoSlotParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const data = eventInfoSlotUpdateSchema.parse(request.body);
+  const slot = await updateEventInfoSlot(
+    parseId(request.params.seriesId, 'seriesId'),
+    parseId(request.params.infoSlotId, 'infoSlotId'),
+    data,
+  );
+  return reply.status(200).send(slot);
+}
+
+export async function deleteEventInfoSlotHandler(
+  request: FastifyRequest<InfoSlotParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  await deleteEventInfoSlot(
+    parseId(request.params.seriesId, 'seriesId'),
+    parseId(request.params.infoSlotId, 'infoSlotId'),
+  );
+  return reply.status(200).send({ success: true });
+}
+
+export async function listOccurrenceInfoSlotsHandler(
+  request: FastifyRequest<OccurrenceIdParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const slots = await listOccurrenceInfoSlots(parseOccurrenceId(request.params.eventOccurrenceId));
+  return reply.status(200).send(slots);
+}
+
+/** Sets the filled value of an occurrence's info slot; only the value may change. */
+export async function updateOccurrenceInfoSlotHandler(
+  request: FastifyRequest<OccurrenceInfoSlotParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const data = eventInfoSlotValueSchema.parse(request.body);
+  const slot = await updateOccurrenceInfoSlotValue(
+    parseOccurrenceId(request.params.eventOccurrenceId),
+    parseId(request.params.infoSlotId, 'infoSlotId'),
+    data.value,
+  );
+  return reply.status(200).send(slot);
+}
+
+/** Imports parent (series-level) info slots into a materialized occurrence. */
+export async function importParentInfoSlotsHandler(
+  request: FastifyRequest<OccurrenceRefParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const { seriesId, occurrenceId } = await resolveOccurrenceForWrite(request.params.occurrenceRef);
+  const imported = await importParentInfoSlots(seriesId, occurrenceId);
+  return reply.status(200).send(imported);
+}
+
 export async function assignUserToWorkRoleHandler(
   request: FastifyRequest<WorkRoleParams>,
   reply: FastifyReply,
@@ -310,6 +448,62 @@ export async function assignUserToWorkRoleHandler(
     data.userId,
   );
   return reply.status(200).send(assignment);
+}
+
+/** Assigns a user to the same slot across many occurrences of the series in one call. */
+export async function bulkAssignUserToWorkRoleHandler(
+  request: FastifyRequest<WorkRoleParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const data = bulkAssignmentSchema.parse(request.body);
+  const results = await assignUserToWorkRoleBulk(
+    parseId(request.params.seriesId, 'seriesId'),
+    parseId(request.params.workRoleId, 'workRoleId'),
+    data.userId,
+    data.occurrenceStarts,
+  );
+  return reply.status(200).send({ results });
+}
+
+interface OrganizationParams {
+  Params: { organizationId: string };
+}
+
+/** Per-user staffing workload of an organization over a range (weekly buckets included). */
+export async function getStaffingWorkloadHandler(
+  request: FastifyRequest<OrganizationParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const query = staffingWorkloadQuerySchema.parse(request.query);
+  const items = await getStaffingWorkload(
+    request.params.organizationId,
+    new Date(query.start),
+    new Date(query.end),
+    {
+      siteId: query.siteId,
+      roomId: query.roomId,
+      teamId: query.teamId,
+    },
+  );
+  return reply.status(200).send({ items });
+}
+
+/**
+ * Lists the users as assignment candidates for a work role slot, with the
+ * declared-role/qualification/certification flags computed against the slot's
+ * work role (and absence flags when start/end are given).
+ */
+export async function getAssignmentCandidatesHandler(
+  request: FastifyRequest<WorkRoleParams & { Querystring: unknown }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const query = assignmentCandidatesQuerySchema.parse(request.query ?? {});
+  const candidates = await getAssignmentCandidates(
+    parseId(request.params.seriesId, 'seriesId'),
+    parseId(request.params.workRoleId, 'workRoleId'),
+    query,
+  );
+  return reply.status(200).send(candidates);
 }
 
 export async function unassignUserFromWorkRoleHandler(
@@ -483,13 +677,13 @@ function parseOccurrenceId(value: string): number {
   return Number.parseInt(value, 10);
 }
 
-/** Materializes a tmp occurrence ref and returns its stable numeric ID. */
+/** Materializes a tmp occurrence ref and returns its stable numeric ID plus booking conflicts. */
 export async function materializeOccurrenceHandler(
   request: FastifyRequest<OccurrenceRefParams>,
   reply: FastifyReply,
 ): Promise<void> {
-  const occurrenceId = await materializeOccurrenceByRef(request.params.occurrenceRef);
-  return reply.status(200).send({ occurrenceId });
+  const result = await materializeOccurrenceByRef(request.params.occurrenceRef);
+  return reply.status(200).send(result);
 }
 
 export async function listOccurrenceWorkRolesHandler(

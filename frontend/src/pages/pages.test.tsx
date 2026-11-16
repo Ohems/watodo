@@ -31,7 +31,7 @@ describe('NoOrganizationPage', () => {
         <RouterProvider router={router} />
       </MantineProvider>,
     );
-    expect(screen.getByText('No Organization')).toBeInTheDocument();
-    expect(screen.getByText(/not a member of any organization/i)).toBeInTheDocument();
+    expect(screen.getByText('No Organisation')).toBeInTheDocument();
+    expect(screen.getByText(/not a member of any organisation/i)).toBeInTheDocument();
   });
 });

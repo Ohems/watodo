@@ -9,6 +9,7 @@ import {
   Group,
   Loader,
   Modal,
+  MultiSelect,
   Paper,
   Select,
   Stack,
@@ -28,7 +29,7 @@ import {
   useAddTeamMemberMutation,
   useGetAllWorkRolesQuery,
   useGetCurrentUserQuery,
-  useGetEventTypesQuery,
+  useGetEventSeriesManagementListQuery,
   useGetOrganizationUsersQuery,
   useGetTeamMembersQuery,
   useGetTeamQuery,
@@ -37,11 +38,11 @@ import {
   useUpdateTeamMemberMutation,
   useUpdateTeamMutation,
 } from '../../api/index.js';
+import { QueryError } from '../../components/QueryState/index.js';
 import { useAppSelector } from '../../hooks/redux.js';
 import { selectActiveOrganizationId } from '../../store/organization-slice.js';
-import type { TeamMember, TeamType } from '../../types/index.js';
-
-const TEAM_TYPES: TeamType[] = ['general', 'event_organizers', 'role_group'];
+import type { FieldErrors, TeamMember } from '../../types/index.js';
+import { validateTeamUpdate } from '../../validation.js';
 
 function TeamManagementPage() {
   const { t } = useTranslation();
@@ -56,15 +57,24 @@ function TeamManagementPage() {
   const teamArg =
     activeOrganizationId && teamId ? { organizationId: activeOrganizationId, teamId } : skipToken;
   const { data: team, isLoading: loading, error: teamError } = useGetTeamQuery(teamArg);
-  const { data: members = [] } = useGetTeamMembersQuery(teamArg);
-  const { data: allUsers = [] } = useGetUserListQuery();
-  const { data: eventTypes = [] } = useGetEventTypesQuery(activeOrganizationId ?? skipToken);
-  const { data: workRoles = [] } = useGetAllWorkRolesQuery(activeOrganizationId ?? skipToken);
-  const { data: orgUsersData } = useGetOrganizationUsersQuery(
+  const { data: members = [], isError: membersError } = useGetTeamMembersQuery(teamArg);
+  const { data: allUsers = [], isError: userListError } = useGetUserListQuery(undefined);
+  const { data: workRoles = [], isError: workRolesError } = useGetAllWorkRolesQuery(
+    activeOrganizationId ?? skipToken,
+  );
+  const { data: seriesData, isError: seriesError } = useGetEventSeriesManagementListQuery(
+    activeOrganizationId
+      ? { organizationId: activeOrganizationId, page: 0, limit: 200 }
+      : skipToken,
+  );
+  const { data: orgUsersData, isError: orgUsersError } = useGetOrganizationUsersQuery(
     activeOrganizationId
       ? { organizationId: activeOrganizationId, query: { page: 0, limit: 200 } }
       : skipToken,
   );
+  // Any of the secondary queries failing must not render as empty selects or
+  // an empty member list.
+  const auxError = membersError || userListError || workRolesError || seriesError || orgUsersError;
   const [updateTeam] = useUpdateTeamMutation();
   const [addMember] = useAddTeamMemberMutation();
   const [updateTeamMember] = useUpdateTeamMemberMutation();
@@ -81,10 +91,10 @@ function TeamManagementPage() {
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
-  const [editTeamType, setEditTeamType] = useState<TeamType>('general');
   const [editLeaderId, setEditLeaderId] = useState<string | null>(null);
-  const [editEventTypeId, setEditEventTypeId] = useState<string | null>(null);
-  const [editWorkRoleId, setEditWorkRoleId] = useState<string | null>(null);
+  const [editWorkRoleIds, setEditWorkRoleIds] = useState<string[]>([]);
+  const [editEventSeriesIds, setEditEventSeriesIds] = useState<string[]>([]);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
@@ -95,16 +105,20 @@ function TeamManagementPage() {
     if (team) {
       setEditName(team.name);
       setEditDescription(team.description);
-      setEditTeamType(team.teamType);
       setEditLeaderId(team.teamLeaderId);
-      setEditEventTypeId(team.eventTypeId !== null ? String(team.eventTypeId) : null);
-      setEditWorkRoleId(team.workRoleId !== null ? String(team.workRoleId) : null);
+      setEditWorkRoleIds(team.workRoles.map(r => String(r.id)));
+      setEditEventSeriesIds(team.eventSeries.map(s => String(s.id)));
     }
   }, [team]);
 
   const handleSave = async () => {
     if (!activeOrganizationId || !teamId) return;
     setActionError(null);
+    const validationErrors = validateTeamUpdate({ name: editName }, t);
+    if (Object.keys(validationErrors).length > 0) {
+      setFieldErrors(validationErrors);
+      return;
+    }
     try {
       await updateTeam({
         organizationId: activeOrganizationId,
@@ -112,15 +126,13 @@ function TeamManagementPage() {
         data: {
           name: editName,
           description: editDescription,
-          teamType: editTeamType,
           teamLeaderId: editLeaderId,
-          eventTypeId:
-            editTeamType === 'event_organizers' && editEventTypeId ? Number(editEventTypeId) : null,
-          workRoleId:
-            editTeamType === 'role_group' && editWorkRoleId ? Number(editWorkRoleId) : null,
+          workRoleIds: editWorkRoleIds.map(Number),
+          eventSeriesIds: editEventSeriesIds.map(Number),
         },
       }).unwrap();
       setEditing(false);
+      setFieldErrors({});
     } catch (err) {
       setActionError(getApiErrorMessage(err));
     }
@@ -201,7 +213,13 @@ function TeamManagementPage() {
           {canManageTeam && (
             <Group>
               {!editing ? (
-                <Button variant="filled" onClick={() => setEditing(true)}>
+                <Button
+                  variant="filled"
+                  onClick={() => {
+                    setFieldErrors({});
+                    setEditing(true);
+                  }}
+                >
                   {t('common.edit')}
                 </Button>
               ) : (
@@ -210,14 +228,12 @@ function TeamManagementPage() {
                     variant="default"
                     onClick={() => {
                       setEditing(false);
+                      setFieldErrors({});
                       setEditName(team.name);
                       setEditDescription(team.description);
-                      setEditTeamType(team.teamType);
                       setEditLeaderId(team.teamLeaderId);
-                      setEditEventTypeId(
-                        team.eventTypeId !== null ? String(team.eventTypeId) : null,
-                      );
-                      setEditWorkRoleId(team.workRoleId !== null ? String(team.workRoleId) : null);
+                      setEditWorkRoleIds(team.workRoles.map(r => String(r.id)));
+                      setEditEventSeriesIds(team.eventSeries.map(s => String(s.id)));
                     }}
                   >
                     {t('common.cancel')}
@@ -237,13 +253,32 @@ function TeamManagementPage() {
           </Alert>
         )}
 
+        {auxError && (
+          <Box mb="md">
+            <QueryError />
+          </Box>
+        )}
+
         <Stack gap="md" mb="lg">
           <Box>
-            <Text size="sm" fw={500} c="dimmed" mb={4}>
+            <Text size="sm" fw={500} c={fieldErrors.name ? 'red' : 'dimmed'} mb={4}>
               {t('common.name')}
             </Text>
             {editing ? (
-              <TextInput value={editName} onChange={e => setEditName(e.target.value)} />
+              <TextInput
+                value={editName}
+                onChange={e => {
+                  setEditName(e.target.value);
+                  setFieldErrors(prev => {
+                    if (!('name' in prev)) return prev;
+                    const next = { ...prev };
+                    delete next.name;
+                    return next;
+                  });
+                }}
+                error={fieldErrors.name}
+                required
+              />
             ) : (
               <Text>{team.name}</Text>
             )}
@@ -265,26 +300,54 @@ function TeamManagementPage() {
           </Box>
           <Box>
             <Text size="sm" fw={500} c="dimmed" mb={4}>
-              {t('teams.type')}
+              {t('teams.workRoles')}
             </Text>
             {editing ? (
-              <Select
-                placeholder={t('teams.type')}
-                value={editTeamType}
-                onChange={value => {
-                  setEditTeamType((value ?? 'general') as TeamType);
-                  setEditEventTypeId(null);
-                  setEditWorkRoleId(null);
-                }}
-                data={TEAM_TYPES.map(type => ({
-                  value: type,
-                  label: t(`teams.teamType.${type}`),
-                }))}
+              <MultiSelect
+                placeholder={t('teams.workRoles')}
+                value={editWorkRoleIds}
+                onChange={setEditWorkRoleIds}
+                data={workRoles.map(wr => ({ value: String(wr.id), label: wr.name }))}
+                searchable
               />
+            ) : team.workRoles.length > 0 ? (
+              <Group gap={4}>
+                {team.workRoles.map(role => (
+                  <Badge key={role.id} variant="light" color="blue" size="sm">
+                    {role.name}
+                  </Badge>
+                ))}
+              </Group>
             ) : (
-              <Badge variant="light" color={team.teamType === 'general' ? 'gray' : 'blue'}>
-                {t(`teams.teamType.${team.teamType}`)}
-              </Badge>
+              <Text>
+                <em style={{ color: '#999' }}>{t('common.notSet')}</em>
+              </Text>
+            )}
+          </Box>
+          <Box>
+            <Text size="sm" fw={500} c="dimmed" mb={4}>
+              {t('teams.eventSeries')}
+            </Text>
+            {editing ? (
+              <MultiSelect
+                placeholder={t('teams.eventSeries')}
+                value={editEventSeriesIds}
+                onChange={setEditEventSeriesIds}
+                data={(seriesData?.items ?? []).map(s => ({ value: String(s.id), label: s.title }))}
+                searchable
+              />
+            ) : team.eventSeries.length > 0 ? (
+              <Group gap={4}>
+                {team.eventSeries.map(series => (
+                  <Badge key={series.id} variant="light" color="grape" size="sm">
+                    {series.title}
+                  </Badge>
+                ))}
+              </Group>
+            ) : (
+              <Text>
+                <em style={{ color: '#999' }}>{t('common.notSet')}</em>
+              </Text>
             )}
           </Box>
           <Box>
@@ -306,46 +369,6 @@ function TeamManagementPage() {
               </Text>
             )}
           </Box>
-          {(editing ? editTeamType : team.teamType) === 'event_organizers' && (
-            <Box>
-              <Text size="sm" fw={500} c="dimmed" mb={4}>
-                {t('teams.eventType')}
-              </Text>
-              {editing ? (
-                <Select
-                  placeholder={t('teams.eventType')}
-                  value={editEventTypeId}
-                  onChange={setEditEventTypeId}
-                  data={eventTypes.map(et => ({ value: String(et.id), label: et.name }))}
-                  searchable
-                />
-              ) : (
-                <Text>
-                  {team.eventTypeName || <em style={{ color: '#999' }}>{t('common.notSet')}</em>}
-                </Text>
-              )}
-            </Box>
-          )}
-          {(editing ? editTeamType : team.teamType) === 'role_group' && (
-            <Box>
-              <Text size="sm" fw={500} c="dimmed" mb={4}>
-                {t('teams.workRole')}
-              </Text>
-              {editing ? (
-                <Select
-                  placeholder={t('teams.workRole')}
-                  value={editWorkRoleId}
-                  onChange={setEditWorkRoleId}
-                  data={workRoles.map(wr => ({ value: String(wr.id), label: wr.name }))}
-                  searchable
-                />
-              ) : (
-                <Text>
-                  {team.workRoleName || <em style={{ color: '#999' }}>{t('common.notSet')}</em>}
-                </Text>
-              )}
-            </Box>
-          )}
         </Stack>
 
         <Group justify="space-between" mb="sm">
@@ -383,6 +406,11 @@ function TeamManagementPage() {
                         {member.userName.charAt(0).toUpperCase()}
                       </Avatar>
                       <Text size="sm">{member.userName}</Text>
+                      {member.hasActiveAbsence && (
+                        <Badge color="orange" variant="light" size="sm">
+                          {t('teams.absentNow')}
+                        </Badge>
+                      )}
                     </Group>
                   </Table.Td>
                   <Table.Td>
@@ -414,7 +442,7 @@ function TeamManagementPage() {
                   )}
                 </Table.Tr>
               ))}
-              {members.length === 0 && (
+              {members.length === 0 && !membersError && (
                 <Table.Tr>
                   <Table.Td colSpan={canManageTeam ? 4 : 3} style={{ textAlign: 'center' }}>
                     <Text c="dimmed">{t('teams.noMembers')}</Text>

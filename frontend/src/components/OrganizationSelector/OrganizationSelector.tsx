@@ -1,4 +1,4 @@
-import { Select } from '@mantine/core';
+import { Select, Text } from '@mantine/core';
 import { useTranslation } from 'react-i18next';
 import { useGetMyOrganizationsQuery } from '../../api/index.js';
 import { useAppDispatch, useAppSelector } from '../../hooks/redux.js';
@@ -15,8 +15,17 @@ interface OrganizationSelectorProps {
 function OrganizationSelector({ onDark = false }: OrganizationSelectorProps) {
   const { t } = useTranslation();
   const dispatch = useAppDispatch();
-  const { data: organizations = [] } = useGetMyOrganizationsQuery();
+  const { data: organizations = [], isError } = useGetMyOrganizationsQuery();
   const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
+
+  // A failed organization list must not silently hide the selector.
+  if (isError) {
+    return (
+      <Text c="red" size="xs">
+        {t('common.dataUnavailable')}
+      </Text>
+    );
+  }
 
   if (organizations.length === 0) {
     return null;

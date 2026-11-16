@@ -68,6 +68,17 @@ function UserProfile() {
     );
   }
 
+  // A failed user list query must not render as an empty profile form.
+  if (queryError && !isNew) {
+    return (
+      <Box p="md">
+        <Alert color="red" variant="light">
+          {getApiErrorMessage(queryError)}
+        </Alert>
+      </Box>
+    );
+  }
+
   return (
     <Box p="md" maw={600} mx="auto">
       <Paper shadow="sm" p="lg">

@@ -81,7 +81,7 @@ Run from `frontend/`:
 
 | Command | Description |
 |---------|-------------|
-| `npm run test:e2e` | Run Playwright E2E tests |
+| `npm run test:e2e` | Run Playwright E2E tests (builds the frontend first; for direct `npx playwright test` runs, build with `npm run build -w frontend` beforehand) |
 | `npm run test:e2e:headed` | Run E2E tests in headed mode |
 | `npm run test:e2e:ui` | Run E2E tests with Playwright UI |
 | `npm run test:all` | Run unit tests + E2E tests |
@@ -119,6 +119,14 @@ Run from `frontend/`:
 - Do not use the em dash character in code comments or markdown files. Use the basic hyphen (`-`) instead.
 - Prefer `const` over `let`. Use template literals over string concatenation.
 - Handle errors explicitly. Do not silently swallow exceptions.
+- **Field-level validation errors.** When a validation error can be attributed to a single
+  input, display it below that input via the input's `error` prop (Mantine turns the input
+  outline red and renders the message underneath; the label also turns red) and, where the
+  page renders its own label `Text`, colour it red (`c={fieldErrors.x ? 'red' : 'dimmed'}`),
+  as in `OrgGeneralPage` and `Account`. Use a generic `Alert` only for backend errors or
+  other errors that cannot be attributed to a single field. Client-side validators live in
+  `frontend/src/validation.ts` as `validate*` functions taking the form data and `t`, and
+  returning a `FieldErrors` map keyed by field name.
 - When a comment describes the following variable or function, use a JSDoc comment
   (`/** ... */`) instead of a standard `//` comment. Only add tags like `@param` or
   `@returns` when the function is not trivial.
@@ -159,6 +167,7 @@ backend/src/
 │   ├── certifications.ts # Certification routes
 │   └── user-work-roles.ts # User work role / certification routes
 ├── controllers/          # Request handlers (parse input, call services, send response)
+├── jobs/                 # Scheduled jobs started from index.ts (e.g. critical-slot-alerts)
 └── services/             # Business logic (database queries via Kysely)
     └── auth-providers/   # OAuth provider logic, one file per provider
         ├── index.ts      # Provider registry + lookup (SUPPORTED_PROVIDERS, getProvider)
@@ -200,17 +209,21 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 
 - `GET /api/health` - Health check (no auth)
 - `GET /api/v1/auth/providers` - List supported auth providers (no auth)
+- `GET /api/v1/locales/:lng` - Server-owned locale bundle for a supported language (`en-GB`, `en-US`, `fi`; no auth). Currently contains the `notifications` message templates; the frontend merges them into its i18n resources and renders notifications with them
 - `GET /api/v1/auth/:provider/login` - Start OAuth flow (discord, google, microsoft)
 - `GET /api/v1/auth/:provider/callback` - OAuth callback
 - `POST /api/v1/auth/:provider/link` - Start an OAuth flow that connects another login method to the current account (auth required)
 - `GET /api/v1/auth/logout` - Logout
 - `GET /api/v1/users` - List users with permissions (paginated, `user-management:read`)
-- `GET /api/v1/users/list` - Simple user list (id + name, no auth)
+- `GET /api/v1/users/list` - Simple user list (id + name, no auth). With `start`/`end` ISO-datetime query params, each item also has `hasAbsence` (an absence overlaps that range), used to mark unavailable users in the assignment dropdown, and `assignmentCount` (work role assignments overlapping that range, used by the staffing view)
+- `GET /api/v1/organizations/:organizationId/staffing/workload` - Per-user staffing workload of an organization over `start`/`end` (optional `siteId`/`roomId`/`teamId` filters; `events:read`): each member has `assignmentCount`, `hours` (sum of effective occurrence durations), `criticalAssignmentCount`, `hasAbsence` and weekly `weeks` buckets for the workload matrix on the staffing page
 - `GET /api/v1/users/@me` - Current user with permissions (auth required)
 - `PATCH /api/v1/users/@me` - Update own personal information (auth required)
 - `DELETE /api/v1/users/@me` - Delete own account (auth required)
 - `GET /api/v1/users/@me/auth-accounts` - List connected login methods (auth required)
 - `DELETE /api/v1/users/@me/auth-accounts/:provider` - Disconnect a login method (auth required)
+- `GET /api/v1/users/@me/notification-preferences` - List the current user's notification preferences: every configurable catalog message key (all except `welcome`) crossed with every channel (`in_app`/`email`/`push`), stored rows or channel defaults, each entry carrying its settings `category` (`general` = sent to everyone, `management` = sent only to event/team managers; see `notificationMessageKeyCategories` in `src/i18n/messages.ts`) (auth required)
+- `PATCH /api/v1/users/@me/notification-preferences/:messageKey/:channel` - Set one preference, body `{ enabled }` (auth required)
 - `GET /api/v1/users/:userId` - Get user with permissions (`user-management:read`)
 - `PATCH /api/v1/users/:userId` - Update user (`user-management:write`)
 - `DELETE /api/v1/users/:userId` - Delete user (`user-management:write`)
@@ -218,11 +231,11 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 - `GET /api/v1/organizations/:organizationId` - Get organization details (members only)
 - `PATCH /api/v1/organizations/:organizationId` - Update organization details (`organization:write`)
 - `GET /api/v1/event-series` - List event series (`events:read`, requires `organizationId` query)
-- `POST /api/v1/event-series` - Create event series (`events:write`)
+- `POST /api/v1/event-series` - Create event series (`events:write`; body may include `siteId`/`roomId`/`reserveWholeSite`; the response carries a `conflicts` warning array listing overlapping bookings in the same room/site)
 - `GET /api/v1/event-series/management` - Paginated series list for the management view (`events:read`)
-- `GET /api/v1/event-series/occurrences` - Occurrences in a time range (used by calendars; `events:read`)
-- `GET /api/v1/event-occurrences/:occurrenceRef` - Single occurrence detail by ref (numeric ID or `tmp:{seriesId}:{isoStart}`; `events:read`)
-- `POST /api/v1/event-occurrences/:occurrenceRef/materialize` - Materialize a tmp ref into a stable numeric ID, inheriting parent slots (`events:write`)
+- `GET /api/v1/event-series/occurrences` - Occurrences in a time range (used by calendars, the Home page and the staffing page; `events:read`). Each occurrence includes `isParticipant`, `isManager`, `workRoleSlots` (per-slot status indicators), `managedUnfilledCriticalSlots` for the requesting user and info slot summary counts (`infoSlotCount`, `filledInfoSlotCount`). The `scope` filter accepts `all`, `mine` (assigned to a slot), `team` (series linked to one of the user's teams) and `involved` (participant or manager; used by the Home page). `unfilledOnly`/`criticalOnly` (booleans) restrict to non-cancelled occurrences with unfilled (critical) slots for the staffing view
+- `GET /api/v1/event-occurrences/:occurrenceRef` - Single occurrence detail by ref (numeric ID or `tmp:{seriesId}:{isoStart}`; `events:read`). Besides work role slots and comments, the detail includes `infoSlots` (occurrence-level when materialized, otherwise parent), `parentInfoSlots`, `occurrenceInfoSlots` and `missingParentInfoSlots`
+- `POST /api/v1/event-occurrences/:occurrenceRef/materialize` - Materialize a tmp ref into a stable numeric ID, inheriting parent slots (`events:write`). Returns `{ occurrenceId, conflicts }` where `conflicts` lists overlapping bookings of the occurrence's effective time range (`events:write`)
 - `POST /api/v1/event-occurrences/:occurrenceRef/import-slots` - Import parent series slots into a materialized occurrence (`events:write`)
 - `GET/POST /api/v1/event-occurrences/:eventOccurrenceId/work-roles` - List/create occurrence-level slots (numeric ID required; `events:read`/`events:write`)
 - `PATCH/DELETE /api/v1/event-occurrences/:eventOccurrenceId/work-roles/:workRoleId` - Update/delete occurrence slot (never touches parent slots)
@@ -230,35 +243,44 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 - `DELETE /api/v1/event-occurrences/:eventOccurrenceId/work-roles/:workRoleId/assignments/:assignmentId` - Unassign (`events:write`)
 - `GET/POST /api/v1/event-occurrences/:eventOccurrenceId/comments` - List/create occurrence comments
 - `PATCH/DELETE /api/v1/event-occurrences/:eventOccurrenceId/comments/:commentId` - Update/delete occurrence comment (author only)
+- `POST /api/v1/event-occurrences/:occurrenceRef/import-info-slots` - Import parent series info slots into a materialized occurrence (`events:write`)
+- `GET /api/v1/event-occurrences/:eventOccurrenceId/info-slots` - List occurrence-level info slots (numeric ID required; `events:read`)
+- `PATCH /api/v1/event-occurrences/:eventOccurrenceId/info-slots/:infoSlotId` - Set the filled value of an occurrence info slot (value only; info slots cannot be added/deleted per occurrence; a parent slot ID resolves to its inherited occurrence copy; `events:write`)
 - `GET /api/v1/event-series/:seriesId` - Get series (`events:read`)
 - `GET /api/v1/event-series/:seriesId/management` - Get series with site/room/teams (`events:read`)
-- `PATCH /api/v1/event-series/:seriesId` - Update series (`events:write`)
-- `PATCH /api/v1/event-series/:seriesId/config` - Update site/room/team assignments (`events:write`)
+- `PATCH /api/v1/event-series/:seriesId` - Update series (`events:write`; body may include `siteId`/`roomId`/`reserveWholeSite`; response carries `conflicts`)
+- `PATCH /api/v1/event-series/:seriesId/config` - Update site/room/team assignments (`events:write`; response carries `conflicts`)
 - `DELETE /api/v1/event-series/:seriesId` - Delete series (`events:write`)
 - `GET /api/v1/event-series/:seriesId/occurrences` - Occurrences of one series in a range (`events:read`)
 - `GET /api/v1/event-series/:seriesId/occurrences/:occurrenceStart` - Single occurrence detail (`events:read`)
 - `POST /api/v1/event-series/:seriesId/occurrences/:occurrenceStart/cancel` - Cancel occurrence (`events:write`)
-- `POST /api/v1/event-series/:seriesId/occurrences/:occurrenceStart/reschedule` - Reschedule occurrence (`events:write`)
-- `POST /api/v1/event-series/:seriesId/occurrences/:occurrenceStart/split` - Split series at occurrence (`events:write`)
+- `POST /api/v1/event-series/:seriesId/occurrences/:occurrenceStart/reschedule` - Reschedule occurrence (`events:write`; response carries `conflicts` for the rescheduled range)
+- `POST /api/v1/event-series/:seriesId/occurrences/:occurrenceStart/split` - Split series at occurrence (`events:write`; response carries `conflicts` of the new series)
 - `DELETE /api/v1/event-series/:seriesId/occurrences/:occurrenceStart/exception` - Restore occurrence (`events:write`)
 - `GET /api/v1/event-series/:seriesId/exceptions` - List cancelled/rescheduled occurrences (`events:read`)
 - `GET /api/v1/event-series/:seriesId/work-roles` - List work role slots (`events:read`, optional `occurrenceStart` query)
 - `POST /api/v1/event-series/:seriesId/work-roles` - Create slot (`events:write`; body may include `occurrenceId`, `isCritical`, `workRoleId`)
 - `PATCH /api/v1/event-series/:seriesId/work-roles/:workRoleId` - Update slot (`events:write`)
 - `DELETE /api/v1/event-series/:seriesId/work-roles/:workRoleId` - Delete slot (`events:write`)
+- `GET /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignment-candidates` - Users as assignment candidates for a slot (`events:read`): each carries `hasAbsence` (when `start`/`end` are given), `hasWorkRole`, `isQualified`, `missingCertifications` (missing or expired required certifications with `expiredDate`) computed against the slot's `work_role_id`, and `assignmentCount`/`workloadHours` (the user's assignments overlapping `start`/`end`, for workload-aware sorting in the assign dropdown); works for parent and occurrence-level slots
 - `POST /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments` - Assign user to slot (`events:write`)
+- `POST /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments/bulk` - Assign one user to the same slot across many occurrences at once (`events:write`; body `{ userId, occurrenceStarts[] }`; materializes each occurrence and assigns the inherited occurrence-level copy, never the parent slot; returns per-occurrence `assigned`/`already-assigned` results)
 - `DELETE /api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments/:assignmentId` - Unassign user (`events:write`)
+- `GET /api/v1/event-series/:seriesId/info-slots` - List parent (series-level) info slots (`events:read`, optional `occurrenceStart` query)
+- `POST /api/v1/event-series/:seriesId/info-slots` - Create parent info slot (`events:write`; body: `title`, optional `description`, `value` default)
+- `PATCH /api/v1/event-series/:seriesId/info-slots/:infoSlotId` - Update parent info slot (`events:write`)
+- `DELETE /api/v1/event-series/:seriesId/info-slots/:infoSlotId` - Delete parent info slot (`events:write`; occurrence copies are kept, their inherited reference becomes NULL)
 - `GET /api/v1/event-series/:seriesId/comments` - List comments (`events:read`)
 - `POST /api/v1/event-series/:seriesId/comments` - Add comment (`events:write`)
 - `PATCH /api/v1/event-series/:seriesId/comments/:commentId` - Update comment (author only, `events:write`)
 - `DELETE /api/v1/event-series/:seriesId/comments/:commentId` - Delete comment (author only, `events:write`)
 - `GET /api/v1/organizations/:organizationId/event-types` - List all event types of an organization (no pagination, `events:read`)
-- `GET /api/v1/organizations/:organizationId/teams` - List teams with type, leader and links (paginated, `team-management:read`)
-- `POST /api/v1/organizations/:organizationId/teams` - Create team (`team-management:write`; body may include `teamType`, `teamLeaderId`, `eventTypeId`, `workRoleId`)
+- `GET /api/v1/organizations/:organizationId/teams` - List teams with leader, assigned work roles and assigned event series (paginated, `team-management:read`)
+- `POST /api/v1/organizations/:organizationId/teams` - Create team (`team-management:write`; body may include `teamLeaderId`, `workRoleIds`, `eventSeriesIds`)
 - `GET /api/v1/organizations/:organizationId/teams/:teamId` - Get team (`team-management:read`)
-- `PATCH /api/v1/organizations/:organizationId/teams/:teamId` - Update team, including type/leader/links (`team-management:write`)
+- `PATCH /api/v1/organizations/:organizationId/teams/:teamId` - Update team, including leader/work roles/event series (`team-management:write`)
 - `DELETE /api/v1/organizations/:organizationId/teams/:teamId` - Delete team (`team-management:write`)
-- `GET /api/v1/organizations/:organizationId/teams/:teamId/members` - List team members (`team-management:read`)
+- `GET /api/v1/organizations/:organizationId/teams/:teamId/members` - List team members, each with `hasActiveAbsence` (`team-management:read`)
 - `POST /api/v1/organizations/:organizationId/teams/:teamId/members` - Add team member, optionally with the manager toggle (`team-management:write`)
 - `PATCH /api/v1/organizations/:organizationId/teams/:teamId/members/:userId` - Update team member, e.g. toggle `isManager` (`team-management:write`)
 - `DELETE /api/v1/organizations/:organizationId/teams/:teamId/members/:userId` - Remove team member (`team-management:write`)
@@ -312,6 +334,7 @@ Team-scoped routes (get/update team, members) also accept users who have the man
 - `PATCH /api/v1/organizations/:organizationId/users/work-roles/:userWorkRoleId` - Update a user's work role (e.g. mark qualified, `work-role-management:write`)
 - `DELETE /api/v1/organizations/:organizationId/users/work-roles/:userWorkRoleId` - Remove a work role from a user (`work-role-management:write`)
 - `GET /api/v1/organizations/:organizationId/users/:userId/certifications` - List a user's certifications (`work-role-management:read`)
+- `GET /api/v1/organizations/:organizationId/users/:userId/event-assignments` - Paginated event occurrences the user is assigned to, with the assigned roles; optional `start`/`end` date span (defaults to one month back and forward from now), `page`, `limit` (`events:read`)
 - `POST /api/v1/organizations/:organizationId/users/:userId/certifications` - Add a certification to a user (`work-role-management:write`)
 - `DELETE /api/v1/organizations/:organizationId/users/certifications/:userCertificationId` - Remove a certification from a user (`work-role-management:write`)
 
@@ -337,13 +360,17 @@ frontend/src/
 │   ├── EditField/        # Inline edit field
 │   ├── EventSeriesDialog/ # Create/edit/split event series dialog
 │   ├── UserCard/         # User card component
+│   ├── EventAssignmentsCard/ # Event occurrences a user is assigned to (date-span filter + pagination; used on /profile and /organization/users/:userId)
 │   ├── ToolbarButton/    # Toolbar button
 │   └── NavigationButton/ # Navigation button
 └── pages/
     ├── Home/             # Dashboard: notifications + upcoming events (default route)
     ├── Events/           # CalendarPage (calendar view), EventManagementPage (series list),
-    │                     # EventConfigPage (series site/room/teams), EventOccurrencePage
-    │                     # (single event instance: readiness, work role slots, assignees)
+    │                     # EventConfigPage (series cards: general info, work role slots, info slots,
+    │                     # schedule, location, teams), EventOccurrencePage
+    │                     # (single event instance: readiness, work role slots, assignees, info slots,
+    │                     # comments), StaffingPage (staffing overview: occurrences with expandable
+    │                     # rows, unfilled slots, workload matrix, available volunteers)
     ├── UserList/         # User list (Contacts)
     ├── UserProfile/      # User profile detail
     ├── Account/          # Account page: personal info, login methods, account deletion
@@ -369,6 +396,15 @@ frontend/src/
   the auth token from localStorage and sends it as the `x-token` header. Use
   `skipToken` as the hook argument to skip a query conditionally, and
   `getApiErrorMessage(error)` to display a mutation/query error.
+- **Loading and error states**: Every page or component that displays data fetched from the
+  backend must render all three query states explicitly instead of showing empty data. While a
+  request is still pending (`isLoading` with no data yet) show a loading indicator (e.g. a
+  Mantine `Loader` or `Skeleton`), not an empty list or an empty calendar. When the request
+  fails (`isError`, e.g. connection lost or backend down) show a clear error message (e.g. a
+  Mantine `Alert` stating that the data is unavailable because the server could not be reached)
+  instead of silently rendering empty data. Only a successful response renders the data, and a
+  genuinely empty result gets its own explicit empty-state message. Never collapse an error
+  into an empty array (e.g. `data?.items ?? (isError ? [] : null)`).
 - **Authentication gate**: `App.tsx` fetches the current user via
   `useGetCurrentUserQuery`. While the check is pending a spinner is shown;
   unauthenticated users are greeted with the `Login` page (provider buttons
@@ -385,17 +421,35 @@ frontend/src/
 - **Migrations**: node-pg-migrate. Migration files live in `backend/migrations/`.
 - **Schema**: tables covering users, authentication accounts (multi-provider),
   access tokens, records, permissions, roles, role permissions, user roles,
-  organizations, teams (with a team type of `general`, `event_organizers` or
-  `role_group`, an optional team leader, and an optional link to an event type
-  or work role), team members (with an `is_manager` toggle granting management
-  of that specific team), sites (physical locations), rooms (within sites),
+  organizations, teams (with an optional team leader; one or more work roles
+  are assigned via the `team_work_roles` join table and one or more event series
+  via `event_series_teams`), team members (with an `is_manager` toggle granting
+  management of that specific team), sites (physical locations), rooms (within sites),
   calendars, event types, work roles (the role catalog), certifications,
   user work roles (availability/qualification), user certifications,
   certification work roles (mandatory certifications per role),
   event series, event occurrences, event work roles (slots), event work role
-  assignments, and event comments.
+  assignments, event info slots (form-like text fields on a series, inherited
+  per occurrence on materialization; only the value is editable per occurrence),
+  and event comments.
+  Notifications store their message language-neutrally as `message_key` +
+  `params` (jsonb): `message_key` is a key into the backend message catalog
+  (`backend/src/i18n/`, per-language templates with `{{placeholder}}` params,
+  validated by the zod registry in `src/i18n/messages.ts`). The in-app list is
+  rendered client-side from the bundle served by `GET /api/v1/locales/:lng`;
+  email/push delivery renders it server-side with `renderNotificationMessage`
+  in the recipient's `users.language`. Per-user delivery toggles live in
+  `notification_preferences` (one row per user + message key + channel; absent
+  rows use the channel default: in-app and email on, push off). The in-app
+  channel is enforced when the notification row is inserted; email/push are
+  configured but not delivered yet.
   Events can be assigned to a site (optionally reserving the whole site)
-  and/or a specific room within a site.
+  and/or a specific room within a site. Booking conflict detection: every
+  write that can change a booking (series create/update, config update, split,
+  occurrence reschedule/materialize) expands the affected occurrences and
+  reports overlaps with other series of the same organization that share the
+  same room, or where either side reserves the whole site, as a `conflicts`
+  warning array on the response (the write itself is not rejected).
 - **Occurrence model**: `event_series` is expanded on the fly by the recurrence
   engine; individual instances are materialized into `event_occurrences` on
   first write (slot, comment, or cancel/reschedule). `event_occurrences` carries
@@ -403,6 +457,22 @@ frontend/src/
   `event_work_roles` slots with `event_occurrence_id` NULL are the parent
   template; materialization copies them to occurrence-level slots tracked by
   `inherited_from_work_role_id` (re-import never duplicates, never deletes).
+  `event_info_slots` works the same way for form-like text fields: parent rows
+  (NULL `event_occurrence_id`) are the template, materialization/import copies
+  them to occurrence-level rows tracked by `inherited_from_info_slot_id`, and
+  only the occurrence copy's `value` may be edited (no add/delete per occurrence).
+- **Event participation and management**: a user is a *participant* of an event
+  (series or occurrence) if they are assigned to one of its work role slots
+  (a series-wide slot covers every occurrence; an occurrence-level slot only
+  that occurrence). A user is a *manager* of an event series if they are the
+  team leader or a manager member (`team_members.is_manager`) of a team that
+  is connected to the series (`event_series_teams`). If the teams they manage
+  have work roles assigned (`team_work_roles`), the user is considered a
+  manager of those specific work roles for the connected event series. The
+  occurrences list endpoint reports these as `isParticipant` / `isManager` per
+  occurrence and flags critical, unfilled slots of managed work roles in
+  `managedUnfilledCriticalSlots`; the Home page "Upcoming events" card uses
+  `scope=involved` to show only occurrences the user participates in or manages.
 - **Auth tables**: `permissions` holds the system-defined permission codes;
   `auth_accounts` links users to provider accounts (discord, google, microsoft);
   `roles` belong to an organization and are granted permissions via
@@ -477,8 +547,19 @@ Group frontend tests by the page or component being tested, for example `Account
 
 - Tests live in `frontend/e2e/`.
 - Config: `frontend/playwright.config.ts` (3 browsers: chromium, firefox, webkit).
-- The dev server starts automatically before tests (port 5173).
-- Run: `npm run test:e2e -w frontend`
+- Playwright starts its own frontend instance before tests: the production
+  build in `frontend/dist/` served by `vite preview` on port 4173 (so it never
+  clashes with a dev server on 5173). See `frontend/playwright.config.ts`
+  (`webServer`). The build is deliberately not part of the Playwright command:
+  always build the frontend before running Playwright tests with
+  `npm run build -w frontend` (or use `npm run test:e2e -w frontend`, which
+  builds first). Running `npx playwright test` directly without a prior build
+  serves a stale or missing `dist/`.
+  No backend is needed: every API call the pages make is mocked via
+  `page.route` (see `e2e/helpers.ts`; `mockCommonApis` includes the auth
+  provider list, and the specs that do not use it mock it in their own
+  `beforeEach`). The frontend has no hardcoded provider fallback.
+- Run: `npm run test:e2e -w frontend` (builds first)
 - Install browsers first: `npm run playwright:install -w frontend`
 
 #### E2E test requirements
@@ -541,6 +622,19 @@ Common E2E pitfalls to avoid:
   `**/api/v1/.../sites?*` for list endpoints, because globs can accidentally
   intercept single-entity requests (e.g. `/sites/site-1`).
 
+### Flaky tests
+
+Whenever a test is observed to be flaky (it fails intermittently and passes on
+a re-run, in any suite: backend, frontend unit, or E2E), make it robust in the
+same change, even when the flake is unrelated to the feature currently being
+worked on. Fix the root cause rather than masking it: wait for the specific
+condition instead of sleeping, use deterministic locators and mocks, avoid
+depending on ordering or timing, and reduce parallelism or split the test when
+a shared resource is the bottleneck. Do not raise timeouts to hide flakes
+(the E2E per-test timeout of 20 seconds must not be increased), and do not add
+`test.retry`-style masking in local runs; retries in CI may hide, not fix, the
+problem.
+
 ## Environment Variables
 
 See `.env.sample` for all variables. Key ones:
@@ -562,7 +656,7 @@ See `.env.sample` for all variables. Key ones:
 - Always run `npm run check:fix` and `npm run test` before finishing work.
 - When you add a feature that persists data, update `backend/scripts/seed-data.ts` (run with
   `npm run seed:data -w backend`) so the generated test data covers the new feature. The script
-  generates semi-realistic test data for both organizations, mock users, roles, teams (with types, leaders and links), calendars,
+  generates semi-realistic test data for both organizations, mock users, roles, teams (with leaders, work role and event series assignments), calendars,
   event types, event series (previous/current/next month), materialized occurrences (with
   cancel/reschedule flags), work role slots with assignments and comments.
   It must keep refusing to run unless the database has exactly one user and one

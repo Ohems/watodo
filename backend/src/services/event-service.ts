@@ -1,10 +1,21 @@
+import { addWeeks, max, startOfWeek } from 'date-fns';
+import type { Transaction } from 'kysely';
 import { db } from '../database.js';
-import type { EventComment, EventOccurrenceRow, EventSeries, EventWorkRole } from '../db/types.js';
+import type {
+  Database,
+  EventComment,
+  EventInfoSlot,
+  EventOccurrenceRow,
+  EventSeries,
+  EventWorkRole,
+} from '../db/types.js';
 import { badRequest, forbidden, isUniqueViolation, notFound } from '../http-error.js';
 import { createLogger } from '../logger.js';
 import type {
   EventCommentPush,
   EventCommentUpdate,
+  EventInfoSlotPush,
+  EventInfoSlotUpdate,
   EventSeriesPush,
   EventSeriesUpdate,
   EventWorkRolePush,
@@ -13,6 +24,8 @@ import type {
   RecurrenceInput,
   RescheduleOccurrenceInput,
 } from '../schemas/index.js';
+import { usersWithAbsenceInRange } from './absence-service.js';
+import { createNotificationInTx } from './notification-service.js';
 import {
   anchorRecurrenceAtStart,
   buildRruleString,
@@ -32,6 +45,26 @@ const logger = createLogger('event-service');
 
 const DEFAULT_DURATION_MINUTES = 60;
 
+/**
+ * A booking conflict: an occurrence of another series in the same
+ * organization that overlaps the new/changed booking and shares the same
+ * room, or whose site is reserved (whole-site reservation on either side).
+ * Reported as a warning on write responses, not as an error.
+ */
+export interface BookingConflict {
+  seriesId: number;
+  title: string;
+  /** Original occurrence start of the conflicting occurrence. */
+  occurrenceStart: string;
+  /** Effective start of the conflicting occurrence (after reschedule overrides). */
+  start: string;
+  /** Effective end of the conflicting occurrence. */
+  end: string;
+  siteId: string | null;
+  roomId: string | null;
+  reserveWholeSite: boolean;
+}
+
 export interface EventSeriesResponse {
   id: number;
   title: string;
@@ -49,6 +82,19 @@ export interface EventSeriesResponse {
   recurrence: RecurrenceInput | null;
   createdAt: string;
   updatedAt: string;
+  /** Booking conflicts detected by this write; only set on write responses. */
+  conflicts?: BookingConflict[];
+}
+
+/** Status indicator for a single work role slot of an occurrence. */
+export interface OccurrenceSlotStatus {
+  slotId: number;
+  title: string;
+  workRoleId: number | null;
+  workRoleName: string | null;
+  isCritical: boolean;
+  /** Number of users assigned to this slot. */
+  assigneeCount: number;
 }
 
 export interface EventOccurrenceResponse {
@@ -69,6 +115,18 @@ export interface EventOccurrenceResponse {
   isRescheduled: boolean;
   isCancelled: boolean;
   exceptionId: number | null;
+  /** True when the requesting user is assigned to a work role slot of this occurrence or its series. */
+  isParticipant: boolean;
+  /** True when the requesting user manages this series via a connected team (team leader or manager member). */
+  isManager: boolean;
+  /** Work role slot status indicators for this occurrence. */
+  workRoleSlots: OccurrenceSlotStatus[];
+  /** Titles of critical, unfilled slots whose work role the requesting user manages for this series. */
+  managedUnfilledCriticalSlots: string[];
+  /** Number of info slots visible for this occurrence (occurrence-level when materialized, else parent). */
+  infoSlotCount: number;
+  /** How many of those info slots have a non-empty value. */
+  filledInfoSlotCount: number;
 }
 
 export interface EventExceptionResponse {
@@ -80,6 +138,8 @@ export interface EventExceptionResponse {
   overrideEnd: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Booking conflicts of the rescheduled occurrence; only set on reschedule. */
+  conflicts?: BookingConflict[];
 }
 
 export interface EventWorkRoleAssignmentResponse {
@@ -102,6 +162,20 @@ export interface EventWorkRoleResponse {
   workRoleId: number | null;
   workRoleName: string | null;
   assignments: EventWorkRoleAssignmentResponse[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EventInfoSlotResponse {
+  id: number;
+  seriesId: number;
+  /** NULL = parent (series-level) info slot; non-NULL = occurrence-level inherited slot. */
+  occurrenceId: number | null;
+  inheritedFromInfoSlotId: number | null;
+  title: string;
+  description: string;
+  /** The filled text; NULL = not filled yet. */
+  value: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -147,6 +221,14 @@ export interface EventOccurrenceDetailResponse {
   occurrenceWorkRoles: EventWorkRoleResponse[];
   /** Parent slots not yet imported into this occurrence. */
   missingParentWorkRoles: EventWorkRoleResponse[];
+  /** Info slots visible for this occurrence (occurrence-level when materialized, otherwise parent). */
+  infoSlots: EventInfoSlotResponse[];
+  /** Parent (series-level) info slots only. */
+  parentInfoSlots: EventInfoSlotResponse[];
+  /** Occurrence-level (inherited) info slots only. */
+  occurrenceInfoSlots: EventInfoSlotResponse[];
+  /** Parent info slots not yet imported into this occurrence. */
+  missingParentInfoSlots: EventInfoSlotResponse[];
   comments: EventCommentResponse[];
   readiness: EventReadiness;
 }
@@ -172,7 +254,7 @@ function toExceptionRule(exception: EventOccurrenceRow): OccurrenceExceptionRule
   };
 }
 
-function serializeSeries(series: EventSeries): EventSeriesResponse {
+function serializeSeries(series: EventSeries, conflicts?: BookingConflict[]): EventSeriesResponse {
   return {
     id: series.id,
     title: series.title,
@@ -190,6 +272,7 @@ function serializeSeries(series: EventSeries): EventSeriesResponse {
     recurrence: series.rrule ? recurrenceFromRruleString(series, series.rrule) : null,
     createdAt: series.created_at.toISOString(),
     updatedAt: series.updated_at.toISOString(),
+    ...(conflicts !== undefined ? { conflicts } : {}),
   };
 }
 
@@ -333,6 +416,30 @@ async function ensureOccurrenceMaterialized(
           .execute();
       }
     }
+    // Inherit parent (series-level) info slots into the new occurrence as well,
+    // copying the parent value as the default for the occurrence's copy.
+    const parentInfoSlots = await db
+      .selectFrom('event_info_slots')
+      .select(['id', 'title', 'description', 'value'])
+      .where('event_series_id', '=', seriesId)
+      .where('event_occurrence_id', 'is', null)
+      .execute();
+    if (parentInfoSlots.length > 0) {
+      await db
+        .insertInto('event_info_slots')
+        .values(
+          parentInfoSlots.map(s => ({
+            event_series_id: seriesId,
+            event_occurrence_id: inserted.id,
+            inherited_from_info_slot_id: s.id,
+            title: s.title,
+            description: s.description,
+            value: s.value,
+          })),
+        )
+        .onConflict(oc => oc.doNothing())
+        .execute();
+    }
     return inserted.id;
   }
   const existing = await db
@@ -344,11 +451,31 @@ async function ensureOccurrenceMaterialized(
   return existing.id;
 }
 
+/** Per-user enrichment attached to a listed occurrence. */
+export interface OccurrenceEnrichment {
+  isParticipant: boolean;
+  isManager: boolean;
+  workRoleSlots: OccurrenceSlotStatus[];
+  managedUnfilledCriticalSlots: string[];
+  infoSlotCount: number;
+  filledInfoSlotCount: number;
+}
+
+const EMPTY_ENRICHMENT: OccurrenceEnrichment = {
+  isParticipant: false,
+  isManager: false,
+  workRoleSlots: [],
+  managedUnfilledCriticalSlots: [],
+  infoSlotCount: 0,
+  filledInfoSlotCount: 0,
+};
+
 function serializeOccurrence(
   series: EventSeries,
   occurrence: ExpandedOccurrence,
   organization: CalendarOrganization,
   occurrenceId: number | null,
+  enrichment: OccurrenceEnrichment = EMPTY_ENRICHMENT,
 ): EventOccurrenceResponse {
   return {
     occurrenceId,
@@ -367,6 +494,12 @@ function serializeOccurrence(
     isRescheduled: occurrence.exception?.overrideStart != null,
     isCancelled: occurrence.exception?.isCancelled ?? false,
     exceptionId: occurrence.exception?.id ?? null,
+    isParticipant: enrichment.isParticipant,
+    isManager: enrichment.isManager,
+    workRoleSlots: enrichment.workRoleSlots,
+    managedUnfilledCriticalSlots: enrichment.managedUnfilledCriticalSlots,
+    infoSlotCount: enrichment.infoSlotCount,
+    filledInfoSlotCount: enrichment.filledInfoSlotCount,
   };
 }
 
@@ -498,6 +631,232 @@ async function fetchExceptionRules(
   return bySeries;
 }
 
+// --- Booking conflict detection ---
+
+/** The location-relevant part of a series' booking. */
+interface BookingRule {
+  siteId: string | null;
+  roomId: string | null;
+  reserveWholeSite: boolean;
+}
+
+/**
+ * Whether two bookings compete for the same space: they share a site and
+ * either both target the same room, or either one reserves the whole site.
+ * A booking without a site never conflicts.
+ */
+function bookingsConflict(a: BookingRule, b: BookingRule): boolean {
+  if (!a.siteId || !b.siteId || a.siteId !== b.siteId) return false;
+  if (a.reserveWholeSite || b.reserveWholeSite) return true;
+  return a.roomId !== null && a.roomId === b.roomId;
+}
+
+/** Maximum number of conflicts reported in one response. */
+const MAX_REPORTED_CONFLICTS = 100;
+
+/** An occupied time interval of the booking being created/changed. */
+interface ProposedInterval {
+  occurrenceStart: Date;
+  start: Date;
+  end: Date;
+}
+
+/**
+ * Finds the occurrences of other series in the same organization that
+ * overlap the proposed intervals and compete for the same room/site.
+ * Candidate series are pre-filtered by site/room in SQL, expanded over the
+ * proposed range with their exceptions applied, and matched against the
+ * proposed intervals with a two-pointer sweep (both sides sorted by start).
+ * @param organizationId - The organization the booking belongs to.
+ * @param booking - The proposed booking (site/room/reserve flag).
+ * @param intervals - The proposed occurrence intervals (sorted by start).
+ * @param excludeSeriesId - Series to skip entirely (the series being created/updated).
+ * @param excludeOccurrence - A single occurrence to skip (the one being rescheduled/materialized).
+ * @returns The conflicting occurrences, sorted by start, capped at MAX_REPORTED_CONFLICTS.
+ */
+async function findBookingConflicts(
+  organizationId: string,
+  booking: BookingRule,
+  intervals: ProposedInterval[],
+  excludeSeriesId: number | null,
+  excludeOccurrence?: { seriesId: number; occurrenceStart: Date },
+): Promise<BookingConflict[]> {
+  if (!booking.siteId || intervals.length === 0) return [];
+  const sorted = [...intervals].sort((a, b) => a.start.getTime() - b.start.getTime());
+  const rangeStart = sorted[0].start;
+  const rangeEnd = max(sorted.map(i => i.end));
+
+  // Candidate series in the same organization sharing the site or room.
+  let candidateQuery = db
+    .selectFrom('event_series')
+    .innerJoin('calendars', 'calendars.id', 'event_series.calendar_id')
+    .selectAll('event_series')
+    .where('calendars.organization_id', '=', organizationId)
+    .where(eb =>
+      eb.or([
+        eb('event_series.site_id', '=', booking.siteId as string),
+        ...(booking.roomId !== null ? [eb('event_series.room_id', '=', booking.roomId)] : []),
+      ]),
+    );
+  if (excludeSeriesId !== null) {
+    candidateQuery = candidateQuery.where('event_series.id', '!=', excludeSeriesId);
+  }
+  const candidates = await candidateQuery.execute();
+  const matching = candidates.filter(candidate =>
+    bookingsConflict(booking, {
+      siteId: candidate.site_id,
+      roomId: candidate.room_id,
+      reserveWholeSite: candidate.reserve_whole_site,
+    }),
+  );
+  if (matching.length === 0) return [];
+
+  const exceptionsBySeries = await fetchExceptionRules(matching.map(c => c.id));
+
+  // Expand every candidate over the proposed range and collect the occupied
+  // intervals that actually overlap a proposed interval (two-pointer sweep).
+  const conflicting: BookingConflict[] = [];
+  const seen = new Set<string>();
+  for (const candidate of matching) {
+    const exceptions = exceptionsBySeries.get(candidate.id) ?? [];
+    const expanded = expandOccurrences(toRule(candidate), exceptions, rangeStart, rangeEnd);
+    let i = 0;
+    for (const occurrence of expanded) {
+      if (
+        excludeOccurrence &&
+        candidate.id === excludeOccurrence.seriesId &&
+        occurrence.occurrenceStart.getTime() === excludeOccurrence.occurrenceStart.getTime()
+      ) {
+        continue;
+      }
+      // Advance the proposed-interval pointer past intervals ending at/before
+      // the candidate occurrence's start.
+      while (i < sorted.length && sorted[i].end.getTime() <= occurrence.start.getTime()) i++;
+      if (i >= sorted.length) break;
+      if (sorted[i].start.getTime() < occurrence.end.getTime()) {
+        const key = `${candidate.id}:${occurrence.occurrenceStart.toISOString()}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          conflicting.push({
+            seriesId: candidate.id,
+            title: candidate.title,
+            occurrenceStart: occurrence.occurrenceStart.toISOString(),
+            start: occurrence.start.toISOString(),
+            end: occurrence.end.toISOString(),
+            siteId: candidate.site_id,
+            roomId: candidate.room_id,
+            reserveWholeSite: candidate.reserve_whole_site,
+          });
+        }
+      }
+    }
+  }
+  conflicting.sort((a, b) => a.start.localeCompare(b.start));
+  return conflicting.slice(0, MAX_REPORTED_CONFLICTS);
+}
+
+/**
+ * Expands a series over its whole (capped) lifetime and returns the booking
+ * conflicts of its occurrences against the other series of the organization.
+ * Used by the series-level write paths (create/update/config/split).
+ * @param organizationId - The organization the series belongs to.
+ * @param series - The series (already saved) to check.
+ * @param excludeSeriesId - The series itself to skip (pass series.id).
+ * @returns The conflicting occurrences, sorted by start.
+ */
+async function findSeriesBookingConflicts(
+  organizationId: string,
+  series: EventSeries,
+  excludeSeriesId: number,
+): Promise<BookingConflict[]> {
+  const booking: BookingRule = {
+    siteId: series.site_id,
+    roomId: series.room_id,
+    reserveWholeSite: series.reserve_whole_site,
+  };
+  if (!booking.siteId) return [];
+  const rangeStart = series.start;
+  const rangeEnd = new Date(series.start.getTime() + MAX_OCCURRENCE_RANGE_MS);
+  const exceptions = (await fetchExceptionRules([series.id])).get(series.id) ?? [];
+  const intervals = expandOccurrences(toRule(series), exceptions, rangeStart, rangeEnd);
+  return findBookingConflicts(organizationId, booking, intervals, excludeSeriesId);
+}
+
+/**
+ * Finds the booking conflicts of a single occurrence interval (used by
+ * reschedule and materialize). The occurrence's own series is included, so
+ * a reschedule into another occurrence of the same series is also reported;
+ * only the occurrence itself is excluded.
+ */
+async function findOccurrenceBookingConflicts(
+  organizationId: string,
+  series: EventSeries,
+  occurrenceStart: Date,
+  start: Date,
+  end: Date,
+): Promise<BookingConflict[]> {
+  const booking: BookingRule = {
+    siteId: series.site_id,
+    roomId: series.room_id,
+    reserveWholeSite: series.reserve_whole_site,
+  };
+  return findBookingConflicts(organizationId, booking, [{ occurrenceStart, start, end }], null, {
+    seriesId: series.id,
+    occurrenceStart,
+  });
+}
+
+/**
+ * Validates the site/room part of a series push/update and derives the site
+ * from the room when only a room is given. Returns the column updates to
+ * apply (only for the fields present in `data`).
+ */
+async function resolveBookingUpdates(data: {
+  siteId?: string | null;
+  roomId?: string | null;
+  reserveWholeSite?: boolean;
+}): Promise<{
+  site_id?: string | null;
+  room_id?: string | null;
+  reserve_whole_site?: boolean;
+}> {
+  const updates: {
+    site_id?: string | null;
+    room_id?: string | null;
+    reserve_whole_site?: boolean;
+  } = {};
+  if (data.siteId !== undefined && data.siteId !== null) {
+    const site = await db
+      .selectFrom('sites')
+      .select('id')
+      .where('id', '=', data.siteId)
+      .executeTakeFirst();
+    if (!site) {
+      throw notFound(`Site ${data.siteId} not found!`);
+    }
+  }
+  if (data.roomId !== undefined && data.roomId !== null) {
+    const room = await db
+      .selectFrom('rooms')
+      .select(['id', 'site_id'])
+      .where('id', '=', data.roomId)
+      .executeTakeFirst();
+    if (!room) {
+      throw notFound(`Room ${data.roomId} not found!`);
+    }
+    // Derive the site from the room when no explicit site is given.
+    if (data.siteId === undefined) {
+      updates.site_id = room.site_id;
+    }
+  }
+  if (data.siteId !== undefined) updates.site_id = data.siteId;
+  if (data.roomId !== undefined) updates.room_id = data.roomId;
+  if (data.reserveWholeSite !== undefined) updates.reserve_whole_site = data.reserveWholeSite;
+  // Clearing the room also clears a whole-site reservation.
+  if (data.roomId === null) updates.reserve_whole_site = false;
+  return updates;
+}
+
 async function attachAssignments(slots: EventWorkRole[]): Promise<EventWorkRoleResponse[]> {
   if (slots.length === 0) return [];
 
@@ -567,7 +926,7 @@ export async function listEventSeries(
     query = query.where('calendar_id', '=', calendarId);
   }
   const rows = await query.execute();
-  return rows.map(serializeSeries);
+  return rows.map(row => serializeSeries(row));
 }
 
 export async function getEventSeries(seriesId: number): Promise<EventSeriesResponse> {
@@ -580,6 +939,7 @@ export async function createEventSeries(data: EventSeriesPush): Promise<EventSer
   const timezone = await resolveTimezone(data.calendarId, data.timezone);
   const start = new Date(data.start);
   const rrule = data.recurrence ? buildRruleString({ start, timezone }, data.recurrence) : null;
+  const booking = await resolveBookingUpdates(data);
 
   const series = await db
     .insertInto('event_series')
@@ -593,11 +953,22 @@ export async function createEventSeries(data: EventSeriesPush): Promise<EventSer
       rrule,
       timezone,
       is_visible: data.isVisible ?? true,
+      ...(booking.site_id !== undefined ? { site_id: booking.site_id } : {}),
+      ...(booking.room_id !== undefined ? { room_id: booking.room_id } : {}),
+      ...(booking.reserve_whole_site !== undefined
+        ? { reserve_whole_site: booking.reserve_whole_site }
+        : {}),
     })
     .returningAll()
     .executeTakeFirstOrThrow();
 
-  return serializeSeries(series);
+  const organization = await getCalendarOrganizationOrThrow(series.calendar_id);
+  const conflicts = await findSeriesBookingConflicts(
+    organization.organizationId,
+    series,
+    series.id,
+  );
+  return serializeSeries(series, conflicts);
 }
 
 export async function updateEventSeries(
@@ -632,6 +1003,8 @@ export async function updateEventSeries(
         : null
       : existing.rrule;
 
+  const booking = await resolveBookingUpdates(data);
+
   // Exceptions are keyed by occurrence start; changing the recurrence (start,
   // rule or timezone) invalidates them.
   const recurrenceChanged =
@@ -639,7 +1012,7 @@ export async function updateEventSeries(
     timezone !== existing.timezone ||
     rrule !== existing.rrule;
 
-  return db.transaction().execute(async tx => {
+  const updated = await db.transaction().execute(async tx => {
     if (recurrenceChanged) {
       // Clear cancel/reschedule flags on materialized occurrences; the
       // occurrence_start keys no longer match the new recurrence.
@@ -655,7 +1028,7 @@ export async function updateEventSeries(
         .execute();
     }
 
-    const updated = await tx
+    return tx
       .updateTable('event_series')
       .set({
         ...(data.title !== undefined ? { title: data.title } : {}),
@@ -667,14 +1040,23 @@ export async function updateEventSeries(
         rrule,
         timezone,
         ...(data.isVisible !== undefined ? { is_visible: data.isVisible } : {}),
+        ...booking,
         updated_at: new Date(),
       })
       .where('id', '=', seriesId)
       .returningAll()
       .executeTakeFirstOrThrow();
-
-    return serializeSeries(updated);
   });
+
+  // Conflict check runs outside the transaction (single-connection databases
+  // like PGlite deadlock when db is used inside the transaction callback).
+  const organization = await getCalendarOrganizationOrThrow(updated.calendar_id);
+  const conflicts = await findSeriesBookingConflicts(
+    organization.organizationId,
+    updated,
+    seriesId,
+  );
+  return serializeSeries(updated, conflicts);
 }
 
 export async function deleteEventSeries(seriesId: number): Promise<void> {
@@ -770,7 +1152,7 @@ export async function splitEventSeries(
   );
   const isFirstOccurrence = earlierOccurrences.length === 0;
 
-  return db.transaction().execute(async tx => {
+  const result = await db.transaction().execute(async tx => {
     if (isFirstOccurrence) {
       const updated = await tx
         .updateTable('event_series')
@@ -803,7 +1185,7 @@ export async function splitEventSeries(
         .where('event_series_id', '=', seriesId)
         .where('occurrence_start', '>=', occurrenceStart)
         .execute();
-      return serializeSeries(updated);
+      return updated;
     }
 
     // Truncate the original series so it ends just before the split
@@ -846,8 +1228,16 @@ export async function splitEventSeries(
       })
       .returningAll()
       .executeTakeFirstOrThrow();
-    return serializeSeries(created);
+    return created;
   });
+
+  const organization = await getCalendarOrganizationOrThrow(result.calendar_id);
+  const conflicts = await findSeriesBookingConflicts(
+    organization.organizationId,
+    result,
+    result.id,
+  );
+  return serializeSeries(result, conflicts);
 }
 
 // --- Occurrences ---
@@ -909,17 +1299,385 @@ async function fetchMySlotAssignments(
   return assignments;
 }
 
+/** Raw slot row with its work role name, as loaded for status computation. */
+interface SlotStatusRow {
+  id: number;
+  event_series_id: number;
+  event_occurrence_id: number | null;
+  title: string;
+  is_critical: boolean;
+  work_role_id: number | null;
+  work_role_name: string | null;
+}
+
+/** Team IDs of the teams the user leads or manages (manager toggle). */
+async function fetchManagedTeamIds(userId: string): Promise<Set<string>> {
+  const rows = await db
+    .selectFrom('team_members')
+    .select('team_id')
+    .where('user_id', '=', userId)
+    .where('is_manager', '=', true)
+    .union(db.selectFrom('teams').select('id as team_id').where('team_leader_id', '=', userId))
+    .execute();
+  return new Set(rows.map(r => r.team_id));
+}
+
+/** Maps each series ID to the IDs of all teams connected to it. */
+async function fetchSeriesTeamIds(seriesIds: number[]): Promise<Map<number, string[]>> {
+  const result = new Map<number, string[]>();
+  if (seriesIds.length === 0) return result;
+  const rows = await db
+    .selectFrom('event_series_teams')
+    .select(['event_series_id', 'team_id'])
+    .where('event_series_id', 'in', seriesIds)
+    .execute();
+  for (const row of rows) {
+    const list = result.get(row.event_series_id) ?? [];
+    list.push(row.team_id);
+    result.set(row.event_series_id, list);
+  }
+  return result;
+}
+
+/** Maps each team ID to the IDs of the work roles assigned to it. */
+async function fetchTeamWorkRoleIds(teamIds: string[]): Promise<Map<string, number[]>> {
+  const result = new Map<string, number[]>();
+  if (teamIds.length === 0) return result;
+  const rows = await db
+    .selectFrom('team_work_roles')
+    .select(['team_id', 'work_role_id'])
+    .where('team_id', 'in', teamIds)
+    .execute();
+  for (const row of rows) {
+    const list = result.get(row.team_id) ?? [];
+    list.push(row.work_role_id);
+    result.set(row.team_id, list);
+  }
+  return result;
+}
+
+/** Per-user series management context used for the manager flags and scope. */
+interface SeriesManagementContext {
+  /** Series IDs the user manages via a connected team (leader or manager member). */
+  managedSeriesIds: Set<number>;
+  /** seriesId -> work role IDs the user manages for that series. */
+  managedWorkRolesBySeries: Map<number, Set<number>>;
+}
+
+async function buildSeriesManagementContext(
+  seriesIds: number[],
+  userId: string,
+): Promise<SeriesManagementContext> {
+  const context: SeriesManagementContext = {
+    managedSeriesIds: new Set(),
+    managedWorkRolesBySeries: new Map(),
+  };
+  const managedTeamIds = await fetchManagedTeamIds(userId);
+  if (managedTeamIds.size === 0) return context;
+  const seriesTeamIds = await fetchSeriesTeamIds(seriesIds);
+  const teamWorkRoleIds = await fetchTeamWorkRoleIds([...managedTeamIds]);
+  for (const [seriesId, teamIds] of seriesTeamIds) {
+    const managed = teamIds.filter(teamId => managedTeamIds.has(teamId));
+    if (managed.length === 0) continue;
+    context.managedSeriesIds.add(seriesId);
+    const roles = new Set<number>();
+    for (const teamId of managed) {
+      for (const workRoleId of teamWorkRoleIds.get(teamId) ?? []) {
+        roles.add(workRoleId);
+      }
+    }
+    context.managedWorkRolesBySeries.set(seriesId, roles);
+  }
+  return context;
+}
+
+// --- Notification helpers ---
+
+/** The users managing a series: team leaders and manager members of connected teams. */
+export async function fetchSeriesManagerIds(seriesId: number): Promise<string[]> {
+  const teamRows = await db
+    .selectFrom('event_series_teams')
+    .select('team_id')
+    .where('event_series_id', '=', seriesId)
+    .execute();
+  if (teamRows.length === 0) return [];
+  const teamIds = teamRows.map(row => row.team_id);
+  const teams = await db
+    .selectFrom('teams')
+    .select(['id', 'team_leader_id'])
+    .where('id', 'in', teamIds)
+    .execute();
+  const managerRows = await db
+    .selectFrom('team_members')
+    .select('user_id')
+    .where('team_id', 'in', teamIds)
+    .where('is_manager', '=', true)
+    .execute();
+  const ids = new Set<string>();
+  for (const team of teams) {
+    if (team.team_leader_id) ids.add(team.team_leader_id);
+  }
+  for (const row of managerRows) {
+    ids.add(row.user_id);
+  }
+  return [...ids];
+}
+
+/**
+ * Users assigned to a slot visible for an occurrence: the occurrence-level
+ * slots of the materialized occurrence plus the parent (series-wide) slots,
+ * which cover every occurrence.
+ */
+async function fetchOccurrenceParticipantIds(
+  seriesId: number,
+  occurrenceId: number | null,
+): Promise<string[]> {
+  const rows = await db
+    .selectFrom('event_work_roles')
+    .innerJoin(
+      'event_work_role_assignments',
+      'event_work_role_assignments.event_work_role_id',
+      'event_work_roles.id',
+    )
+    .select('event_work_role_assignments.user_id')
+    .where('event_work_roles.event_series_id', '=', seriesId)
+    .where(eb =>
+      eb.or([
+        eb('event_work_roles.event_occurrence_id', 'is', null),
+        eb('event_work_roles.event_occurrence_id', '=', occurrenceId ?? -1),
+      ]),
+    )
+    .execute();
+  return [...new Set(rows.map(row => row.user_id))];
+}
+
+/** All users assigned to any slot of the series. */
+async function fetchSeriesParticipantIds(seriesId: number): Promise<string[]> {
+  const rows = await db
+    .selectFrom('event_work_role_assignments')
+    .innerJoin(
+      'event_work_roles',
+      'event_work_roles.id',
+      'event_work_role_assignments.event_work_role_id',
+    )
+    .select('event_work_role_assignments.user_id')
+    .where('event_work_roles.event_series_id', '=', seriesId)
+    .execute();
+  return [...new Set(rows.map(row => row.user_id))];
+}
+
+/** Display name of a slot: the linked work role's name, falling back to the slot title. */
+async function getSlotRoleName(slot: {
+  title: string;
+  work_role_id: number | null;
+}): Promise<string> {
+  if (slot.work_role_id === null) return slot.title;
+  const row = await db
+    .selectFrom('work_roles')
+    .select('name')
+    .where('id', '=', slot.work_role_id)
+    .executeTakeFirst();
+  return row?.name ?? slot.title;
+}
+
+/** The occurrence start of a slot, when it is an occurrence-level slot. */
+async function getSlotOccurrenceStart(slot: {
+  event_occurrence_id: number | null;
+}): Promise<Date | null> {
+  if (slot.event_occurrence_id === null) return null;
+  const occ = await db
+    .selectFrom('event_occurrences')
+    .select('occurrence_start')
+    .where('id', '=', slot.event_occurrence_id)
+    .executeTakeFirst();
+  return occ?.occurrence_start ?? null;
+}
+
+/**
+ * Sends one notification per recipient inside the caller's transaction.
+ * Recipients are deduplicated; the author (when given) is excluded.
+ */
+async function notifyUsers(
+  tx: Transaction<Database>,
+  recipientIds: Iterable<string>,
+  excludeUserId: string | null,
+  key: string,
+  params: Record<string, unknown>,
+  organizationId: string,
+): Promise<void> {
+  const recipients = new Set(recipientIds);
+  if (excludeUserId) recipients.delete(excludeUserId);
+  for (const userId of recipients) {
+    await createNotificationInTx(tx, userId, key, params, organizationId);
+  }
+}
+
+/**
+ * Fetches info slot rows (parent + occurrence-level) for the given series so
+ * the occurrences list can report per-occurrence info slot summary counts
+ * without extra queries per occurrence.
+ */
+async function fetchInfoSlotSummaryData(seriesIds: number[]): Promise<{
+  forOccurrence: (seriesId: number, occurrenceId: number | null) => { value: string | null }[];
+}> {
+  const parentBySeries = new Map<number, { value: string | null }[]>();
+  const occurrenceByOccurrence = new Map<number, { value: string | null }[]>();
+  if (seriesIds.length > 0) {
+    const parentRows = await db
+      .selectFrom('event_info_slots')
+      .select(['event_series_id', 'value'])
+      .where('event_series_id', 'in', seriesIds)
+      .where('event_occurrence_id', 'is', null)
+      .execute();
+    for (const row of parentRows) {
+      const list = parentBySeries.get(row.event_series_id) ?? [];
+      list.push({ value: row.value });
+      parentBySeries.set(row.event_series_id, list);
+    }
+    const occRows = await db
+      .selectFrom('event_info_slots')
+      .select(['event_occurrence_id', 'value'])
+      .where('event_series_id', 'in', seriesIds)
+      .where('event_occurrence_id', 'is not', null)
+      .execute();
+    for (const row of occRows) {
+      const id = row.event_occurrence_id as number;
+      const list = occurrenceByOccurrence.get(id) ?? [];
+      list.push({ value: row.value });
+      occurrenceByOccurrence.set(id, list);
+    }
+  }
+  return {
+    forOccurrence: (seriesId, occurrenceId) => {
+      if (occurrenceId !== null) {
+        const occSlots = occurrenceByOccurrence.get(occurrenceId);
+        if (occSlots !== undefined) return occSlots;
+      }
+      return parentBySeries.get(seriesId) ?? [];
+    },
+  };
+}
+
+/**
+ * Loads all slots of the given series (parent and occurrence-level) plus the
+ * assignment count per slot, for building per-occurrence slot status lists.
+ */
+async function fetchSlotStatusData(seriesIds: number[]): Promise<{
+  parentSlotsBySeries: Map<number, SlotStatusRow[]>;
+  occurrenceSlotsByOccurrence: Map<number, SlotStatusRow[]>;
+  assigneeCountBySlot: Map<number, number>;
+}> {
+  const parentSlotsBySeries = new Map<number, SlotStatusRow[]>();
+  const occurrenceSlotsByOccurrence = new Map<number, SlotStatusRow[]>();
+  const assigneeCountBySlot = new Map<number, number>();
+  if (seriesIds.length === 0) {
+    return { parentSlotsBySeries, occurrenceSlotsByOccurrence, assigneeCountBySlot };
+  }
+  const slotRows = await db
+    .selectFrom('event_work_roles')
+    .leftJoin('work_roles', 'work_roles.id', 'event_work_roles.work_role_id')
+    .select([
+      'event_work_roles.id',
+      'event_work_roles.event_series_id',
+      'event_work_roles.event_occurrence_id',
+      'event_work_roles.title',
+      'event_work_roles.is_critical',
+      'event_work_roles.work_role_id',
+      'work_roles.name as work_role_name',
+    ])
+    .where('event_work_roles.event_series_id', 'in', seriesIds)
+    .execute();
+  for (const row of slotRows) {
+    if (row.event_occurrence_id === null) {
+      const list = parentSlotsBySeries.get(row.event_series_id) ?? [];
+      list.push(row);
+      parentSlotsBySeries.set(row.event_series_id, list);
+    } else {
+      const list = occurrenceSlotsByOccurrence.get(row.event_occurrence_id) ?? [];
+      list.push(row);
+      occurrenceSlotsByOccurrence.set(row.event_occurrence_id, list);
+    }
+  }
+  const slotIds = slotRows.map(r => r.id);
+  if (slotIds.length > 0) {
+    const countRows = await db
+      .selectFrom('event_work_role_assignments')
+      .select(['event_work_role_id', db.fn.countAll().as('count')])
+      .where('event_work_role_id', 'in', slotIds)
+      .groupBy('event_work_role_id')
+      .execute();
+    for (const row of countRows) {
+      assigneeCountBySlot.set(row.event_work_role_id, Number(row.count));
+    }
+  }
+  return { parentSlotsBySeries, occurrenceSlotsByOccurrence, assigneeCountBySlot };
+}
+
+/**
+ * Computes the slot status indicators and managed-critical warnings for one
+ * occurrence. Occurrence-level slots are used when the occurrence is
+ * materialized and has its own slots; otherwise the parent (series-level)
+ * slots apply.
+ */
+function computeOccurrenceEnrichment(
+  seriesId: number,
+  occurrenceId: number | null,
+  isParticipant: boolean,
+  isManager: boolean,
+  management: SeriesManagementContext | null,
+  slotData: {
+    parentSlotsBySeries: Map<number, SlotStatusRow[]>;
+    occurrenceSlotsByOccurrence: Map<number, SlotStatusRow[]>;
+    assigneeCountBySlot: Map<number, number>;
+  },
+): OccurrenceEnrichment {
+  const occurrenceSlots =
+    occurrenceId !== null ? (slotData.occurrenceSlotsByOccurrence.get(occurrenceId) ?? []) : [];
+  const slots =
+    occurrenceSlots.length > 0
+      ? occurrenceSlots
+      : (slotData.parentSlotsBySeries.get(seriesId) ?? []);
+  const workRoleSlots: OccurrenceSlotStatus[] = slots.map(slot => ({
+    slotId: slot.id,
+    title: slot.title,
+    workRoleId: slot.work_role_id,
+    workRoleName: slot.work_role_name,
+    isCritical: slot.is_critical,
+    assigneeCount: slotData.assigneeCountBySlot.get(slot.id) ?? 0,
+  }));
+  const managedRoles = management?.managedWorkRolesBySeries.get(seriesId);
+  const managedUnfilledCriticalSlots = workRoleSlots
+    .filter(
+      slot =>
+        slot.isCritical &&
+        slot.assigneeCount === 0 &&
+        slot.workRoleId !== null &&
+        managedRoles?.has(slot.workRoleId),
+    )
+    .map(slot => slot.title);
+  return {
+    isParticipant,
+    isManager,
+    workRoleSlots,
+    managedUnfilledCriticalSlots,
+    infoSlotCount: 0,
+    filledInfoSlotCount: 0,
+  };
+}
+
 /**
  * Lists the occurrences of all visible series within a time range, optionally
  * narrowed down by organization, calendar, location, team and scope. The
  * `mine` scope keeps only occurrences the user is assigned to (via a
  * series-wide or occurrence-scoped work role slot); the `team` scope keeps only
- * series linked to a team the user belongs to.
+ * series linked to a team the user belongs to; the `involved` scope keeps only
+ * occurrences the user is a participant of or a manager of. Every occurrence
+ * carries participant/manager flags and work role slot status indicators.
  * @param rangeStart - Start of the range (inclusive).
  * @param rangeEnd - End of the range (inclusive).
  * @param calendarId - Optional calendar to restrict the series to.
  * @param filter - Optional location, team and scope filters.
- * @param userId - The current user, required for the `mine` and `team` scopes.
+ * @param userId - The current user, required for the `mine`, `team` and `involved` scopes.
  * @param organizationId - Optional organization to restrict the series to.
  * @returns The occurrences in the range, sorted by start.
  */
@@ -972,34 +1730,40 @@ export async function getOccurrences(
       .groupBy('event_series.id');
   }
   const series = await query.orderBy('event_series.start', 'asc').execute();
-  const exceptionsBySeries = await fetchExceptionRules(series.map(row => row.id));
+  const seriesIds = series.map(row => row.id);
+  const exceptionsBySeries = await fetchExceptionRules(seriesIds);
   const organizationsByCalendar = await getCalendarOrganizations(
     series.map(row => row.calendar_id),
   );
-  const myAssignments =
-    filter?.scope === 'mine' && userId
-      ? await fetchMySlotAssignments(
-          series.map(row => row.id),
-          userId,
-        )
-      : null;
+  const myAssignments = userId ? await fetchMySlotAssignments(seriesIds, userId) : null;
+  const management = userId ? await buildSeriesManagementContext(seriesIds, userId) : null;
 
   const occurrences: EventOccurrenceResponse[] = [];
-  const allExpanded: { series: EventSeries; occurrence: ExpandedOccurrence }[] = [];
+  const allExpanded: {
+    series: EventSeries;
+    occurrence: ExpandedOccurrence;
+    isParticipant: boolean;
+    isManager: boolean;
+  }[] = [];
   for (const row of series) {
     const exceptions = exceptionsBySeries.get(row.id) ?? [];
     const organization = organizationsByCalendar.get(row.calendar_id);
     if (!organization) {
       throw new Error(`Organization for calendar ${row.calendar_id} not found!`);
     }
+    const isManager = management?.managedSeriesIds.has(row.id) ?? false;
     for (const occurrence of expandOccurrences(toRule(row), exceptions, rangeStart, rangeEnd)) {
-      if (myAssignments) {
-        const key = `${row.id}:${occurrence.occurrenceStart.toISOString()}`;
-        if (!myAssignments.seriesWide.has(row.id) && !myAssignments.perOccurrence.has(key)) {
-          continue;
-        }
+      const key = `${row.id}:${occurrence.occurrenceStart.toISOString()}`;
+      const isParticipant = myAssignments
+        ? myAssignments.seriesWide.has(row.id) || myAssignments.perOccurrence.has(key)
+        : false;
+      if (filter?.scope === 'mine' && !isParticipant) {
+        continue;
       }
-      allExpanded.push({ series: row, occurrence });
+      if (filter?.scope === 'involved' && !isParticipant && !isManager) {
+        continue;
+      }
+      allExpanded.push({ series: row, occurrence, isParticipant, isManager });
     }
   }
 
@@ -1010,25 +1774,51 @@ export async function getOccurrences(
       occurrenceStart: e.occurrence.occurrenceStart,
     })),
   );
+  const slotData = await fetchSlotStatusData(seriesIds);
+  const infoSlotData = await fetchInfoSlotSummaryData(seriesIds);
 
-  for (const { series: row, occurrence } of allExpanded) {
+  for (const { series: row, occurrence, isParticipant, isManager } of allExpanded) {
     const organization = organizationsByCalendar.get(row.calendar_id);
     if (!organization) {
       throw new Error(`Organization for calendar ${row.calendar_id} not found!`);
     }
     const key = `${row.id}:${occurrence.occurrenceStart.toISOString()}`;
-    occurrences.push(
-      serializeOccurrence(row, occurrence, organization, occurrenceIds.get(key) ?? null),
+    const occurrenceId = occurrenceIds.get(key) ?? null;
+    const enrichment = computeOccurrenceEnrichment(
+      row.id,
+      occurrenceId,
+      isParticipant,
+      isManager,
+      management,
+      slotData,
     );
+    const infoSlots = infoSlotData.forOccurrence(row.id, occurrenceId);
+    enrichment.infoSlotCount = infoSlots.length;
+    enrichment.filledInfoSlotCount = infoSlots.filter(
+      s => s.value !== null && s.value !== '',
+    ).length;
+    occurrences.push(serializeOccurrence(row, occurrence, organization, occurrenceId, enrichment));
   }
   occurrences.sort((a, b) => a.start.localeCompare(b.start));
-  return occurrences;
+  // Staffing filters: only non-cancelled occurrences with unfilled slots.
+  const staffingFiltered = occurrences.filter(o => {
+    if (o.isCancelled) return false;
+    if (filter?.criticalOnly) {
+      return o.workRoleSlots.some(s => s.isCritical && s.assigneeCount === 0);
+    }
+    if (filter?.unfilledOnly) {
+      return o.workRoleSlots.some(s => s.assigneeCount === 0);
+    }
+    return true;
+  });
+  return filter?.unfilledOnly || filter?.criticalOnly ? staffingFiltered : occurrences;
 }
 
 export async function getSeriesOccurrences(
   seriesId: number,
   rangeStart: Date,
   rangeEnd: Date,
+  userId?: string,
 ): Promise<EventOccurrenceResponse[]> {
   logger.trace('eventService.getSeriesOccurrences');
   validateRange(rangeStart, rangeEnd);
@@ -1040,10 +1830,185 @@ export async function getSeriesOccurrences(
   const occurrenceIds = await lookupOccurrenceIds(
     expanded.map(o => ({ seriesId, occurrenceStart: o.occurrenceStart })),
   );
+  const myAssignments = userId ? await fetchMySlotAssignments([seriesId], userId) : null;
+  const management = userId ? await buildSeriesManagementContext([seriesId], userId) : null;
+  const slotData = await fetchSlotStatusData([seriesId]);
   return expanded.map(occurrence => {
     const key = `${seriesId}:${occurrence.occurrenceStart.toISOString()}`;
-    return serializeOccurrence(series, occurrence, organization, occurrenceIds.get(key) ?? null);
+    const occurrenceId = occurrenceIds.get(key) ?? null;
+    const isParticipant = myAssignments
+      ? myAssignments.seriesWide.has(seriesId) || myAssignments.perOccurrence.has(key)
+      : false;
+    const isManager = management?.managedSeriesIds.has(seriesId) ?? false;
+    const enrichment = computeOccurrenceEnrichment(
+      seriesId,
+      occurrenceId,
+      isParticipant,
+      isManager,
+      management,
+      slotData,
+    );
+    return serializeOccurrence(series, occurrence, organization, occurrenceId, enrichment);
   });
+}
+
+/** A work role slot of an occurrence that a user is assigned to. */
+export interface UserEventAssignmentRole {
+  slotId: number;
+  title: string;
+  workRoleId: number | null;
+  workRoleName: string | null;
+  isCritical: boolean;
+}
+
+/** An occurrence together with the slots the user is assigned to. */
+export interface UserEventAssignment {
+  occurrenceId: number | null;
+  seriesId: number;
+  title: string;
+  organizationId: string;
+  organizationName: string;
+  occurrenceStart: string;
+  start: string;
+  end: string;
+  isRescheduled: boolean;
+  isCancelled: boolean;
+  /** The effective work role slots of this occurrence the user is assigned to. */
+  roles: UserEventAssignmentRole[];
+}
+
+export interface PaginatedUserEventAssignments {
+  items: UserEventAssignment[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+/**
+ * Lists the occurrences of an organization's visible series within a time
+ * range that the given user is assigned to (via an effective work role slot),
+ * together with the slots (roles) they are assigned to. Paginated.
+ * @param organizationId - The organization to restrict the series to.
+ * @param targetUserId - The user whose assignments are listed.
+ * @param rangeStart - Start of the range (inclusive).
+ * @param rangeEnd - End of the range (inclusive).
+ * @param page - Zero-based page number.
+ * @param limit - Page size.
+ * @returns The paginated assignments, sorted by start.
+ */
+export async function getUserEventAssignments(
+  organizationId: string,
+  targetUserId: string,
+  rangeStart: Date,
+  rangeEnd: Date,
+  page: number,
+  limit: number,
+): Promise<PaginatedUserEventAssignments> {
+  logger.trace('eventService.getUserEventAssignments');
+  validateRange(rangeStart, rangeEnd);
+
+  // The target user must belong to the organization.
+  const membership = await db
+    .selectFrom('user_organizations')
+    .select('id')
+    .where('user_id', '=', targetUserId)
+    .where('organization_id', '=', organizationId)
+    .executeTakeFirst();
+  if (!membership) {
+    throw notFound(`User ${targetUserId} is not a member of organization ${organizationId}!`);
+  }
+
+  const series = await db
+    .selectFrom('event_series')
+    .selectAll('event_series')
+    .innerJoin('calendars', 'calendars.id', 'event_series.calendar_id')
+    .where('calendars.organization_id', '=', organizationId)
+    .where('is_visible', '=', true)
+    .orderBy('event_series.start', 'asc')
+    .execute();
+  const seriesIds = series.map(row => row.id);
+  const exceptionsBySeries = await fetchExceptionRules(seriesIds);
+  const organizationsByCalendar = await getCalendarOrganizations(
+    series.map(row => row.calendar_id),
+  );
+
+  const expanded: { series: EventSeries; occurrence: ExpandedOccurrence }[] = [];
+  for (const row of series) {
+    const exceptions = exceptionsBySeries.get(row.id) ?? [];
+    for (const occurrence of expandOccurrences(toRule(row), exceptions, rangeStart, rangeEnd)) {
+      expanded.push({ series: row, occurrence });
+    }
+  }
+  const occurrenceIds = await lookupOccurrenceIds(
+    expanded.map(e => ({ seriesId: e.series.id, occurrenceStart: e.occurrence.occurrenceStart })),
+  );
+
+  // All slots of the involved series plus the target user's assignments on them.
+  const slotData = await fetchSlotStatusData(seriesIds);
+  const allSlotIds = [
+    ...[...slotData.parentSlotsBySeries.values()].flat().map(s => s.id),
+    ...[...slotData.occurrenceSlotsByOccurrence.values()].flat().map(s => s.id),
+  ];
+  const assignedSlotIds = new Set<number>();
+  if (allSlotIds.length > 0) {
+    const assignmentRows = await db
+      .selectFrom('event_work_role_assignments')
+      .select('event_work_role_id')
+      .where('user_id', '=', targetUserId)
+      .where('event_work_role_id', 'in', allSlotIds)
+      .execute();
+    for (const row of assignmentRows) {
+      assignedSlotIds.add(row.event_work_role_id);
+    }
+  }
+
+  const items: UserEventAssignment[] = [];
+  for (const { series: row, occurrence } of expanded) {
+    const organization = organizationsByCalendar.get(row.calendar_id);
+    if (!organization) {
+      throw new Error(`Organization for calendar ${row.calendar_id} not found!`);
+    }
+    const key = `${row.id}:${occurrence.occurrenceStart.toISOString()}`;
+    const occurrenceId = occurrenceIds.get(key) ?? null;
+    // Effective slots: occurrence-level when the occurrence is materialized
+    // and has its own slots, otherwise the parent (series-level) slots.
+    const occurrenceSlots =
+      occurrenceId !== null ? (slotData.occurrenceSlotsByOccurrence.get(occurrenceId) ?? []) : [];
+    const slots =
+      occurrenceSlots.length > 0
+        ? occurrenceSlots
+        : (slotData.parentSlotsBySeries.get(row.id) ?? []);
+    const roles: UserEventAssignmentRole[] = slots
+      .filter(slot => assignedSlotIds.has(slot.id))
+      .map(slot => ({
+        slotId: slot.id,
+        title: slot.title,
+        workRoleId: slot.work_role_id,
+        workRoleName: slot.work_role_name,
+        isCritical: slot.is_critical,
+      }));
+    if (roles.length === 0) continue;
+    items.push({
+      occurrenceId,
+      seriesId: row.id,
+      title: row.title,
+      organizationId: organization.organizationId,
+      organizationName: organization.organizationName,
+      occurrenceStart: occurrence.occurrenceStart.toISOString(),
+      start: occurrence.start.toISOString(),
+      end: occurrence.end.toISOString(),
+      isRescheduled: occurrence.exception?.overrideStart != null,
+      isCancelled: occurrence.exception?.isCancelled ?? false,
+      roles,
+    });
+  }
+  items.sort((a, b) => a.start.localeCompare(b.start));
+  return {
+    items: items.slice(page * limit, page * limit + limit),
+    total: items.length,
+    page,
+    limit,
+  };
 }
 
 export async function getOccurrenceDetail(
@@ -1113,6 +2078,20 @@ export async function getOccurrenceDetail(
     return !inheritedParentIds.has(j.id);
   });
 
+  // Info slots: occurrence-level (inherited) + parent-level, plus the missing ones.
+  const parentInfoSlots = await listEventInfoSlots(seriesId, { parentOnly: true });
+  const occurrenceInfoSlots =
+    occurrenceId !== null
+      ? await listEventInfoSlots(seriesId, { occurrenceId, occurrenceOnly: true })
+      : [];
+  const inheritedParentInfoSlotIds = new Set(
+    occurrenceInfoSlots
+      .map(s => s.inheritedFromInfoSlotId)
+      .filter((id): id is number => id !== null),
+  );
+  const missingParentInfoSlots = parentInfoSlots.filter(s => !inheritedParentInfoSlotIds.has(s.id));
+  const infoSlots = occurrenceId !== null ? occurrenceInfoSlots : parentInfoSlots;
+
   const comments = await listEventComments(seriesId, occurrenceStart);
   const readiness = await computeReadiness(seriesId, occurrenceStart);
 
@@ -1135,11 +2114,21 @@ export async function getOccurrenceDetail(
       isRescheduled: exception?.overrideStart != null,
       isCancelled: exception?.isCancelled ?? false,
       exceptionId: exception?.id ?? null,
+      isParticipant: false,
+      isManager: false,
+      workRoleSlots: [],
+      managedUnfilledCriticalSlots: [],
+      infoSlotCount: infoSlots.length,
+      filledInfoSlotCount: infoSlots.filter(s => s.value !== null && s.value !== '').length,
     },
     workRoles: slots,
     parentWorkRoles,
     occurrenceWorkRoles,
     missingParentWorkRoles,
+    infoSlots,
+    parentInfoSlots,
+    occurrenceInfoSlots,
+    missingParentInfoSlots,
     comments,
     readiness,
   };
@@ -1197,17 +2186,48 @@ export async function getOccurrenceDetailByRef(
   return getOccurrenceDetail(seriesId, occurrenceStart);
 }
 
+/** Result of materializing an occurrence: its stable ID plus booking conflicts. */
+export interface MaterializeOccurrenceResult {
+  occurrenceId: number;
+  conflicts: BookingConflict[];
+}
+
 /**
  * Materializes an occurrence referenced by ref (numeric ID or tmp key) and
- * returns its stable ID. On first creation, parent slots and their
- * assignments are inherited.
+ * returns its stable ID together with the booking conflicts of the
+ * occurrence's effective time range. On first creation, parent slots and
+ * their assignments are inherited.
  * @param ref - The occurrence reference.
- * @returns The stable occurrence ID.
+ * @returns The stable occurrence ID and the booking conflicts.
  */
-export async function materializeOccurrenceByRef(ref: string): Promise<number> {
+export async function materializeOccurrenceByRef(
+  ref: string,
+): Promise<MaterializeOccurrenceResult> {
   logger.trace('eventService.materializeOccurrenceByRef');
   const { seriesId, occurrenceStart } = await resolveOccurrenceRef(ref);
-  return ensureOccurrenceMaterialized(seriesId, occurrenceStart);
+  const occurrenceId = await ensureOccurrenceMaterialized(seriesId, occurrenceStart);
+
+  const series = await getSeriesRowOrThrow(seriesId);
+  assertOccurrence(series, occurrenceStart);
+  const organization = await getCalendarOrganizationOrThrow(series.calendar_id);
+  const exceptions = (await fetchExceptionRules([seriesId])).get(seriesId) ?? [];
+  const exception = exceptions.find(
+    entry => entry.occurrenceStart.getTime() === occurrenceStart.getTime(),
+  );
+  let start = occurrenceStart;
+  let end = new Date(occurrenceStart.getTime() + series.duration_minutes * 60 * 1000);
+  if (exception?.overrideStart) {
+    start = exception.overrideStart;
+    end = exception.overrideEnd ?? new Date(start.getTime() + series.duration_minutes * 60 * 1000);
+  }
+  const conflicts = await findOccurrenceBookingConflicts(
+    organization.organizationId,
+    series,
+    occurrenceStart,
+    start,
+    end,
+  );
+  return { occurrenceId, conflicts };
 }
 
 /**
@@ -1248,6 +2268,13 @@ export async function createOccurrenceWorkRole(
   });
 }
 
+/**
+ * Resolves a slot referenced by an occurrence-scoped endpoint. When the given
+ * slot ID is a parent (series-level) slot - which the occurrence page shows
+ * before the occurrence is materialized - the occurrence-level copy inherited
+ * from that parent slot is resolved instead. Parent slots themselves are
+ * never returned here, so occurrence-scoped writes never modify them.
+ */
 async function getOccurrenceSlotOrThrow(occurrenceId: number, workRoleId: number) {
   const slot = await db
     .selectFrom('event_work_roles')
@@ -1255,20 +2282,42 @@ async function getOccurrenceSlotOrThrow(occurrenceId: number, workRoleId: number
     .where('id', '=', workRoleId)
     .where('event_occurrence_id', '=', occurrenceId)
     .executeTakeFirst();
-  if (!slot) {
+  if (slot) {
+    return slot;
+  }
+  const occurrence = await db
+    .selectFrom('event_occurrences')
+    .select('event_series_id')
+    .where('id', '=', occurrenceId)
+    .executeTakeFirst();
+  if (!occurrence) {
+    throw notFound(`Event occurrence ${occurrenceId} not found!`);
+  }
+  const inheritedCopy = await db
+    .selectFrom('event_work_roles')
+    .selectAll()
+    .where('event_series_id', '=', occurrence.event_series_id)
+    .where('event_occurrence_id', '=', occurrenceId)
+    .where('inherited_from_work_role_id', '=', workRoleId)
+    .executeTakeFirst();
+  if (!inheritedCopy) {
     throw notFound(`Work role slot ${workRoleId} not found in occurrence ${occurrenceId}!`);
   }
-  return slot;
+  return inheritedCopy;
 }
 
-/** Updates a slot that belongs to the occurrence (parent slots are rejected). */
+/**
+ * Updates a slot that belongs to the occurrence. When the given slot ID is a
+ * parent (series-level) slot, the occurrence-level copy inherited from it is
+ * updated instead; parent slots themselves are never modified here.
+ */
 export async function updateOccurrenceWorkRole(
   occurrenceId: number,
   workRoleId: number,
   data: EventWorkRoleUpdate,
 ): Promise<EventWorkRoleResponse> {
   const slot = await getOccurrenceSlotOrThrow(occurrenceId, workRoleId);
-  return updateEventWorkRole(slot.event_series_id, workRoleId, data);
+  return updateEventWorkRole(slot.event_series_id, slot.id, data);
 }
 
 /** Deletes a slot that belongs to the occurrence; parent slots are never deleted. */
@@ -1276,8 +2325,8 @@ export async function deleteOccurrenceWorkRole(
   occurrenceId: number,
   workRoleId: number,
 ): Promise<void> {
-  await getOccurrenceSlotOrThrow(occurrenceId, workRoleId);
-  await db.deleteFrom('event_work_roles').where('id', '=', workRoleId).execute();
+  const slot = await getOccurrenceSlotOrThrow(occurrenceId, workRoleId);
+  await db.deleteFrom('event_work_roles').where('id', '=', slot.id).execute();
 }
 
 /** Assigns a user to an occurrence slot. */
@@ -1287,7 +2336,7 @@ export async function assignUserToOccurrenceWorkRole(
   userId: string,
 ): Promise<EventWorkRoleAssignmentResponse> {
   const slot = await getOccurrenceSlotOrThrow(occurrenceId, workRoleId);
-  return assignUserToWorkRole(slot.event_series_id, workRoleId, userId);
+  return assignUserToWorkRole(slot.event_series_id, slot.id, userId);
 }
 
 /** Removes an assignment from an occurrence slot. */
@@ -1297,7 +2346,293 @@ export async function unassignUserFromOccurrenceWorkRole(
   assignmentId: number,
 ): Promise<void> {
   const slot = await getOccurrenceSlotOrThrow(occurrenceId, workRoleId);
-  return unassignUserFromWorkRole(slot.event_series_id, workRoleId, assignmentId);
+  // The occurrence page lists the parent slot's assignments before the
+  // occurrence is materialized: when the given assignment ID belongs to the
+  // parent slot, remove the copy inherited by this occurrence's slot instead.
+  const assignment = await db
+    .selectFrom('event_work_role_assignments')
+    .select(['id', 'event_work_role_id', 'user_id'])
+    .where('id', '=', assignmentId)
+    .executeTakeFirst();
+  let assignmentToDelete = assignmentId;
+  if (assignment && assignment.event_work_role_id !== slot.id) {
+    if (assignment.event_work_role_id !== workRoleId) {
+      throw notFound(`Assignment ${assignmentId} not found in occurrence ${occurrenceId}!`);
+    }
+    const inheritedAssignment = await db
+      .selectFrom('event_work_role_assignments')
+      .select('id')
+      .where('event_work_role_id', '=', slot.id)
+      .where('user_id', '=', assignment.user_id)
+      .executeTakeFirst();
+    if (!inheritedAssignment) {
+      throw notFound(`Assignment ${assignmentId} not found in occurrence ${occurrenceId}!`);
+    }
+    assignmentToDelete = inheritedAssignment.id;
+  }
+  return unassignUserFromWorkRole(slot.event_series_id, slot.id, assignmentToDelete);
+}
+
+// --- Event info slots ---
+
+function serializeInfoSlot(slot: EventInfoSlot): EventInfoSlotResponse {
+  return {
+    id: slot.id,
+    seriesId: slot.event_series_id,
+    occurrenceId: slot.event_occurrence_id,
+    inheritedFromInfoSlotId: slot.inherited_from_info_slot_id,
+    title: slot.title,
+    description: slot.description,
+    value: slot.value,
+    createdAt: slot.created_at.toISOString(),
+    updatedAt: slot.updated_at.toISOString(),
+  };
+}
+
+/**
+ * Lists info slots of a series. Without options, only the parent
+ * (series-level) slots are returned; with occurrenceStart/occurrenceId the
+ * slots visible for that occurrence are returned (mirrors listEventWorkRoles).
+ */
+export async function listEventInfoSlots(
+  seriesId: number,
+  options?: {
+    occurrenceStart?: Date;
+    occurrenceId?: number | null;
+    parentOnly?: boolean;
+    occurrenceOnly?: boolean;
+  },
+): Promise<EventInfoSlotResponse[]> {
+  logger.trace('eventService.listEventInfoSlots');
+  await getSeriesRowOrThrow(seriesId);
+
+  let occurrenceId = options?.occurrenceId ?? null;
+  if (occurrenceId === null && options?.occurrenceStart) {
+    const occ = await db
+      .selectFrom('event_occurrences')
+      .select('id')
+      .where('event_series_id', '=', seriesId)
+      .where('occurrence_start', '=', options.occurrenceStart)
+      .executeTakeFirst();
+    occurrenceId = occ?.id ?? null;
+  }
+  const occurrenceRequested =
+    options?.occurrenceId !== undefined || options?.occurrenceStart !== undefined;
+
+  let query = db.selectFrom('event_info_slots').selectAll().where('event_series_id', '=', seriesId);
+  if (options?.parentOnly || (!occurrenceRequested && !options?.occurrenceOnly)) {
+    // Series-level management lists the parent template only.
+    query = query.where('event_occurrence_id', 'is', null);
+  } else if (options?.occurrenceOnly) {
+    query = query.where('event_occurrence_id', '=', occurrenceId ?? -1);
+  } else if (occurrenceId !== null) {
+    query = query.where(eb =>
+      eb.or([eb('event_occurrence_id', 'is', null), eb('event_occurrence_id', '=', occurrenceId)]),
+    );
+  } else {
+    query = query.where('event_occurrence_id', 'is', null);
+  }
+  const slots = await query.orderBy('id', 'asc').execute();
+  return slots.map(serializeInfoSlot);
+}
+
+/** Creates a parent (series-level) info slot. Info slots are never created per occurrence. */
+export async function createEventInfoSlot(
+  seriesId: number,
+  data: EventInfoSlotPush,
+): Promise<EventInfoSlotResponse> {
+  logger.trace('eventService.createEventInfoSlot');
+  await getSeriesRowOrThrow(seriesId);
+  const slot = await db
+    .insertInto('event_info_slots')
+    .values({
+      event_series_id: seriesId,
+      event_occurrence_id: null,
+      inherited_from_info_slot_id: null,
+      title: data.title,
+      description: data.description ?? '',
+      value: data.value ?? null,
+    })
+    .returningAll()
+    .executeTakeFirstOrThrow();
+  return serializeInfoSlot(slot);
+}
+
+/** Updates a parent (series-level) info slot (title, description, default value). */
+export async function updateEventInfoSlot(
+  seriesId: number,
+  infoSlotId: number,
+  data: EventInfoSlotUpdate,
+): Promise<EventInfoSlotResponse> {
+  logger.trace('eventService.updateEventInfoSlot');
+  await getSeriesRowOrThrow(seriesId);
+  const slot = await db
+    .selectFrom('event_info_slots')
+    .selectAll()
+    .where('id', '=', infoSlotId)
+    .where('event_series_id', '=', seriesId)
+    .executeTakeFirst();
+  if (!slot) {
+    throw notFound(`Info slot ${infoSlotId} not found in event series ${seriesId}!`);
+  }
+  const update: Record<string, unknown> = { updated_at: new Date() };
+  if (data.title !== undefined) update.title = data.title;
+  if (data.description !== undefined) update.description = data.description;
+  if (data.value !== undefined) update.value = data.value;
+  const updated = await db
+    .updateTable('event_info_slots')
+    .set(update)
+    .where('id', '=', infoSlotId)
+    .returningAll()
+    .executeTakeFirstOrThrow();
+  return serializeInfoSlot(updated);
+}
+
+/** Deletes a parent (series-level) info slot. Occurrence-level copies are kept (their inherited reference is set to NULL). */
+export async function deleteEventInfoSlot(seriesId: number, infoSlotId: number): Promise<void> {
+  logger.trace('eventService.deleteEventInfoSlot');
+  await getSeriesRowOrThrow(seriesId);
+  const slot = await db
+    .selectFrom('event_info_slots')
+    .select('id')
+    .where('id', '=', infoSlotId)
+    .where('event_series_id', '=', seriesId)
+    .where('event_occurrence_id', 'is', null)
+    .executeTakeFirst();
+  if (!slot) {
+    throw notFound(`Info slot ${infoSlotId} not found in event series ${seriesId}!`);
+  }
+  await db.deleteFrom('event_info_slots').where('id', '=', infoSlotId).execute();
+}
+
+/** Lists the info slots scoped to a materialized occurrence. */
+export async function listOccurrenceInfoSlots(
+  occurrenceId: number,
+): Promise<EventInfoSlotResponse[]> {
+  const occ = await db
+    .selectFrom('event_occurrences')
+    .select('event_series_id')
+    .where('id', '=', occurrenceId)
+    .executeTakeFirst();
+  if (!occ) throw notFound(`Event occurrence ${occurrenceId} not found!`);
+  return listEventInfoSlots(occ.event_series_id, { occurrenceId, occurrenceOnly: true });
+}
+
+/**
+ * Resolves an info slot referenced by an occurrence-scoped endpoint. When the
+ * given ID is a parent (series-level) slot, the occurrence-level copy
+ * inherited from it is resolved instead; parent slots are never modified here.
+ */
+async function getOccurrenceInfoSlotOrThrow(occurrenceId: number, infoSlotId: number) {
+  const slot = await db
+    .selectFrom('event_info_slots')
+    .selectAll()
+    .where('id', '=', infoSlotId)
+    .where('event_occurrence_id', '=', occurrenceId)
+    .executeTakeFirst();
+  if (slot) {
+    return slot;
+  }
+  const occurrence = await db
+    .selectFrom('event_occurrences')
+    .select('event_series_id')
+    .where('id', '=', occurrenceId)
+    .executeTakeFirst();
+  if (!occurrence) {
+    throw notFound(`Event occurrence ${occurrenceId} not found!`);
+  }
+  const inheritedCopy = await db
+    .selectFrom('event_info_slots')
+    .selectAll()
+    .where('event_series_id', '=', occurrence.event_series_id)
+    .where('event_occurrence_id', '=', occurrenceId)
+    .where('inherited_from_info_slot_id', '=', infoSlotId)
+    .executeTakeFirst();
+  if (!inheritedCopy) {
+    throw notFound(`Info slot ${infoSlotId} not found in occurrence ${occurrenceId}!`);
+  }
+  return inheritedCopy;
+}
+
+/**
+ * Sets the filled value of an occurrence's info slot. Only the value may
+ * change; info slots cannot be added or deleted per occurrence.
+ */
+export async function updateOccurrenceInfoSlotValue(
+  occurrenceId: number,
+  infoSlotId: number,
+  value: string | null,
+): Promise<EventInfoSlotResponse> {
+  logger.trace('eventService.updateOccurrenceInfoSlotValue');
+  const slot = await getOccurrenceInfoSlotOrThrow(occurrenceId, infoSlotId);
+  const updated = await db
+    .updateTable('event_info_slots')
+    .set({ value, updated_at: new Date() })
+    .where('id', '=', slot.id)
+    .returningAll()
+    .executeTakeFirstOrThrow();
+  return serializeInfoSlot(updated);
+}
+
+/**
+ * Imports parent (series-level) info slots into a materialized occurrence.
+ * Only slots not yet inherited are copied (with the parent value as default);
+ * existing occurrence slots are never modified or deleted.
+ */
+export async function importParentInfoSlots(
+  seriesId: number,
+  occurrenceId: number,
+): Promise<EventInfoSlotResponse[]> {
+  logger.trace('eventService.importParentInfoSlots');
+  await getSeriesRowOrThrow(seriesId);
+
+  const occ = await db
+    .selectFrom('event_occurrences')
+    .select('id')
+    .where('id', '=', occurrenceId)
+    .where('event_series_id', '=', seriesId)
+    .executeTakeFirst();
+  if (!occ) {
+    throw notFound(`Occurrence ${occurrenceId} not found in event series ${seriesId}!`);
+  }
+
+  const parentSlots = await db
+    .selectFrom('event_info_slots')
+    .select(['id', 'title', 'description', 'value'])
+    .where('event_series_id', '=', seriesId)
+    .where('event_occurrence_id', 'is', null)
+    .where(eb =>
+      eb.not(
+        eb.exists(
+          db
+            .selectFrom('event_info_slots as occ_slot')
+            .select('occ_slot.id')
+            .where('occ_slot.event_occurrence_id', '=', occurrenceId)
+            .whereRef('occ_slot.inherited_from_info_slot_id', '=', 'event_info_slots.id' as never),
+        ),
+      ),
+    )
+    .execute();
+
+  if (parentSlots.length === 0) return [];
+
+  const inserted = await db
+    .insertInto('event_info_slots')
+    .values(
+      parentSlots.map(s => ({
+        event_series_id: seriesId,
+        event_occurrence_id: occurrenceId,
+        inherited_from_info_slot_id: s.id,
+        title: s.title,
+        description: s.description,
+        value: s.value,
+      })),
+    )
+    .onConflict(oc => oc.doNothing())
+    .returningAll()
+    .execute();
+
+  return inserted.map(serializeInfoSlot);
 }
 
 // --- Occurrence-scoped comments ---
@@ -1391,7 +2726,7 @@ export async function cancelOccurrence(
   assertOccurrence(series, occurrenceStart);
 
   // Materialize the occurrence on write (an exception attaches data to it).
-  await ensureOccurrenceMaterialized(seriesId, occurrenceStart);
+  const occurrenceId = await ensureOccurrenceMaterialized(seriesId, occurrenceStart);
 
   const exception = await db
     .insertInto('event_occurrences')
@@ -1408,6 +2743,26 @@ export async function cancelOccurrence(
     .returningAll()
     .executeTakeFirstOrThrow();
 
+  // Notify the occurrence's participants and the series' managers.
+  const organization = await getCalendarOrganizationOrThrow(series.calendar_id);
+  const recipients = [
+    ...(await fetchOccurrenceParticipantIds(seriesId, occurrenceId)),
+    ...(await fetchSeriesManagerIds(seriesId)),
+  ];
+  await db.transaction().execute(async tx => {
+    await notifyUsers(
+      tx,
+      recipients,
+      null,
+      'eventCancelled',
+      {
+        eventTitle: series.title,
+        start: occurrenceStart.toISOString(),
+      },
+      organization.organizationId,
+    );
+  });
+
   return serializeException(exception);
 }
 
@@ -1421,7 +2776,7 @@ export async function rescheduleOccurrence(
   assertOccurrence(series, occurrenceStart);
 
   // Materialize the occurrence on write (an exception attaches data to it).
-  await ensureOccurrenceMaterialized(seriesId, occurrenceStart);
+  const occurrenceId = await ensureOccurrenceMaterialized(seriesId, occurrenceStart);
 
   const start = new Date(data.start);
   const end = data.end
@@ -1451,7 +2806,35 @@ export async function rescheduleOccurrence(
     .returningAll()
     .executeTakeFirstOrThrow();
 
-  return serializeException(exception);
+  const organization = await getCalendarOrganizationOrThrow(series.calendar_id);
+  const recipients = [
+    ...(await fetchOccurrenceParticipantIds(seriesId, occurrenceId)),
+    ...(await fetchSeriesManagerIds(seriesId)),
+  ];
+  await db.transaction().execute(async tx => {
+    await notifyUsers(
+      tx,
+      recipients,
+      null,
+      'eventRescheduled',
+      {
+        eventTitle: series.title,
+        start: occurrenceStart.toISOString(),
+        newStart: start.toISOString(),
+        newEnd: end.toISOString(),
+      },
+      organization.organizationId,
+    );
+  });
+
+  const conflicts = await findOccurrenceBookingConflicts(
+    organization.organizationId,
+    series,
+    occurrenceStart,
+    start,
+    end,
+  );
+  return { ...serializeException(exception), conflicts };
 }
 
 export async function deleteException(seriesId: number, occurrenceStart: Date): Promise<void> {
@@ -1558,18 +2941,24 @@ export async function createEventWorkRole(
     }
   }
 
-  // Validate the work role if given; default the title from the work role.
+  // Validate the work role if given; default the title and description from
+  // the work role. Work roles are organization-scoped catalog data, so the
+  // work role must belong to the same organization as the series.
+  const organization = await getCalendarOrganizationOrThrow(series.calendar_id);
   let workRoleName: string | null = null;
+  let workRoleDescription: string | null = null;
   if (data.workRoleId != null) {
     const workRole = await db
       .selectFrom('work_roles')
-      .select(['id', 'name'])
+      .select(['id', 'name', 'description'])
       .where('id', '=', data.workRoleId)
+      .where('organization_id', '=', organization.organizationId)
       .executeTakeFirst();
     if (!workRole) {
-      throw notFound(`Work role ${data.workRoleId} not found!`);
+      throw notFound(`Work role ${data.workRoleId} not found in this organization!`);
     }
     workRoleName = workRole.name;
+    workRoleDescription = workRole.description;
   }
 
   const slot = await db
@@ -1579,7 +2968,7 @@ export async function createEventWorkRole(
       event_occurrence_id: eventOccurrenceId,
       inherited_from_work_role_id: null,
       title: data.title || workRoleName || 'Slot',
-      description: data.description ?? '',
+      description: data.description ?? workRoleDescription ?? '',
       is_critical: data.isCritical ?? false,
       work_role_id: data.workRoleId ?? null,
     })
@@ -1607,15 +2996,18 @@ export async function updateEventWorkRole(
     throw notFound(`Work role slot ${slotId} not found in event series ${seriesId}!`);
   }
 
-  // Validate the work role if given.
+  // Validate the work role if given; it must belong to the same organization
+  // as the series (work roles are organization-scoped catalog data).
   if (data.workRoleId != null) {
+    const organization = await getCalendarOrganizationOrThrow(series.calendar_id);
     const workRole = await db
       .selectFrom('work_roles')
       .select('id')
       .where('id', '=', data.workRoleId)
+      .where('organization_id', '=', organization.organizationId)
       .executeTakeFirst();
     if (!workRole) {
-      throw notFound(`Work role ${data.workRoleId} not found!`);
+      throw notFound(`Work role ${data.workRoleId} not found in this organization!`);
     }
   }
 
@@ -1700,11 +3092,11 @@ export async function assignUserToWorkRole(
   userId: string,
 ): Promise<EventWorkRoleAssignmentResponse> {
   logger.trace('eventService.assignUserToWorkRole');
-  await getSeriesRowOrThrow(seriesId);
+  const series = await getSeriesRowOrThrow(seriesId);
 
   const slot = await db
     .selectFrom('event_work_roles')
-    .select(['id', 'event_occurrence_id'])
+    .select(['id', 'event_occurrence_id', 'title', 'work_role_id'])
     .where('id', '=', slotId)
     .where('event_series_id', '=', seriesId)
     .executeTakeFirst();
@@ -1721,19 +3113,37 @@ export async function assignUserToWorkRole(
     throw notFound(`User ${userId} not found!`);
   }
 
+  const organization = await getCalendarOrganizationOrThrow(series.calendar_id);
+  const role = await getSlotRoleName(slot);
+  const occurrenceStart = await getSlotOccurrenceStart(slot);
+
   try {
-    const assignment = await db
-      .insertInto('event_work_role_assignments')
-      .values({ event_work_role_id: slotId, user_id: userId })
-      .returningAll()
-      .executeTakeFirstOrThrow();
-    return {
-      id: assignment.id,
-      eventWorkRoleId: assignment.event_work_role_id,
-      userId: assignment.user_id,
-      userName: user.name,
-      createdAt: assignment.created_at.toISOString(),
-    };
+    return await db.transaction().execute(async tx => {
+      const assignment = await tx
+        .insertInto('event_work_role_assignments')
+        .values({ event_work_role_id: slotId, user_id: userId })
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      // Notify the assigned user about the new assignment.
+      await createNotificationInTx(
+        tx,
+        userId,
+        'workRoleAssigned',
+        {
+          eventTitle: series.title,
+          role,
+          ...(occurrenceStart ? { start: occurrenceStart.toISOString() } : {}),
+        },
+        organization.organizationId,
+      );
+      return {
+        id: assignment.id,
+        eventWorkRoleId: assignment.event_work_role_id,
+        userId: assignment.user_id,
+        userName: user.name,
+        createdAt: assignment.created_at.toISOString(),
+      };
+    });
   } catch (error) {
     if (isUniqueViolation(error)) {
       throw badRequest('User is already assigned to this work role slot!');
@@ -1748,7 +3158,7 @@ export async function unassignUserFromWorkRole(
   assignmentId: number,
 ): Promise<void> {
   logger.trace('eventService.unassignUserFromWorkRole');
-  await getSeriesRowOrThrow(seriesId);
+  const series = await getSeriesRowOrThrow(seriesId);
 
   const assignment = await db
     .selectFrom('event_work_role_assignments')
@@ -1760,7 +3170,11 @@ export async function unassignUserFromWorkRole(
     .select([
       'event_work_role_assignments.id',
       'event_work_role_assignments.event_work_role_id',
+      'event_work_role_assignments.user_id',
       'event_work_roles.event_series_id',
+      'event_work_roles.title',
+      'event_work_roles.work_role_id',
+      'event_work_roles.event_occurrence_id',
     ])
     .where('event_work_role_assignments.id', '=', assignmentId)
     .executeTakeFirst();
@@ -1772,7 +3186,510 @@ export async function unassignUserFromWorkRole(
     throw notFound(`Assignment ${assignmentId} not found in event series ${seriesId}!`);
   }
 
-  await db.deleteFrom('event_work_role_assignments').where('id', '=', assignmentId).execute();
+  const organization = await getCalendarOrganizationOrThrow(series.calendar_id);
+  const role = await getSlotRoleName(assignment);
+  const occurrenceStart = await getSlotOccurrenceStart(assignment);
+
+  await db.transaction().execute(async tx => {
+    await tx.deleteFrom('event_work_role_assignments').where('id', '=', assignmentId).execute();
+    // Notify the removed user about the unassignment.
+    await createNotificationInTx(
+      tx,
+      assignment.user_id,
+      'workRoleUnassigned',
+      {
+        eventTitle: series.title,
+        role,
+        ...(occurrenceStart ? { start: occurrenceStart.toISOString() } : {}),
+      },
+      organization.organizationId,
+    );
+  });
+}
+
+// --- Assignment candidates ---
+
+/** A required certification the candidate does not hold, or holds only expired. */
+export interface MissingCertification {
+  certificationId: number;
+  name: string;
+  /**
+   * Expiry date (YYYY-MM-DD) when the user holds the certification but it has
+   * expired; null when the user does not hold it at all.
+   */
+  expiredDate: string | null;
+}
+
+/** A user listed as an assignment candidate for a work role slot. */
+export interface AssignmentCandidate {
+  id: string;
+  name: string;
+  /** True when the user has an absence overlapping the requested range. */
+  hasAbsence: boolean;
+  /** True when the user declared the slot's work role (`user_work_roles`). */
+  hasWorkRole: boolean;
+  /** The `is_qualified` flag of the user's declared work role (false when not declared). */
+  isQualified: boolean;
+  /** Required certifications of the slot's work role the user is missing or holds expired. */
+  missingCertifications: MissingCertification[];
+  /** Assignments of the user overlapping the requested range (0 when no range given). */
+  assignmentCount: number;
+  /** Workload hours of the user overlapping the requested range (0 when no range given). */
+  workloadHours: number;
+}
+
+/**
+ * Lists all users as assignment candidates for a work role slot, enriched with
+ * the flags computed against the slot's `work_role_id`: whether the user
+ * declared the role (`hasWorkRole`), their qualification (`isQualified`) and
+ * the required certifications of the role the user is missing or holds only
+ * expired (`missingCertifications`). A certification is expired when its
+ * `valid_until_date` is before today (the expiry day itself is still valid; a
+ * null date never expires). When both `start` and `end` are given, candidates
+ * with an overlapping absence are flagged `hasAbsence`. Slots without a linked
+ * work role return neutral flags for everyone. The slot may be a parent
+ * (series-level) or occurrence-level slot; both belong to the series.
+ * @param seriesId - The series ID.
+ * @param slotId - The work role slot ID.
+ * @param query - Optional occurrence range for the absence flags.
+ * @returns The candidates, sorted by name.
+ */
+export async function getAssignmentCandidates(
+  seriesId: number,
+  slotId: number,
+  query: { start?: string; end?: string } = {},
+): Promise<AssignmentCandidate[]> {
+  logger.trace('eventService.getAssignmentCandidates');
+  const series = await getSeriesRowOrThrow(seriesId);
+
+  const slot = await db
+    .selectFrom('event_work_roles')
+    .select(['id', 'work_role_id'])
+    .where('id', '=', slotId)
+    .where('event_series_id', '=', seriesId)
+    .executeTakeFirst();
+  if (!slot) {
+    throw notFound(`Work role slot ${slotId} not found in event series ${seriesId}!`);
+  }
+
+  const users = await db
+    .selectFrom('users')
+    .select(['id', 'name'])
+    .orderBy('name', 'asc')
+    .execute();
+
+  let absentIds = new Set<string>();
+  let workloadByUser = new Map<string, WorkloadSummary>();
+  if (query.start && query.end) {
+    absentIds = await usersWithAbsenceInRange(
+      users.map(user => user.id),
+      new Date(query.start),
+      new Date(query.end),
+    );
+    workloadByUser = await computeWorkloadInRange(new Date(query.start), new Date(query.end));
+  }
+
+  const workRoleId = slot.work_role_id;
+  if (workRoleId === null) {
+    return users.map(user => ({
+      id: user.id,
+      name: user.name,
+      hasAbsence: absentIds.has(user.id),
+      hasWorkRole: false,
+      isQualified: false,
+      missingCertifications: [],
+      assignmentCount: workloadByUser.get(user.id)?.assignmentCount ?? 0,
+      workloadHours: workloadByUser.get(user.id)?.hours ?? 0,
+    }));
+  }
+
+  // The work role must belong to the same organization as the series (work
+  // roles are organization-scoped catalog data).
+  const organization = await getCalendarOrganizationOrThrow(series.calendar_id);
+  const workRole = await db
+    .selectFrom('work_roles')
+    .select('id')
+    .where('id', '=', workRoleId)
+    .where('organization_id', '=', organization.organizationId)
+    .executeTakeFirst();
+  if (!workRole) {
+    throw notFound(`Work role ${workRoleId} not found in this organization!`);
+  }
+
+  // Certifications required for the work role.
+  const requiredCerts = await db
+    .selectFrom('certification_work_roles')
+    .innerJoin('certifications', 'certifications.id', 'certification_work_roles.certification_id')
+    .select(['certifications.id', 'certifications.name'])
+    .where('certification_work_roles.work_role_id', '=', workRoleId)
+    .orderBy('certifications.name', 'asc')
+    .execute();
+
+  // Users who declared the work role, with their qualification flag.
+  const userRoles = await db
+    .selectFrom('user_work_roles')
+    .select(['user_id', 'is_qualified'])
+    .where('work_role_id', '=', workRoleId)
+    .execute();
+  const qualificationByUser = new Map(userRoles.map(row => [row.user_id, row.is_qualified]));
+
+  // The users' held certifications for the required certification IDs.
+  const requiredCertIds = requiredCerts.map(cert => cert.id);
+  const heldCerts =
+    requiredCertIds.length > 0
+      ? await db
+          .selectFrom('user_certifications')
+          .select(['user_id', 'certification_id', 'valid_until_date'])
+          .where('certification_id', 'in', requiredCertIds)
+          .execute()
+      : [];
+  // userId -> certificationId -> expiry date (null = no expiry).
+  const heldByUser = new Map<string, Map<number, Date | null>>();
+  for (const row of heldCerts) {
+    let byCert = heldByUser.get(row.user_id);
+    if (!byCert) {
+      byCert = new Map();
+      heldByUser.set(row.user_id, byCert);
+    }
+    byCert.set(row.certification_id, row.valid_until_date);
+  }
+
+  // The expiry day itself is still valid: a certification is expired only
+  // when valid_until_date is before the start of today (UTC).
+  const now = new Date();
+  const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+
+  return users.map(user => {
+    const hasWorkRole = qualificationByUser.has(user.id);
+    const missingCertifications: MissingCertification[] = [];
+    if (requiredCerts.length > 0) {
+      const held = heldByUser.get(user.id);
+      for (const cert of requiredCerts) {
+        const expiry = held?.get(cert.id);
+        if (expiry === undefined) {
+          missingCertifications.push({
+            certificationId: cert.id,
+            name: cert.name,
+            expiredDate: null,
+          });
+        } else if (expiry !== null && expiry.getTime() < todayStart.getTime()) {
+          missingCertifications.push({
+            certificationId: cert.id,
+            name: cert.name,
+            expiredDate: expiry.toISOString().slice(0, 10),
+          });
+        }
+      }
+    }
+    return {
+      id: user.id,
+      name: user.name,
+      hasAbsence: absentIds.has(user.id),
+      hasWorkRole,
+      isQualified: qualificationByUser.get(user.id) ?? false,
+      missingCertifications,
+      assignmentCount: workloadByUser.get(user.id)?.assignmentCount ?? 0,
+      workloadHours: workloadByUser.get(user.id)?.hours ?? 0,
+    };
+  });
+}
+
+// --- Workload in a range (staffing view, availability, candidate sorting) ---
+
+export interface WorkloadAssignment {
+  seriesId: number;
+  /** Effective start of the occurrence (reschedule override applied). */
+  start: Date;
+  durationMinutes: number;
+  isCritical: boolean;
+}
+
+export interface WorkloadSummary {
+  assignmentCount: number;
+  hours: number;
+  criticalAssignmentCount: number;
+  assignments: WorkloadAssignment[];
+}
+
+export interface SeriesScopeFilter {
+  siteId?: string;
+  roomId?: string;
+  teamId?: string;
+}
+
+/**
+ * Computes, per user, the work role assignments whose effective occurrence
+ * overlaps [rangeStart, rangeEnd]. A series-wide (parent) slot assignment
+ * counts once per overlapping occurrence of the series; an occurrence-level
+ * slot counts once when its (possibly rescheduled) occurrence overlaps.
+ * Cancelled occurrences never count.
+ */
+export async function computeWorkloadInRange(
+  rangeStart: Date,
+  rangeEnd: Date,
+  options?: { userIds?: string[]; seriesFilter?: SeriesScopeFilter },
+): Promise<Map<string, WorkloadSummary>> {
+  validateRange(rangeStart, rangeEnd);
+  let query = db
+    .selectFrom('event_work_role_assignments as a')
+    .innerJoin('event_work_roles as w', 'w.id', 'a.event_work_role_id')
+    .innerJoin('event_series as s', 's.id', 'w.event_series_id')
+    .leftJoin('event_occurrences as o', 'o.id', 'w.event_occurrence_id')
+    .select([
+      'a.user_id',
+      'w.event_occurrence_id',
+      'w.is_critical',
+      'w.event_series_id',
+      's.start',
+      's.duration_minutes',
+      's.rrule',
+      's.timezone',
+      's.site_id',
+      's.room_id',
+      'o.occurrence_start',
+      'o.override_start',
+      'o.is_cancelled',
+    ]);
+  if (options?.userIds && options.userIds.length > 0) {
+    query = query.where('a.user_id', 'in', options.userIds);
+  }
+  const filter = options?.seriesFilter;
+  if (filter?.siteId) query = query.where('s.site_id', '=', filter.siteId);
+  if (filter?.roomId) query = query.where('s.room_id', '=', filter.roomId);
+  if (filter?.teamId) {
+    query = query
+      .innerJoin('event_series_teams as est', 'est.event_series_id', 's.id')
+      .where('est.team_id', '=', filter.teamId);
+  }
+  const rows = await query.execute();
+
+  // Expand the involved series once each; expandOccurrences already keeps
+  // only range-overlapping, non-cancelled occurrences.
+  const seriesById = new Map<number, EventSeries>();
+  for (const row of rows) {
+    if (!seriesById.has(row.event_series_id)) {
+      seriesById.set(row.event_series_id, row as unknown as EventSeries);
+    }
+  }
+  const exceptionsBySeries = await fetchExceptionRules([...seriesById.keys()]);
+  const expandedBySeries = new Map<number, ExpandedOccurrence[]>();
+  for (const [id, series] of seriesById) {
+    const exceptions = exceptionsBySeries.get(id) ?? [];
+    expandedBySeries.set(id, expandOccurrences(toRule(series), exceptions, rangeStart, rangeEnd));
+  }
+
+  const result = new Map<string, WorkloadSummary>();
+  const empty = (): WorkloadSummary => ({
+    assignmentCount: 0,
+    hours: 0,
+    criticalAssignmentCount: 0,
+    assignments: [],
+  });
+  for (const row of rows) {
+    const summary = result.get(row.user_id) ?? empty();
+    result.set(row.user_id, summary);
+    if (row.event_occurrence_id === null) {
+      // Parent slot: one assignment per overlapping occurrence of the series.
+      for (const occ of expandedBySeries.get(row.event_series_id) ?? []) {
+        summary.assignmentCount += 1;
+        summary.hours += row.duration_minutes / 60;
+        if (row.is_critical) summary.criticalAssignmentCount += 1;
+        summary.assignments.push({
+          seriesId: row.event_series_id,
+          start: occ.start,
+          durationMinutes: row.duration_minutes,
+          isCritical: row.is_critical,
+        });
+      }
+    } else {
+      // Occurrence-level slot: counts when its effective occurrence overlaps.
+      if (row.is_cancelled) continue;
+      const start = row.override_start ?? row.occurrence_start;
+      if (!start) continue;
+      const end = new Date(start.getTime() + row.duration_minutes * 60 * 1000);
+      if (end.getTime() > rangeStart.getTime() && start.getTime() < rangeEnd.getTime()) {
+        summary.assignmentCount += 1;
+        summary.hours += row.duration_minutes / 60;
+        if (row.is_critical) summary.criticalAssignmentCount += 1;
+        summary.assignments.push({
+          seriesId: row.event_series_id,
+          start,
+          durationMinutes: row.duration_minutes,
+          isCritical: row.is_critical,
+        });
+      }
+    }
+  }
+  return result;
+}
+
+/** Per-user staffing workload for an organization over a range, with weekly buckets. */
+export interface StaffingWorkloadItem {
+  userId: string;
+  name: string;
+  assignmentCount: number;
+  hours: number;
+  criticalAssignmentCount: number;
+  hasAbsence: boolean;
+  /** Weekly buckets (Monday week starts) covering the range; counts/hours per bucket. */
+  weeks: { start: string; count: number; hours: number }[];
+}
+
+export async function getStaffingWorkload(
+  organizationId: string,
+  rangeStart: Date,
+  rangeEnd: Date,
+  seriesFilter?: SeriesScopeFilter,
+): Promise<StaffingWorkloadItem[]> {
+  logger.trace('eventService.getStaffingWorkload');
+  validateRange(rangeStart, rangeEnd);
+  const org = await db
+    .selectFrom('organizations')
+    .select('id')
+    .where('id', '=', organizationId)
+    .executeTakeFirst();
+  if (!org) throw notFound(`Organization ${organizationId} not found!`);
+
+  const members = await db
+    .selectFrom('user_organizations as uo')
+    .innerJoin('users as u', 'u.id', 'uo.user_id')
+    .select(['u.id', 'u.name'])
+    .where('uo.organization_id', '=', organizationId)
+    .orderBy('u.name', 'asc')
+    .execute();
+
+  const userIds = members.map(m => m.id);
+  const workload = await computeWorkloadInRange(rangeStart, rangeEnd, {
+    userIds,
+    seriesFilter,
+  });
+  const absentIds = await usersWithAbsenceInRange(userIds, rangeStart, rangeEnd);
+
+  // Weekly buckets (Monday starts) covering the range. Use addWeeks so the
+  // buckets stay on local week boundaries across DST changes.
+  const weekStarts: Date[] = [];
+  let cursor = startOfWeek(rangeStart, { weekStartsOn: 1 });
+  while (cursor.getTime() < rangeEnd.getTime()) {
+    weekStarts.push(new Date(cursor));
+    cursor = addWeeks(cursor, 1);
+  }
+
+  return members.map(member => {
+    const summary = workload.get(member.id);
+    const weeks = weekStarts.map(ws => ({ start: ws, count: 0, hours: 0 }));
+    for (const assignment of summary?.assignments ?? []) {
+      const bucket = startOfWeek(assignment.start, { weekStartsOn: 1 });
+      const idx = weekStarts.findIndex(ws => ws.getTime() === bucket.getTime());
+      if (idx >= 0) {
+        weeks[idx].count += 1;
+        weeks[idx].hours += assignment.durationMinutes / 60;
+      }
+    }
+    return {
+      userId: member.id,
+      name: member.name,
+      assignmentCount: summary?.assignmentCount ?? 0,
+      hours: summary?.hours ?? 0,
+      criticalAssignmentCount: summary?.criticalAssignmentCount ?? 0,
+      hasAbsence: absentIds.has(member.id),
+      weeks: weeks.map(w => ({ start: w.start.toISOString(), count: w.count, hours: w.hours })),
+    };
+  });
+}
+
+// --- Bulk assignment across occurrences ---
+
+export interface BulkAssignmentResult {
+  occurrenceStart: string;
+  occurrenceId: number;
+  status: 'assigned' | 'already-assigned';
+}
+
+/**
+ * Assigns a user to the same (parent) slot across multiple occurrences of a
+ * series in one call. Each occurrence is materialized on demand and the user
+ * is assigned to the occurrence-level slot inherited from the parent slot;
+ * the parent slot itself is never modified.
+ */
+export async function assignUserToWorkRoleBulk(
+  seriesId: number,
+  slotId: number,
+  userId: string,
+  occurrenceStarts: string[],
+): Promise<BulkAssignmentResult[]> {
+  logger.trace('eventService.assignUserToWorkRoleBulk');
+  const series = await getSeriesRowOrThrow(seriesId);
+  const slot = await db
+    .selectFrom('event_work_roles')
+    .select(['id', 'event_series_id', 'title', 'work_role_id'])
+    .where('id', '=', slotId)
+    .where('event_series_id', '=', seriesId)
+    .executeTakeFirst();
+  if (!slot) {
+    throw notFound(`Work role slot ${slotId} not found in event series ${seriesId}!`);
+  }
+  const user = await db
+    .selectFrom('users')
+    .select('id')
+    .where('id', '=', userId)
+    .executeTakeFirst();
+  if (!user) throw notFound(`User ${userId} not found!`);
+
+  const organization = await getCalendarOrganizationOrThrow(series.calendar_id);
+  const role = await getSlotRoleName(slot);
+
+  const results: BulkAssignmentResult[] = [];
+  for (const startStr of occurrenceStarts) {
+    const occurrenceStart = new Date(startStr);
+    if (Number.isNaN(occurrenceStart.getTime())) {
+      throw badRequest(`Invalid occurrence start: ${startStr}`);
+    }
+    assertOccurrence(series, occurrenceStart);
+    const occurrenceId = await ensureOccurrenceMaterialized(seriesId, occurrenceStart);
+    // Resolve the occurrence-level copy inherited from the parent slot.
+    const copy = await db
+      .selectFrom('event_work_roles')
+      .select('id')
+      .where('event_series_id', '=', seriesId)
+      .where('event_occurrence_id', '=', occurrenceId)
+      .where('inherited_from_work_role_id', '=', slotId)
+      .executeTakeFirst();
+    const targetSlotId = copy?.id ?? slotId;
+    const existing = await db
+      .selectFrom('event_work_role_assignments')
+      .select('id')
+      .where('event_work_role_id', '=', targetSlotId)
+      .where('user_id', '=', userId)
+      .executeTakeFirst();
+    if (existing) {
+      results.push({
+        occurrenceStart: occurrenceStart.toISOString(),
+        occurrenceId,
+        status: 'already-assigned',
+      });
+      continue;
+    }
+    await db.transaction().execute(async tx => {
+      await tx
+        .insertInto('event_work_role_assignments')
+        .values({ event_work_role_id: targetSlotId, user_id: userId })
+        .execute();
+      // Notify the assigned user once per occurrence.
+      await createNotificationInTx(
+        tx,
+        userId,
+        'workRoleAssigned',
+        { eventTitle: series.title, role, start: occurrenceStart.toISOString() },
+        organization.organizationId,
+      );
+    });
+    results.push({
+      occurrenceStart: occurrenceStart.toISOString(),
+      occurrenceId,
+      status: 'assigned',
+    });
+  }
+  return results;
 }
 
 // --- Work role slots: import from parent ---
@@ -1952,6 +3869,115 @@ export async function computeReadiness(
   };
 }
 
+/** An upcoming occurrence that still has unfilled critical slots. */
+export interface UnfilledCriticalOccurrence {
+  seriesId: number;
+  title: string;
+  organizationId: string;
+  /** Original occurrence start (stable identity of the occurrence). */
+  occurrenceStart: Date;
+  /** Effective start (after reschedule overrides). */
+  start: Date;
+  /** Display names of the unfilled critical slots. */
+  roles: string[];
+}
+
+/**
+ * Finds the occurrences of all visible series in [rangeStart, rangeEnd) that
+ * still have unfilled critical slots, for the coordinator alert job. Cancelled
+ * occurrences are skipped by the expansion. Slot selection mirrors
+ * computeReadiness: occurrence-level slots when the occurrence is
+ * materialized, otherwise the parent (series-level) slots.
+ * @param rangeStart - Start of the look-ahead window.
+ * @param rangeEnd - End of the look-ahead window.
+ * @returns The occurrences with unfilled critical slots, sorted by start.
+ */
+export async function findUnfilledCriticalOccurrences(
+  rangeStart: Date,
+  rangeEnd: Date,
+): Promise<UnfilledCriticalOccurrence[]> {
+  logger.trace('eventService.findUnfilledCriticalOccurrences');
+  const seriesRows = await db
+    .selectFrom('event_series')
+    .selectAll()
+    .where('is_visible', '=', true)
+    .execute();
+  if (seriesRows.length === 0) return [];
+  const seriesIds = seriesRows.map(s => s.id);
+  const exceptionsBySeries = await fetchExceptionRules(seriesIds);
+  const calendarOrgs = await getCalendarOrganizations(seriesRows.map(s => s.calendar_id));
+
+  // All slots of these series with their work role names, plus assignment counts.
+  const slotRows = await db
+    .selectFrom('event_work_roles')
+    .leftJoin('work_roles', 'work_roles.id', 'event_work_roles.work_role_id')
+    .select([
+      'event_work_roles.id',
+      'event_work_roles.event_series_id',
+      'event_work_roles.event_occurrence_id',
+      'event_work_roles.title',
+      'event_work_roles.is_critical',
+      'work_roles.name as work_role_name',
+    ])
+    .where('event_work_roles.event_series_id', 'in', seriesIds)
+    .execute();
+  const assignmentCounts = new Map<number, number>();
+  const slotIds = slotRows.map(s => s.id);
+  if (slotIds.length > 0) {
+    const countRows = await db
+      .selectFrom('event_work_role_assignments')
+      .select(['event_work_role_id', db.fn.countAll().as('count')])
+      .where('event_work_role_id', 'in', slotIds)
+      .groupBy('event_work_role_id')
+      .execute();
+    for (const row of countRows) {
+      assignmentCounts.set(row.event_work_role_id, Number(row.count));
+    }
+  }
+
+  const result: UnfilledCriticalOccurrence[] = [];
+  for (const series of seriesRows) {
+    const organization = calendarOrgs.get(series.calendar_id);
+    if (!organization) continue;
+    const occurrences = expandOccurrences(
+      toRule(series),
+      exceptionsBySeries.get(series.id) ?? [],
+      rangeStart,
+      rangeEnd,
+    );
+    if (occurrences.length === 0) continue;
+    const occurrenceIds = await lookupOccurrenceIds(
+      occurrences.map(o => ({ seriesId: series.id, occurrenceStart: o.occurrenceStart })),
+    );
+    for (const occurrence of occurrences) {
+      const occurrenceId =
+        occurrenceIds.get(`${series.id}:${occurrence.occurrenceStart.toISOString()}`) ?? null;
+      let visible = slotRows.filter(
+        s => s.event_series_id === series.id && s.event_occurrence_id === occurrenceId,
+      );
+      if (visible.length === 0) {
+        visible = slotRows.filter(
+          s => s.event_series_id === series.id && s.event_occurrence_id === null,
+        );
+      }
+      const unfilled = visible.filter(
+        s => s.is_critical && (assignmentCounts.get(s.id) ?? 0) === 0,
+      );
+      if (unfilled.length === 0) continue;
+      result.push({
+        seriesId: series.id,
+        title: series.title,
+        organizationId: organization.organizationId,
+        occurrenceStart: occurrence.occurrenceStart,
+        start: occurrence.start,
+        roles: unfilled.map(s => s.work_role_name ?? s.title),
+      });
+    }
+  }
+  result.sort((a, b) => a.start.getTime() - b.start.getTime());
+  return result;
+}
+
 // --- Comments ---
 
 const commentSelect = [
@@ -2020,16 +4046,40 @@ export async function createEventComment(
     throw notFound(`User ${userId} not found!`);
   }
 
-  const comment = await db
-    .insertInto('event_comments')
-    .values({
-      event_series_id: seriesId,
-      event_occurrence_id: eventOccurrenceId,
-      user_id: userId,
-      body: data.body,
-    })
-    .returningAll()
-    .executeTakeFirstOrThrow();
+  // Notify the participants of the commented occurrence (or of the whole
+  // series for a series-wide comment) and the series' managers, except the
+  // comment author.
+  const organization = await getCalendarOrganizationOrThrow(series.calendar_id);
+  const participants = eventOccurrenceId
+    ? await fetchOccurrenceParticipantIds(seriesId, eventOccurrenceId)
+    : await fetchSeriesParticipantIds(seriesId);
+  const recipients = [...participants, ...(await fetchSeriesManagerIds(seriesId))];
+  const commentParams = {
+    eventTitle: series.title,
+    ...(occurrenceStart ? { start: occurrenceStart.toISOString() } : {}),
+  };
+
+  const comment = await db.transaction().execute(async tx => {
+    const inserted = await tx
+      .insertInto('event_comments')
+      .values({
+        event_series_id: seriesId,
+        event_occurrence_id: eventOccurrenceId,
+        user_id: userId,
+        body: data.body,
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    await notifyUsers(
+      tx,
+      recipients,
+      userId,
+      'newEventComment',
+      commentParams,
+      organization.organizationId,
+    );
+    return inserted;
+  });
 
   return serializeComment({ ...comment, user_name: user.name });
 }
@@ -2157,9 +4207,10 @@ function serializeSeriesManagement(
   siteName: string | null,
   roomName: string | null,
   teams: EventSeriesTeamResponse[],
+  conflicts?: BookingConflict[],
 ): EventSeriesManagementResponse {
   return {
-    ...serializeSeries(series),
+    ...serializeSeries(series, conflicts),
     organizationId: organization.organizationId,
     organizationName: organization.organizationName,
     siteName,
@@ -2441,11 +4492,17 @@ export async function updateEventSeriesConfig(
     ? ((await getRoomNames([updated.room_id])).get(updated.room_id) ?? null)
     : null;
   const teamsMap = await getSeriesTeamsMap([seriesId]);
+  const conflicts = await findSeriesBookingConflicts(
+    organization.organizationId,
+    updated,
+    seriesId,
+  );
   return serializeSeriesManagement(
     updated,
     organization,
     siteName,
     roomName,
     teamsMap.get(seriesId) ?? [],
+    conflicts,
   );
 }

@@ -2,10 +2,12 @@ import { expect, test } from '@playwright/test';
 import {
   adminUser,
   createOrganization,
+  gotoApp,
   interceptMutation,
   mockCommonApis,
   mockOrgApis,
   ORG_ID,
+  pickDate,
   regularUser,
   userWithPermissions,
 } from './helpers.js';
@@ -24,7 +26,7 @@ test.describe('Organization General page', () => {
   test.describe('data display', () => {
     test('shows organization details', async ({ page }) => {
       await mockCommonApis(page, adminUser(), [testOrg]);
-      await page.goto('/organization/general');
+      await gotoApp(page, '/organization/general');
 
       await expect(page.getByRole('heading', { name: 'Acme Events' })).toBeVisible();
       await expect(page.getByText('We organize community events')).toBeVisible();
@@ -35,21 +37,21 @@ test.describe('Organization General page', () => {
   test.describe('permission-based UI', () => {
     test('admin sees the Edit button', async ({ page }) => {
       await mockCommonApis(page, adminUser(), [testOrg]);
-      await page.goto('/organization/general');
+      await gotoApp(page, '/organization/general');
 
       await expect(page.getByRole('button', { name: 'Edit' })).toBeVisible();
     });
 
     test('user with organization:write sees the Edit button', async ({ page }) => {
       await mockCommonApis(page, userWithPermissions(['organization:write']), [testOrg]);
-      await page.goto('/organization/general');
+      await gotoApp(page, '/organization/general');
 
       await expect(page.getByRole('button', { name: 'Edit' })).toBeVisible();
     });
 
     test('regular user (no permissions) does not see the Edit button', async ({ page }) => {
       await mockCommonApis(page, regularUser(), [testOrg]);
-      await page.goto('/organization/general');
+      await gotoApp(page, '/organization/general');
 
       await expect(page.getByRole('button', { name: 'Edit' })).toHaveCount(0);
       // But still sees the data
@@ -69,10 +71,10 @@ test.describe('Organization General page', () => {
         updatedOrg,
       );
 
-      await page.goto('/organization/general');
+      await gotoApp(page, '/organization/general');
 
       await page.getByRole('button', { name: 'Edit' }).click();
-      await expect(page.getByRole('heading', { name: 'Edit organization' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Edit organisation' })).toBeVisible();
 
       const nameInput = page.getByRole('textbox', { name: 'Name' });
       await nameInput.fill('Acme Events Updated');
@@ -87,7 +89,7 @@ test.describe('Organization General page', () => {
 
     test('shows validation error for empty name', async ({ page }) => {
       await mockCommonApis(page, adminUser(), [testOrg]);
-      await page.goto('/organization/general');
+      await gotoApp(page, '/organization/general');
 
       await page.getByRole('button', { name: 'Edit' }).click();
       const nameInput = page.getByRole('textbox', { name: 'Name' });
@@ -130,7 +132,7 @@ test.describe('Organization Sites page', () => {
     test('shows sites in a table', async ({ page }) => {
       await mockCommonApis(page, adminUser(), [testOrg]);
       await mockOrgApis(page, ORG_ID, { sites: mockSites });
-      await page.goto('/organization/sites');
+      await gotoApp(page, '/organization/sites');
 
       await expect(page.getByRole('heading', { name: 'Sites' })).toBeVisible();
       await expect(page.getByText('Main Hall').first()).toBeVisible();
@@ -142,7 +144,7 @@ test.describe('Organization Sites page', () => {
     test('shows empty state when no sites', async ({ page }) => {
       await mockCommonApis(page, adminUser(), [testOrg]);
       await mockOrgApis(page, ORG_ID, { sites: [] });
-      await page.goto('/organization/sites');
+      await gotoApp(page, '/organization/sites');
 
       await expect(page.getByText('No results found')).toBeVisible();
     });
@@ -152,7 +154,7 @@ test.describe('Organization Sites page', () => {
     test('admin sees the Add button', async ({ page }) => {
       await mockCommonApis(page, adminUser(), [testOrg]);
       await mockOrgApis(page, ORG_ID, { sites: mockSites });
-      await page.goto('/organization/sites');
+      await gotoApp(page, '/organization/sites');
 
       await expect(page.getByRole('button', { name: 'Add' })).toBeVisible();
     });
@@ -160,7 +162,7 @@ test.describe('Organization Sites page', () => {
     test('user with site-management:write sees the Add button', async ({ page }) => {
       await mockCommonApis(page, userWithPermissions(['site-management:write']), [testOrg]);
       await mockOrgApis(page, ORG_ID, { sites: mockSites });
-      await page.goto('/organization/sites');
+      await gotoApp(page, '/organization/sites');
 
       await expect(page.getByRole('button', { name: 'Add' })).toBeVisible();
     });
@@ -168,7 +170,7 @@ test.describe('Organization Sites page', () => {
     test('regular user does not see the Add button', async ({ page }) => {
       await mockCommonApis(page, regularUser(), [testOrg]);
       await mockOrgApis(page, ORG_ID, { sites: mockSites });
-      await page.goto('/organization/sites');
+      await gotoApp(page, '/organization/sites');
 
       await expect(page.getByRole('button', { name: 'Add' })).toHaveCount(0);
       // But still sees the data
@@ -197,7 +199,7 @@ test.describe('Organization Sites page', () => {
         newSite,
       );
 
-      await page.goto('/organization/sites');
+      await gotoApp(page, '/organization/sites');
       await page.getByRole('button', { name: 'Add' }).click();
 
       await expect(page.getByRole('heading', { name: 'New site' })).toBeVisible();
@@ -221,7 +223,7 @@ test.describe('Organization Sites page', () => {
     test('clicking a site row navigates to site config', async ({ page }) => {
       await mockCommonApis(page, adminUser(), [testOrg]);
       await mockOrgApis(page, ORG_ID, { sites: mockSites });
-      await page.goto('/organization/sites');
+      await gotoApp(page, '/organization/sites');
 
       await page.getByText('Main Hall').click();
       await expect(page).toHaveURL('/organization/sites/site-1');
@@ -277,7 +279,7 @@ test.describe('Site Config page', () => {
       await mockCommonApis(page, adminUser(), [testOrg]);
       await mockOrgApis(page, ORG_ID, { sites: mockSites, rooms: mockRooms });
       await mockSiteDetail(page);
-      await page.goto('/organization/sites/site-1');
+      await gotoApp(page, '/organization/sites/site-1');
 
       await expect(page.getByRole('heading', { name: 'Main Hall' })).toBeVisible();
       await expect(page.getByText('123 Main Street')).toBeVisible();
@@ -296,7 +298,7 @@ test.describe('Site Config page', () => {
       await mockCommonApis(page, adminUser(), [testOrg]);
       await mockOrgApis(page, ORG_ID, { sites: mockSites, rooms: mockRooms });
       await mockSiteDetail(page);
-      await page.goto('/organization/sites/site-1');
+      await gotoApp(page, '/organization/sites/site-1');
 
       await expect(page.getByRole('button', { name: 'Edit' })).toBeVisible();
       // Room add button
@@ -308,7 +310,7 @@ test.describe('Site Config page', () => {
       await mockCommonApis(page, regularUser(), [testOrg]);
       await mockOrgApis(page, ORG_ID, { sites: mockSites, rooms: mockRooms });
       await mockSiteDetail(page);
-      await page.goto('/organization/sites/site-1');
+      await gotoApp(page, '/organization/sites/site-1');
 
       await expect(page.getByRole('button', { name: 'Edit' })).toHaveCount(0);
       // Room add button should not be visible
@@ -352,7 +354,7 @@ test.describe('Site Config page', () => {
           }),
       );
 
-      await page.goto('/organization/sites/site-1');
+      await gotoApp(page, '/organization/sites/site-1');
 
       await page.getByRole('button', { name: 'Edit' }).click();
       await expect(page.getByRole('heading', { name: 'Edit site' })).toBeVisible();
@@ -391,7 +393,7 @@ test.describe('Site Config page', () => {
         newRoom,
       );
 
-      await page.goto('/organization/sites/site-1');
+      await gotoApp(page, '/organization/sites/site-1');
 
       const roomsSection = page.getByRole('heading', { name: 'Rooms' }).locator('..');
       await roomsSection.getByRole('button', { name: 'Add' }).click();
@@ -413,7 +415,7 @@ test.describe('Site Config page', () => {
       await mockCommonApis(page, adminUser(), [testOrg]);
       await mockOrgApis(page, ORG_ID, { sites: mockSites, rooms: mockRooms });
       await mockSiteDetail(page);
-      await page.goto('/organization/sites/site-1');
+      await gotoApp(page, '/organization/sites/site-1');
 
       await page.getByText('Conference Room A').click();
       await expect(page).toHaveURL('/organization/sites/site-1/rooms/room-1');
@@ -423,7 +425,7 @@ test.describe('Site Config page', () => {
       await mockCommonApis(page, adminUser(), [testOrg]);
       await mockOrgApis(page, ORG_ID, { sites: mockSites, rooms: mockRooms });
       await mockSiteDetail(page);
-      await page.goto('/organization/sites/site-1');
+      await gotoApp(page, '/organization/sites/site-1');
 
       await page.getByRole('button', { name: 'Back to sites' }).click();
       await expect(page).toHaveURL('/organization/sites');
@@ -443,7 +445,7 @@ test.describe('Room Config page', () => {
       await page.route(`**/api/v1/organizations/${ORG_ID}/sites/site-1/rooms/room-1`, route =>
         route.fulfill({ json: mockRooms[0] }),
       );
-      await page.goto('/organization/sites/site-1/rooms/room-1');
+      await gotoApp(page, '/organization/sites/site-1/rooms/room-1');
 
       await expect(page.getByRole('heading', { name: 'Conference Room A' })).toBeVisible();
       await expect(page.getByText('Large conference room')).toBeVisible();
@@ -457,7 +459,7 @@ test.describe('Room Config page', () => {
       await page.route(`**/api/v1/organizations/${ORG_ID}/sites/site-1/rooms/room-1`, route =>
         route.fulfill({ json: mockRooms[0] }),
       );
-      await page.goto('/organization/sites/site-1/rooms/room-1');
+      await gotoApp(page, '/organization/sites/site-1/rooms/room-1');
 
       await expect(page.getByRole('button', { name: 'Edit' })).toBeVisible();
     });
@@ -468,7 +470,7 @@ test.describe('Room Config page', () => {
       await page.route(`**/api/v1/organizations/${ORG_ID}/sites/site-1/rooms/room-1`, route =>
         route.fulfill({ json: mockRooms[0] }),
       );
-      await page.goto('/organization/sites/site-1/rooms/room-1');
+      await gotoApp(page, '/organization/sites/site-1/rooms/room-1');
 
       await expect(page.getByRole('button', { name: 'Edit' })).toHaveCount(0);
     });
@@ -494,7 +496,7 @@ test.describe('Room Config page', () => {
         },
       );
 
-      await page.goto('/organization/sites/site-1/rooms/room-1');
+      await gotoApp(page, '/organization/sites/site-1/rooms/room-1');
 
       await page.getByRole('button', { name: 'Edit' }).click();
       await expect(page.getByRole('heading', { name: 'Edit room' })).toBeVisible();
@@ -518,7 +520,7 @@ test.describe('Room Config page', () => {
       await page.route(`**/api/v1/organizations/${ORG_ID}/sites/site-1/rooms/room-1`, route =>
         route.fulfill({ json: mockRooms[0] }),
       );
-      await page.goto('/organization/sites/site-1/rooms/room-1');
+      await gotoApp(page, '/organization/sites/site-1/rooms/room-1');
 
       await page.getByRole('button', { name: 'Back to site' }).click();
       await expect(page).toHaveURL('/organization/sites/site-1');
@@ -554,7 +556,7 @@ test.describe('Organization Work Roles page', () => {
     test('shows work roles in a table', async ({ page }) => {
       await mockCommonApis(page, adminUser(), [testOrg]);
       await mockOrgApis(page, ORG_ID, { workRoles: mockWorkRoles });
-      await page.goto('/organization/work-roles');
+      await gotoApp(page, '/organization/work-roles');
 
       await expect(page.getByRole('heading', { name: 'Work Roles' })).toBeVisible();
       await expect(page.getByText('Setup Crew').first()).toBeVisible();
@@ -567,7 +569,7 @@ test.describe('Organization Work Roles page', () => {
     test('admin sees the Add button', async ({ page }) => {
       await mockCommonApis(page, adminUser(), [testOrg]);
       await mockOrgApis(page, ORG_ID, { workRoles: mockWorkRoles });
-      await page.goto('/organization/work-roles');
+      await gotoApp(page, '/organization/work-roles');
 
       await expect(page.getByRole('button', { name: 'Add' })).toBeVisible();
     });
@@ -575,7 +577,7 @@ test.describe('Organization Work Roles page', () => {
     test('user with work-role-management:write sees the Add button', async ({ page }) => {
       await mockCommonApis(page, userWithPermissions(['work-role-management:write']), [testOrg]);
       await mockOrgApis(page, ORG_ID, { workRoles: mockWorkRoles });
-      await page.goto('/organization/work-roles');
+      await gotoApp(page, '/organization/work-roles');
 
       await expect(page.getByRole('button', { name: 'Add' })).toBeVisible();
     });
@@ -583,7 +585,7 @@ test.describe('Organization Work Roles page', () => {
     test('regular user does not see the Add button', async ({ page }) => {
       await mockCommonApis(page, regularUser(), [testOrg]);
       await mockOrgApis(page, ORG_ID, { workRoles: mockWorkRoles });
-      await page.goto('/organization/work-roles');
+      await gotoApp(page, '/organization/work-roles');
 
       await expect(page.getByRole('button', { name: 'Add' })).toHaveCount(0);
     });
@@ -609,7 +611,7 @@ test.describe('Organization Work Roles page', () => {
         newRole,
       );
 
-      await page.goto('/organization/work-roles');
+      await gotoApp(page, '/organization/work-roles');
       await page.getByRole('button', { name: 'Add' }).click();
 
       await expect(page.getByRole('heading', { name: 'New work role' })).toBeVisible();
@@ -626,7 +628,7 @@ test.describe('Organization Work Roles page', () => {
     test('clicking a work role row navigates to work role config', async ({ page }) => {
       await mockCommonApis(page, adminUser(), [testOrg]);
       await mockOrgApis(page, ORG_ID, { workRoles: mockWorkRoles });
-      await page.goto('/organization/work-roles');
+      await gotoApp(page, '/organization/work-roles');
 
       await page.getByText('Setup Crew').click();
       await expect(page).toHaveURL('/organization/work-roles/1');
@@ -698,7 +700,7 @@ test.describe('Work Role Config page', () => {
   test.describe('data display', () => {
     test('shows work role details, certifications, and assigned users', async ({ page }) => {
       await setupWorkRoleConfig(page);
-      await page.goto('/organization/work-roles/1');
+      await gotoApp(page, '/organization/work-roles/1');
 
       await expect(page.getByRole('heading', { name: 'Setup Crew' })).toBeVisible();
       await expect(page.getByText('Sets up the venue')).toBeVisible();
@@ -718,7 +720,7 @@ test.describe('Work Role Config page', () => {
   test.describe('permission-based UI', () => {
     test('admin sees Edit button and MultiSelect for certifications', async ({ page }) => {
       await setupWorkRoleConfig(page, adminUser());
-      await page.goto('/organization/work-roles/1');
+      await gotoApp(page, '/organization/work-roles/1');
 
       await expect(page.getByRole('button', { name: 'Edit' })).toBeVisible();
       // MultiSelect for certifications should be visible
@@ -727,7 +729,7 @@ test.describe('Work Role Config page', () => {
 
     test('regular user sees read-only certification badges', async ({ page }) => {
       await setupWorkRoleConfig(page, regularUser());
-      await page.goto('/organization/work-roles/1');
+      await gotoApp(page, '/organization/work-roles/1');
 
       await expect(page.getByRole('button', { name: 'Edit' })).toHaveCount(0);
       // Certifications shown as badges, not MultiSelect
@@ -756,7 +758,7 @@ test.describe('Work Role Config page', () => {
         },
       );
 
-      await page.goto('/organization/work-roles/1');
+      await gotoApp(page, '/organization/work-roles/1');
 
       await page.getByRole('button', { name: 'Edit' }).click();
       await expect(page.getByRole('heading', { name: 'Edit work role' })).toBeVisible();
@@ -784,7 +786,7 @@ test.describe('Work Role Config page', () => {
         {},
       );
 
-      await page.goto('/organization/work-roles/1');
+      await gotoApp(page, '/organization/work-roles/1');
 
       // Select Forklift License in the MultiSelect
       await page.getByPlaceholder('Select certifications...').click();
@@ -800,7 +802,7 @@ test.describe('Work Role Config page', () => {
   test.describe('navigation', () => {
     test('back to list button returns to work roles list', async ({ page }) => {
       await setupWorkRoleConfig(page, adminUser());
-      await page.goto('/organization/work-roles/1');
+      await gotoApp(page, '/organization/work-roles/1');
 
       await page.getByRole('button', { name: 'Back to work roles' }).click();
       await expect(page).toHaveURL('/organization/work-roles');
@@ -837,12 +839,41 @@ const mockOrgUsers = [
   },
 ];
 
+const mockEventAssignments = {
+  items: [
+    {
+      occurrenceId: 101,
+      seriesId: 5,
+      title: 'Weekly Community Meeting',
+      organizationId: ORG_ID,
+      organizationName: 'Acme Events',
+      occurrenceStart: '2026-11-09T16:00:00.000Z',
+      start: '2026-11-09T16:00:00.000Z',
+      end: '2026-11-09T17:30:00.000Z',
+      isRescheduled: false,
+      isCancelled: false,
+      roles: [
+        {
+          slotId: 11,
+          title: 'Take minutes',
+          workRoleId: 1,
+          workRoleName: 'Setup Crew',
+          isCritical: true,
+        },
+      ],
+    },
+  ],
+  total: 1,
+  page: 0,
+  limit: 5,
+};
+
 test.describe('Organization Users page', () => {
   test.describe('data display', () => {
     test('shows organization users in a table', async ({ page }) => {
       await mockCommonApis(page, adminUser(), [testOrg]);
       await mockOrgApis(page, ORG_ID, { orgUsers: mockOrgUsers });
-      await page.goto('/organization/users');
+      await gotoApp(page, '/organization/users');
 
       await expect(page.getByRole('heading', { name: 'Users' })).toBeVisible();
       await expect(page.getByText('Alice Anderson')).toBeVisible();
@@ -854,7 +885,7 @@ test.describe('Organization Users page', () => {
     test('clicking a user row navigates to org user profile', async ({ page }) => {
       await mockCommonApis(page, adminUser(), [testOrg]);
       await mockOrgApis(page, ORG_ID, { orgUsers: mockOrgUsers });
-      await page.goto('/organization/users');
+      await gotoApp(page, '/organization/users');
 
       await page.getByText('Alice Anderson').click();
       await expect(page).toHaveURL('/organization/users/user-1');
@@ -918,12 +949,19 @@ test.describe('Organization User Profile page', () => {
           ],
         }),
     );
+    // Mock the user's event assignments (paginated)
+    await page.route(
+      url =>
+        url.pathname === `/api/v1/organizations/${ORG_ID}/users/user-2/event-assignments` &&
+        url.searchParams.has('page'),
+      route => route.fulfill({ json: mockEventAssignments }),
+    );
   }
 
   test.describe('data display', () => {
     test('shows user details, work roles, and certifications', async ({ page }) => {
       await setupOrgUserProfile(page);
-      await page.goto('/organization/users/user-2');
+      await gotoApp(page, '/organization/users/user-2');
 
       await expect(page.getByRole('heading', { name: 'Bob Brown' })).toBeVisible();
       await expect(page.getByText('bob@example.com')).toBeVisible();
@@ -941,7 +979,7 @@ test.describe('Organization User Profile page', () => {
   test.describe('permission-based UI', () => {
     test('admin sees management controls for work roles and certifications', async ({ page }) => {
       await setupOrgUserProfile(page, adminUser());
-      await page.goto('/organization/users/user-2');
+      await gotoApp(page, '/organization/users/user-2');
 
       // Should see Select for adding roles
       await expect(page.getByPlaceholder('Select a role...')).toBeVisible();
@@ -952,7 +990,7 @@ test.describe('Organization User Profile page', () => {
 
     test('regular user sees read-only view', async ({ page }) => {
       await setupOrgUserProfile(page, regularUser());
-      await page.goto('/organization/users/user-2');
+      await gotoApp(page, '/organization/users/user-2');
 
       // No management controls
       await expect(page.getByPlaceholder('Select a role...')).toHaveCount(0);
@@ -985,7 +1023,7 @@ test.describe('Organization User Profile page', () => {
         },
       );
 
-      await page.goto('/organization/users/user-2');
+      await gotoApp(page, '/organization/users/user-2');
 
       await page.getByPlaceholder('Select a role...').click();
       await page.getByRole('option', { name: 'Security' }).click();
@@ -1018,7 +1056,7 @@ test.describe('Organization User Profile page', () => {
         },
       );
 
-      await page.goto('/organization/users/user-2');
+      await gotoApp(page, '/organization/users/user-2');
 
       await page.getByRole('button', { name: 'Not qualified' }).click();
 
@@ -1037,7 +1075,7 @@ test.describe('Organization User Profile page', () => {
         'DELETE',
       );
 
-      await page.goto('/organization/users/user-2');
+      await gotoApp(page, '/organization/users/user-2');
 
       const roleRow = page.locator('text=Setup Crew').locator('..').locator('..');
       await roleRow.getByRole('button', { name: 'Delete' }).click();
@@ -1068,13 +1106,16 @@ test.describe('Organization User Profile page', () => {
         },
       );
 
-      await page.goto('/organization/users/user-2');
+      await gotoApp(page, '/organization/users/user-2');
 
       await page.getByPlaceholder('Select a certification...').click();
       await page.getByRole('option', { name: 'Forklift License' }).click();
 
-      // Set date
-      await page.getByLabel('Certification date').fill('2025-06-01');
+      // Set date (the empty picker opens on the current month, so pick a
+      // date in the current month)
+      const now = new Date();
+      const certDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-05`;
+      await pickDate(page, 'Certification date', certDate);
 
       await page.getByRole('button', { name: 'Add certification' }).click();
 
@@ -1083,7 +1124,7 @@ test.describe('Organization User Profile page', () => {
         .toBe(1);
       expect(captured[0].body).toMatchObject({
         certificationId: 2,
-        certificationDate: '2025-06-01',
+        certificationDate: certDate,
       });
     });
   });
@@ -1091,10 +1132,115 @@ test.describe('Organization User Profile page', () => {
   test.describe('navigation', () => {
     test('back to list button returns to org users', async ({ page }) => {
       await setupOrgUserProfile(page, adminUser());
-      await page.goto('/organization/users/user-2');
+      await gotoApp(page, '/organization/users/user-2');
 
       await page.getByRole('button', { name: 'Back to users' }).click();
       await expect(page).toHaveURL('/organization/users');
+    });
+  });
+
+  test.describe('event assignments card', () => {
+    const assignmentsUrl = `**/api/v1/organizations/${ORG_ID}/users/user-2/event-assignments?*`;
+
+    function expectedDateInput(offsetMonths: number): string {
+      const now = new Date();
+      const d = new Date(now.getFullYear(), now.getMonth() + offsetMonths, now.getDate());
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${d.getFullYear()}-${month}-${day}`;
+    }
+
+    test('shows the assigned occurrences with their roles and the default date span', async ({
+      page,
+    }) => {
+      await setupOrgUserProfile(page);
+      const requests: string[] = [];
+      await page.route(assignmentsUrl, route => {
+        requests.push(route.request().url());
+        return route.fulfill({ json: mockEventAssignments });
+      });
+      await gotoApp(page, '/organization/users/user-2');
+
+      await expect(page.getByRole('heading', { name: 'Event assignments' })).toBeVisible();
+      await expect(page.getByText('Weekly Community Meeting')).toBeVisible();
+      // The assigned role is shown as a badge (the work roles card also shows "Setup Crew").
+      await expect(
+        page.locator('span.mantine-Badge-label', { hasText: 'Setup Crew' }),
+      ).toBeVisible();
+
+      // Date fields default to one month back and forward from today.
+      await expect(page.getByLabel('From')).toHaveText(expectedDateInput(-1));
+      await expect(page.getByLabel('To')).toHaveText(expectedDateInput(1));
+
+      // The request carries the default span and pagination.
+      await expect
+        .poll(() => requests.length, { message: 'event-assignments was called' })
+        .toBeGreaterThan(0);
+      const url = new URL(requests[0]);
+      expect(url.searchParams.get('page')).toBe('0');
+      expect(url.searchParams.get('limit')).toBe('5');
+      const start = new Date(url.searchParams.get('start') as string);
+      const end = new Date(url.searchParams.get('end') as string);
+      expect(start.getTime()).toBeLessThanOrEqual(Date.now());
+      expect(end.getTime()).toBeGreaterThan(Date.now());
+    });
+
+    test('changing the date span refetches with the new range', async ({ page }) => {
+      await setupOrgUserProfile(page);
+      const requests: string[] = [];
+      await page.route(assignmentsUrl, route => {
+        requests.push(route.request().url());
+        return route.fulfill({ json: mockEventAssignments });
+      });
+      await gotoApp(page, '/organization/users/user-2');
+
+      await expect(page.getByRole('heading', { name: 'Event assignments' })).toBeVisible();
+      // The "From" field defaults to one month back, so its picker opens on
+      // that month; pick the 5th of it.
+      const now = new Date();
+      const fromDate = new Date(now.getFullYear(), now.getMonth() - 1, 5);
+      const from = `${fromDate.getFullYear()}-${String(fromDate.getMonth() + 1).padStart(2, '0')}-05`;
+      await pickDate(page, 'From', from);
+
+      // The app sends the local-midnight ISO of the picked date.
+      const expectedStart = new Date(`${from}T00:00:00`).toISOString();
+      await expect
+        .poll(
+          () =>
+            requests.some(u =>
+              (new URL(u).searchParams.get('start') ?? '').startsWith(expectedStart),
+            ),
+          { message: 'event-assignments was called with the new start date' },
+        )
+        .toBe(true);
+    });
+
+    test('paginates the assignments list', async ({ page }) => {
+      await setupOrgUserProfile(page);
+      const requests: string[] = [];
+      await page.route(assignmentsUrl, route => {
+        requests.push(route.request().url());
+        return route.fulfill({ json: { ...mockEventAssignments, total: 12 } });
+      });
+      await gotoApp(page, '/organization/users/user-2');
+
+      await expect(page.getByText('Page 1 of 3')).toBeVisible();
+      await page.getByRole('button', { name: 'Next' }).click();
+
+      await expect
+        .poll(() => requests.some(u => new URL(u).searchParams.get('page') === '1'), {
+          message: 'event-assignments was called with page=1',
+        })
+        .toBe(true);
+      await expect(page.getByText('Page 2 of 3')).toBeVisible();
+    });
+
+    test('regular user without events:read does not see the card', async ({ page }) => {
+      await setupOrgUserProfile(page, regularUser());
+      await gotoApp(page, '/organization/users/user-2');
+
+      await expect(page.getByRole('heading', { name: 'Bob Brown' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Event assignments' })).toHaveCount(0);
     });
   });
 });

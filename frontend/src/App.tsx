@@ -1,15 +1,20 @@
 import { Box, Loader, MantineProvider } from '@mantine/core';
 
+import { useEffect } from 'react';
 import { Provider } from 'react-redux';
 import { Route, Routes } from 'react-router-dom';
 import { useGetCurrentUserQuery } from './api/index.js';
 import NavBar from './components/NavBar/NavBar.js';
+import i18n from './i18n/index.js';
+import AbsencesPage from './pages/Absences/AbsencesPage.js';
 import AccountPage from './pages/Account/Account.js';
 import ErrorPage from './pages/ErrorPage/ErrorPage.js';
 import CalendarPage from './pages/Events/CalendarPage.js';
 import EventConfigPage from './pages/Events/EventConfigPage.js';
 import EventManagementPage from './pages/Events/EventManagementPage.js';
+import EventNewPage from './pages/Events/EventNewPage.js';
 import EventOccurrencePage from './pages/Events/EventOccurrencePage.js';
+import StaffingPage from './pages/Events/StaffingPage.js';
 import Home from './pages/Home/Home.js';
 import LoginPage from './pages/Login/LoginPage.js';
 import OrgGeneralPage from './pages/Organization/OrgGeneralPage.js';
@@ -29,6 +34,14 @@ import { store } from './store/index.js';
 
 function AppContent() {
   const { data: currentUser, isLoading, isError } = useGetCurrentUserQuery();
+
+  // Apply the language saved on the user's account once it is loaded. The
+  // initial language comes from localStorage (see i18n/index.ts).
+  useEffect(() => {
+    if (currentUser && currentUser.language !== i18n.language) {
+      void i18n.changeLanguage(currentUser.language);
+    }
+  }, [currentUser]);
 
   if (isError) {
     return <LoginPage />;
@@ -56,7 +69,9 @@ function AppContent() {
         <Route path="/" element={<Home />} />
         <Route path="/events/calendar" element={<CalendarPage />} />
         <Route path="/events/management" element={<EventManagementPage />} />
+        <Route path="/events/staffing" element={<StaffingPage />} />
         <Route path="/events/occurrences/:occurrenceRef" element={<EventOccurrencePage />} />
+        <Route path="/events/new" element={<EventNewPage />} />
         <Route path="/events/:eventId" element={<EventConfigPage />} />
         <Route path="/teams" element={<TeamsPage />} />
         <Route path="/teams/:teamId" element={<TeamManagementPage />} />
@@ -67,6 +82,7 @@ function AppContent() {
         <Route path="/organization/work-roles" element={<OrgWorkRolesPage />} />
         <Route path="/organization/work-roles/:workRoleId" element={<WorkRoleConfigPage />} />
         <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/absences" element={<AbsencesPage />} />
         <Route path="/organization/users" element={<OrgUsersPage />} />
         <Route path="/organization/users/:userId" element={<OrgUserProfilePage />} />
         <Route path="/users" element={<UserList />} />

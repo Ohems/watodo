@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { api } from '../../api/index.js';
+import { organizationsApi } from '../../api/index.js';
 import { type MockApi, mockApi } from '../../test/api-mock.js';
 import { renderWithProviders } from '../../test/test-utils.js';
 import type { Organization, User } from '../../types/index.js';
@@ -30,6 +30,10 @@ const mockUser: User = {
   email: 'test@example.com',
   description: '',
   phoneNumber: null,
+  language: 'en-GB',
+  weekStart: 'sunday',
+  dateFormat: 'ymd',
+  timeFormat: '24h',
   permissions: ['admin'],
   state: 'active',
   isEmployed: true,
@@ -56,7 +60,7 @@ describe('NavBar', () => {
     expect(await screen.findByText('Test User')).toBeInTheDocument();
     // The selector in the app bar; the mobile menu is aria-hidden while closed
     // (its selector is covered by the mobile menu test below).
-    expect(screen.getByRole('combobox', { name: 'Select organization' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Select organisation' })).toBeInTheDocument();
     expect(screen.getAllByText('Org A').length).toBeGreaterThan(0);
   });
 
@@ -67,9 +71,11 @@ describe('NavBar', () => {
 
     expect(await screen.findByText('Test User')).toBeInTheDocument();
     await waitFor(() => {
-      expect(api.endpoints.getMyOrganizations.select()(store.getState()).isSuccess).toBe(true);
+      expect(
+        organizationsApi.endpoints.getMyOrganizations.select()(store.getState()).isSuccess,
+      ).toBe(true);
     });
-    expect(screen.queryByRole('combobox', { name: 'Select organization' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Select organisation' })).not.toBeInTheDocument();
   });
 
   it('activates another organization when selected', async () => {
@@ -77,7 +83,7 @@ describe('NavBar', () => {
 
     const { store } = renderWithProviders(<NavBar />);
 
-    fireEvent.click(await screen.findByRole('combobox', { name: 'Select organization' }));
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Select organisation' }));
     // jsdom has no layout, so Mantine keeps the floating dropdown hidden;
     // the options are still in the accessibility tree with `hidden: true`.
     fireEvent.click(await screen.findByRole('option', { name: 'Org B', hidden: true }));
@@ -94,7 +100,7 @@ describe('NavBar', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'navigation menu' }));
     expect(await screen.findByRole('menu')).toBeInTheDocument();
     // The organization selector renders inside the mobile menu dropdown.
-    const selectors = screen.getAllByRole('combobox', { name: 'Select organization' });
+    const selectors = screen.getAllByRole('combobox', { name: 'Select organisation' });
     expect(selectors.length).toBeGreaterThan(0);
   });
 });

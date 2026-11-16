@@ -1,3 +1,14 @@
+import type { Language } from '../i18n/index.js';
+
+/** First day of the week shown in calendars. */
+export type WeekStart = 'sunday' | 'monday';
+
+/** Date format used when displaying dates: year-month-day, month-day-year or day-month-year. */
+export type DateFormat = 'ymd' | 'mdy' | 'dmy';
+
+/** Time format used when displaying times: 24-hour or 12-hour clock. */
+export type TimeFormat = '24h' | '12h';
+
 export interface User {
   id: string;
   name: string;
@@ -5,6 +16,14 @@ export interface User {
   description: string;
   /** Optional contact number in E.164 format (includes the country code). */
   phoneNumber: string | null;
+  /** UI language (BCP 47 tag of a supported locale, e.g. 'en-GB'). */
+  language: Language;
+  /** First day of the week shown in calendars. */
+  weekStart: WeekStart;
+  /** Date format used when displaying dates. */
+  dateFormat: DateFormat;
+  /** Time format used when displaying times. */
+  timeFormat: TimeFormat;
   permissions: string[];
   state: 'active' | 'inactive';
   isEmployed: boolean;
@@ -28,6 +47,10 @@ export interface UserSelfUpdate {
   description?: string | null;
   /** E.164 format (includes the country code); null clears the number. */
   phoneNumber?: string | null;
+  language?: Language;
+  weekStart?: WeekStart;
+  dateFormat?: DateFormat;
+  timeFormat?: TimeFormat;
 }
 
 /** A login method (OAuth provider account) connected to the user's account. */
@@ -40,6 +63,39 @@ export interface AuthAccount {
 export interface UserListItem {
   id: string;
   name: string;
+  /** True when the user has an absence overlapping the requested range. */
+  hasAbsence: boolean;
+  /** Work role assignments overlapping the requested range (0 when no range given). */
+  assignmentCount: number;
+}
+
+/** A required certification the candidate does not hold, or holds only expired. */
+export interface MissingCertification {
+  certificationId: number;
+  name: string;
+  /**
+   * Expiry date (YYYY-MM-DD) when the user holds the certification but it has
+   * expired; null when the user does not hold it at all.
+   */
+  expiredDate: string | null;
+}
+
+/** A user listed as an assignment candidate for a work role slot. */
+export interface AssignmentCandidate {
+  id: string;
+  name: string;
+  /** True when the user has an absence overlapping the requested range. */
+  hasAbsence: boolean;
+  /** True when the user declared the slot's work role. */
+  hasWorkRole: boolean;
+  /** The qualification flag of the user's declared work role (false when not declared). */
+  isQualified: boolean;
+  /** Required certifications of the slot's work role the user is missing or holds expired. */
+  missingCertifications: MissingCertification[];
+  /** Assignments of the user overlapping the requested range (0 when no range given). */
+  assignmentCount: number;
+  /** Workload hours of the user overlapping the requested range (0 when no range given). */
+  workloadHours: number;
 }
 
 export interface AuthProviderInfo {
@@ -93,6 +149,25 @@ export interface RecurrenceInput {
   count?: number;
 }
 
+/**
+ * A booking conflict reported by a write: an occurrence of another series in
+ * the same organization that overlaps the saved booking and shares the same
+ * room, or whose site is reserved (whole-site reservation on either side).
+ */
+export interface BookingConflict {
+  seriesId: number;
+  title: string;
+  /** Original occurrence start of the conflicting occurrence. */
+  occurrenceStart: string;
+  /** Effective start of the conflicting occurrence (after reschedule overrides). */
+  start: string;
+  /** Effective end of the conflicting occurrence. */
+  end: string;
+  siteId: string | null;
+  roomId: string | null;
+  reserveWholeSite: boolean;
+}
+
 export interface EventSeries {
   id: number;
   title: string;
@@ -110,6 +185,8 @@ export interface EventSeries {
   recurrence: RecurrenceInput | null;
   createdAt: string;
   updatedAt: string;
+  /** Booking conflicts detected by the write that returned this series. */
+  conflicts?: BookingConflict[];
 }
 
 export interface EventSeriesPush {
@@ -122,6 +199,9 @@ export interface EventSeriesPush {
   timezone?: string;
   isVisible?: boolean;
   recurrence?: RecurrenceInput | null;
+  siteId?: string | null;
+  roomId?: string | null;
+  reserveWholeSite?: boolean;
 }
 
 export type EventSeriesUpdate = Partial<EventSeriesPush>;
@@ -144,6 +224,29 @@ export interface EventOccurrence {
   isRescheduled: boolean;
   isCancelled: boolean;
   exceptionId: number | null;
+  /** True when the current user is assigned to a work role slot of this occurrence or its series. */
+  isParticipant: boolean;
+  /** True when the current user manages this series via a connected team (team leader or manager member). */
+  isManager: boolean;
+  /** Work role slot status indicators for this occurrence. */
+  workRoleSlots: OccurrenceSlotStatus[];
+  /** Titles of critical, unfilled slots whose work role the current user manages for this series. */
+  managedUnfilledCriticalSlots: string[];
+  /** Number of info slots visible for this occurrence (occurrence-level when materialized, else parent). */
+  infoSlotCount?: number;
+  /** How many of those info slots have a non-empty value. */
+  filledInfoSlotCount?: number;
+}
+
+/** Status indicator for a single work role slot of an occurrence. */
+export interface OccurrenceSlotStatus {
+  slotId: number;
+  title: string;
+  workRoleId: number | null;
+  workRoleName: string | null;
+  isCritical: boolean;
+  /** Number of users assigned to this slot. */
+  assigneeCount: number;
 }
 
 /**
@@ -167,6 +270,8 @@ export interface EventException {
   overrideEnd: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Booking conflicts of the rescheduled occurrence. */
+  conflicts?: BookingConflict[];
 }
 
 export interface EventWorkRoleAssignment {
@@ -204,6 +309,54 @@ export interface EventWorkRolePush {
 
 export type EventWorkRoleUpdate = Partial<EventWorkRolePush>;
 
+// --- Event info slots ---
+
+/** A form-like text field of an event: parent template on the series, per-occurrence copies hold the value. */
+export interface EventInfoSlot {
+  id: number;
+  seriesId: number;
+  /** NULL = parent (series-level) info slot; non-NULL = occurrence-level inherited slot. */
+  occurrenceId: number | null;
+  inheritedFromInfoSlotId: number | null;
+  title: string;
+  description: string;
+  /** The filled text; NULL = not filled yet. */
+  value: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EventInfoSlotPush {
+  title: string;
+  description?: string;
+  value?: string | null;
+}
+
+export type EventInfoSlotUpdate = Partial<EventInfoSlotPush>;
+
+// --- Staffing workload ---
+
+export interface StaffingWorkloadWeek {
+  /** ISO start (Monday) of the week bucket. */
+  start: string;
+  count: number;
+  hours: number;
+}
+
+export interface StaffingWorkloadItem {
+  userId: string;
+  name: string;
+  assignmentCount: number;
+  hours: number;
+  criticalAssignmentCount: number;
+  hasAbsence: boolean;
+  weeks: StaffingWorkloadWeek[];
+}
+
+export interface StaffingWorkloadResponse {
+  items: StaffingWorkloadItem[];
+}
+
 // --- Event readiness ---
 
 export interface RoleReadiness {
@@ -219,6 +372,30 @@ export interface EventReadiness {
   roles: RoleReadiness[];
   isReady: boolean;
   unfilledCriticalCount: number;
+}
+
+/** A work role slot of an occurrence that a user is assigned to. */
+export interface UserEventAssignmentRole {
+  slotId: number;
+  title: string;
+  workRoleId: number | null;
+  workRoleName: string | null;
+  isCritical: boolean;
+}
+
+/** An occurrence together with the slots the user is assigned to. */
+export interface UserEventAssignment {
+  occurrenceId: number | null;
+  seriesId: number;
+  title: string;
+  organizationId: string;
+  organizationName: string;
+  occurrenceStart: string;
+  start: string;
+  end: string;
+  isRescheduled: boolean;
+  isCancelled: boolean;
+  roles: UserEventAssignmentRole[];
 }
 
 export interface EventComment {
@@ -242,26 +419,41 @@ export interface EventOccurrenceDetail {
   occurrenceWorkRoles: EventWorkRole[];
   /** Parent slots not yet imported into this occurrence. */
   missingParentWorkRoles: EventWorkRole[];
+  /** Info slots visible for this occurrence (occurrence-level when materialized, otherwise parent). */
+  infoSlots: EventInfoSlot[];
+  /** Parent (series-level) info slots only. */
+  parentInfoSlots: EventInfoSlot[];
+  /** Occurrence-level (inherited) info slots only. */
+  occurrenceInfoSlots: EventInfoSlot[];
+  /** Parent info slots not yet imported into this occurrence. */
+  missingParentInfoSlots: EventInfoSlot[];
   comments: EventComment[];
   readiness: EventReadiness;
 }
 
 // --- Teams ---
 
-export type TeamType = 'general' | 'event_organizers' | 'role_group';
+export interface TeamWorkRoleLink {
+  id: number;
+  name: string;
+}
+
+export interface TeamEventSeriesLink {
+  id: number;
+  title: string;
+}
 
 export interface Team {
   id: string;
   name: string;
   description: string;
   organizationId: string;
-  teamType: TeamType;
   teamLeaderId: string | null;
   teamLeaderName: string | null;
-  eventTypeId: number | null;
-  eventTypeName: string | null;
-  workRoleId: number | null;
-  workRoleName: string | null;
+  /** Work roles assigned to the team. */
+  workRoles: TeamWorkRoleLink[];
+  /** Event series assigned to the team. */
+  eventSeries: TeamEventSeriesLink[];
   memberCount: number;
   createdAt: string;
   updatedAt: string;
@@ -271,19 +463,17 @@ export interface TeamPush {
   name: string;
   description?: string;
   organizationId: string;
-  teamType?: TeamType;
   teamLeaderId?: string | null;
-  eventTypeId?: number | null;
-  workRoleId?: number | null;
+  workRoleIds?: number[];
+  eventSeriesIds?: number[];
 }
 
 export interface TeamUpdate {
   name?: string;
   description?: string;
-  teamType?: TeamType;
   teamLeaderId?: string | null;
-  eventTypeId?: number | null;
-  workRoleId?: number | null;
+  workRoleIds?: number[];
+  eventSeriesIds?: number[];
 }
 
 export interface TeamMember {
@@ -294,6 +484,8 @@ export interface TeamMember {
   userEmail: string;
   /** When true, the member can manage this specific team. */
   isManager: boolean;
+  /** True when the member currently has an active absence. */
+  hasActiveAbsence: boolean;
   createdAt: string;
 }
 
@@ -450,6 +642,34 @@ export interface UserCertificationUpdate {
   validUntilDate?: string | null;
 }
 
+// --- Absences ---
+
+export type AbsenceType = 'sick' | 'away' | 'other';
+
+export interface Absence {
+  id: number;
+  userId: string;
+  type: AbsenceType;
+  description: string;
+  /** First day of the absence (inclusive), ISO date. */
+  startDate: string;
+  /** Last day of the absence (inclusive), ISO date. */
+  endDate: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AbsencePush {
+  type: AbsenceType;
+  description?: string;
+  /** ISO date (YYYY-MM-DD). */
+  startDate: string;
+  /** ISO date (YYYY-MM-DD), inclusive. */
+  endDate: string;
+}
+
+export type AbsenceUpdate = Partial<AbsencePush>;
+
 // --- Notifications ---
 
 export interface Notification {
@@ -458,10 +678,40 @@ export interface Notification {
   /** The organization this notification belongs to, if any. */
   organizationId: string | null;
   organizationName: string | null;
-  title: string;
-  body: string;
+  /**
+   * Language-neutral key into the backend message catalog, rendered via the
+   * `notifications.<key>.title` / `notifications.<key>.body` translations
+   * (served by GET /api/v1/locales/:lng).
+   */
+  messageKey: string;
+  /** Structured params interpolated into the message template. */
+  params: Record<string, unknown>;
   isRead: boolean;
   createdAt: string;
+}
+
+/** Delivery channels a notification can be sent through. */
+export type NotificationChannel = 'in_app' | 'email' | 'push';
+
+/**
+ * Settings category of a notification type: `general` notifications go to
+ * everyone concerned, `management` ones only to event/team managers.
+ */
+export type NotificationCategory = 'general' | 'management';
+
+/** One per-user toggle: a notification message key on a delivery channel. */
+export interface NotificationPreference {
+  messageKey: string;
+  channel: NotificationChannel;
+  enabled: boolean;
+  category: NotificationCategory;
+}
+
+/** Response of GET /api/v1/users/@me/notification-preferences. */
+export interface NotificationPreferencesResponse {
+  channels: NotificationChannel[];
+  /** Every catalog message key crossed with every channel, in catalog order. */
+  preferences: NotificationPreference[];
 }
 
 // --- Paginated responses ---
@@ -537,10 +787,14 @@ export interface EventSeriesListQuery {
 }
 
 export interface OccurrenceFilter {
-  scope?: 'all' | 'team' | 'mine';
+  scope?: 'all' | 'team' | 'mine' | 'involved';
   siteId?: string;
   roomId?: string;
   teamId?: string;
+  /** Only occurrences with at least one unfilled work role slot (staffing view). */
+  unfilledOnly?: boolean;
+  /** Only occurrences with at least one unfilled critical slot (staffing view). */
+  criticalOnly?: boolean;
 }
 
 // --- Table query ---

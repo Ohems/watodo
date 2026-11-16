@@ -19,7 +19,6 @@ import {
   roleUpdateSchema,
   teamMemberUpdateSchema,
   teamPushSchema,
-  teamTypeSchema,
   teamUpdateSchema,
   userPushSchema,
   userQuerySchema,
@@ -102,18 +101,6 @@ describe('Schemas', () => {
     });
   });
 
-  describe('teamTypeSchema', () => {
-    it('should accept all team types', () => {
-      for (const type of ['general', 'event_organizers', 'role_group']) {
-        expect(teamTypeSchema.safeParse(type).success).toBe(true);
-      }
-    });
-
-    it('should reject unknown team types', () => {
-      expect(teamTypeSchema.safeParse('unknown').success).toBe(false);
-    });
-  });
-
   describe('teamPushSchema', () => {
     it('should accept a plain team', () => {
       const result = teamPushSchema.safeParse({
@@ -123,24 +110,23 @@ describe('Schemas', () => {
       expect(result.success).toBe(true);
     });
 
-    it('should accept a team with type, leader and links', () => {
+    it('should accept a team with leader, work roles and event series', () => {
       const result = teamPushSchema.safeParse({
         name: 'Events Team',
         organizationId: '123e4567-e89b-42d3-a456-426614174000',
-        teamType: 'event_organizers',
         teamLeaderId: '123e4567-e89b-42d3-a456-426614174001',
-        eventTypeId: 3,
-        workRoleId: null,
+        workRoleIds: [3, 4],
+        eventSeriesIds: [7, 8],
       });
       expect(result.success).toBe(true);
     });
 
-    it('should reject an invalid team type', () => {
+    it('should reject non-integer work role ids', () => {
       expect(
         teamPushSchema.safeParse({
           name: 'Team',
           organizationId: '123e4567-e89b-42d3-a456-426614174000',
-          teamType: 'admins',
+          workRoleIds: ['cook'],
         }).success,
       ).toBe(false);
     });
@@ -157,7 +143,7 @@ describe('Schemas', () => {
   describe('teamUpdateSchema', () => {
     it('should accept partial updates including clearing the leader', () => {
       expect(teamUpdateSchema.safeParse({ teamLeaderId: null }).success).toBe(true);
-      expect(teamUpdateSchema.safeParse({ teamType: 'role_group', workRoleId: 2 }).success).toBe(
+      expect(teamUpdateSchema.safeParse({ workRoleIds: [2], eventSeriesIds: [] }).success).toBe(
         true,
       );
       expect(teamUpdateSchema.safeParse({}).success).toBe(true);

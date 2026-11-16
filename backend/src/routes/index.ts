@@ -1,9 +1,11 @@
 import type { FastifyInstance } from 'fastify';
+import { absenceRoutes } from './absences.js';
 import { authRoutes } from './auth.js';
 import { calendarRoutes } from './calendars.js';
 import { certificationRoutes } from './certifications.js';
 import { eventTypeRoutes } from './event-types.js';
 import { eventRoutes } from './events.js';
+import { localeRoutes } from './locales.js';
 import { notificationRoutes } from './notifications.js';
 import { organizationRoutes } from './organizations.js';
 import { roleRoutes } from './roles.js';
@@ -17,7 +19,9 @@ import { workRoleRoutes } from './work-roles.js';
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
   await authRoutes(app);
+  await localeRoutes(app);
   await userRoutes(app);
+  await absenceRoutes(app);
   await roleRoutes(app);
   await organizationRoutes(app);
   await calendarRoutes(app);

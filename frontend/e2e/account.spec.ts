@@ -1,9 +1,11 @@
 import { expect, test } from '@playwright/test';
 import {
   adminUser,
+  gotoApp,
   interceptMutation,
   mockAuthAccounts,
   mockCommonApis,
+  mockNotificationPreferences,
   regularUser,
 } from './helpers.js';
 
@@ -21,7 +23,7 @@ test.describe('Account page', () => {
       await mockAuthAccounts(page, [
         { provider: 'discord', providerAccountId: '123', createdAt: '2025-01-01T00:00:00.000Z' },
       ]);
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       await expect(page.getByRole('heading', { name: 'Account' })).toBeVisible();
       await expect(page.getByRole('heading', { name: 'Personal information' })).toBeVisible();
@@ -37,7 +39,7 @@ test.describe('Account page', () => {
       await mockAuthAccounts(page, [
         { provider: 'discord', providerAccountId: '123', createdAt: '2025-01-01T00:00:00.000Z' },
       ]);
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       await expect(page.getByRole('heading', { name: 'Login methods' })).toBeVisible();
       // Discord is connected -> shows Disconnect button
@@ -53,7 +55,7 @@ test.describe('Account page', () => {
       await mockAuthAccounts(page, [
         { provider: 'discord', providerAccountId: '123', createdAt: '2025-01-01T00:00:00.000Z' },
       ]);
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       await expect(page.getByText('You cannot disconnect your last login method.')).toBeVisible();
       // Disconnect button should be disabled
@@ -63,10 +65,273 @@ test.describe('Account page', () => {
     test('shows danger zone section', async ({ page }) => {
       await mockCommonApis(page, testUser);
       await mockAuthAccounts(page, []);
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       await expect(page.getByRole('heading', { name: 'Danger zone' })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Delete account' })).toBeVisible();
+    });
+
+    test('shows the language preference with the current language', async ({ page }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, []);
+      await gotoApp(page, '/account');
+
+      await expect(page.getByRole('heading', { name: 'Preferences' })).toBeVisible();
+      await expect(page.getByRole('combobox', { name: 'Language' })).toHaveValue('English (UK)');
+    });
+  });
+
+  test.describe('language preference', () => {
+    test('changing the language calls PATCH /users/@me with the selected language', async ({
+      page,
+    }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, [
+        { provider: 'discord', providerAccountId: '123', createdAt: '2025-01-01T00:00:00.000Z' },
+      ]);
+
+      // One route handling both GET and PATCH on the same URL; the language
+      // is kept in a variable so refetches return the updated user.
+      let currentLanguage = testUser.language;
+      await page.route('**/api/v1/users/@me', route => {
+        const request = route.request();
+        if (request.method() === 'PATCH') {
+          const body = request.postDataJSON() as { language?: string };
+          currentLanguage = body.language ?? currentLanguage;
+        }
+        return route.fulfill({ json: { ...testUser, language: currentLanguage } });
+      });
+
+      await gotoApp(page, '/account');
+
+      const patchRequest = page.waitForRequest(
+        req => req.url().includes('/api/v1/users/@me') && req.method() === 'PATCH',
+      );
+
+      await page.getByRole('combobox', { name: 'Language' }).click();
+      await page.getByRole('option', { name: 'Suomi' }).click();
+
+      const request = await patchRequest;
+      expect(request.postDataJSON()).toEqual({ language: 'fi' });
+      // The UI switches to Finnish immediately (the label is Finnish now).
+      await expect(page.getByRole('combobox', { name: 'Kieli' })).toHaveValue('Suomi');
+    });
+  });
+
+  test.describe('week start preference', () => {
+    test('shows the week start preference with the current week start', async ({ page }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, []);
+      await gotoApp(page, '/account');
+
+      await expect(page.getByRole('combobox', { name: 'Week starts on' })).toHaveValue('Sunday');
+    });
+
+    test('changing the week start calls PATCH /users/@me with the selected value', async ({
+      page,
+    }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, []);
+
+      // One route handling both GET and PATCH on the same URL; the week start
+      // is kept in a variable so refetches return the updated user.
+      let currentWeekStart = testUser.weekStart;
+      await page.route('**/api/v1/users/@me', route => {
+        const request = route.request();
+        if (request.method() === 'PATCH') {
+          const body = request.postDataJSON() as { weekStart?: string };
+          currentWeekStart = body.weekStart ?? currentWeekStart;
+        }
+        return route.fulfill({ json: { ...testUser, weekStart: currentWeekStart } });
+      });
+
+      await gotoApp(page, '/account');
+
+      const patchRequest = page.waitForRequest(
+        req => req.url().includes('/api/v1/users/@me') && req.method() === 'PATCH',
+      );
+
+      await page.getByRole('combobox', { name: 'Week starts on' }).click();
+      await page.getByRole('option', { name: 'Monday' }).click();
+
+      const request = await patchRequest;
+      expect(request.postDataJSON()).toEqual({ weekStart: 'monday' });
+      await expect(page.getByRole('combobox', { name: 'Week starts on' })).toHaveValue('Monday');
+    });
+  });
+
+  test.describe('date and time format preferences', () => {
+    test('show the current formats', async ({ page }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, []);
+      await gotoApp(page, '/account');
+
+      await expect(page.getByRole('combobox', { name: 'Date format' })).toHaveValue(
+        'YYYY-MM-DD (year-month-day)',
+      );
+      await expect(page.getByRole('combobox', { name: 'Time format' })).toHaveValue(
+        '24-hour clock (14:30)',
+      );
+    });
+
+    test('changing the date format calls PATCH /users/@me with the selected value', async ({
+      page,
+    }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, []);
+
+      let currentDateFormat = testUser.dateFormat;
+      await page.route('**/api/v1/users/@me', route => {
+        const request = route.request();
+        if (request.method() === 'PATCH') {
+          const body = request.postDataJSON() as { dateFormat?: string };
+          currentDateFormat = body.dateFormat ?? currentDateFormat;
+        }
+        return route.fulfill({ json: { ...testUser, dateFormat: currentDateFormat } });
+      });
+
+      await gotoApp(page, '/account');
+
+      const patchRequest = page.waitForRequest(
+        req => req.url().includes('/api/v1/users/@me') && req.method() === 'PATCH',
+      );
+
+      await page.getByRole('combobox', { name: 'Date format' }).click();
+      await page.getByRole('option', { name: 'MM/DD/YYYY (month-day-year)' }).click();
+
+      const request = await patchRequest;
+      expect(request.postDataJSON()).toEqual({ dateFormat: 'mdy' });
+      await expect(page.getByRole('combobox', { name: 'Date format' })).toHaveValue(
+        'MM/DD/YYYY (month-day-year)',
+      );
+    });
+
+    test('changing the time format calls PATCH /users/@me with the selected value', async ({
+      page,
+    }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, []);
+
+      let currentTimeFormat = testUser.timeFormat;
+      await page.route('**/api/v1/users/@me', route => {
+        const request = route.request();
+        if (request.method() === 'PATCH') {
+          const body = request.postDataJSON() as { timeFormat?: string };
+          currentTimeFormat = body.timeFormat ?? currentTimeFormat;
+        }
+        return route.fulfill({ json: { ...testUser, timeFormat: currentTimeFormat } });
+      });
+
+      await gotoApp(page, '/account');
+
+      const patchRequest = page.waitForRequest(
+        req => req.url().includes('/api/v1/users/@me') && req.method() === 'PATCH',
+      );
+
+      await page.getByRole('combobox', { name: 'Time format' }).click();
+      await page.getByRole('option', { name: '12-hour clock (2:30 PM)' }).click();
+
+      const request = await patchRequest;
+      expect(request.postDataJSON()).toEqual({ timeFormat: '12h' });
+      await expect(page.getByRole('combobox', { name: 'Time format' })).toHaveValue(
+        '12-hour clock (2:30 PM)',
+      );
+    });
+  });
+
+  test.describe('notification settings', () => {
+    test('shows the notification settings card grouped into categories, without a welcome toggle', async ({
+      page,
+    }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, []);
+      // One stored override: email for cancellations is off.
+      await mockNotificationPreferences(page, [
+        { messageKey: 'eventCancelled', channel: 'email', enabled: false },
+      ]);
+      await gotoApp(page, '/account');
+
+      await expect(page.getByRole('heading', { name: 'Notification settings' })).toBeVisible();
+      // The settings are split into the General and Management categories.
+      await expect(page.getByRole('heading', { name: 'General' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Management' })).toBeVisible();
+      // Channel columns, once per category table.
+      await expect(page.getByRole('columnheader', { name: 'In app' })).toHaveCount(2);
+      await expect(page.getByRole('columnheader', { name: 'Email' })).toHaveCount(2);
+      await expect(page.getByRole('columnheader', { name: 'Push' })).toHaveCount(2);
+      // One row per notification type (exact match: the toggle cells contain
+      // the type name in their switch labels too). The welcome type has no
+      // toggle; manager-only alerts sit in the Management section.
+      await expect(
+        page.getByRole('cell', { name: 'Work role assigned', exact: true }),
+      ).toBeVisible();
+      await expect(page.getByRole('cell', { name: 'Event cancelled', exact: true })).toBeVisible();
+      await expect(
+        page.getByRole('cell', { name: 'Unfilled critical role alert', exact: true }),
+      ).toBeVisible();
+      await expect(page.getByRole('cell', { name: 'Welcome', exact: true })).toHaveCount(0);
+      // Defaults: in-app and email on, push off; the override is off.
+      await expect(page.getByRole('switch', { name: 'Work role assigned - In app' })).toBeChecked();
+      await expect(
+        page.getByRole('switch', { name: 'Work role assigned - Push' }),
+      ).not.toBeChecked();
+      await expect(page.getByRole('switch', { name: 'Event cancelled - Email' })).not.toBeChecked();
+      await expect(
+        page.getByRole('switch', { name: 'Unfilled critical role alert - In app' }),
+      ).toBeChecked();
+    });
+
+    test('toggling a switch calls PATCH with the type, channel and new value', async ({ page }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, []);
+      await gotoApp(page, '/account');
+
+      const toggle = page.getByRole('switch', { name: 'Work role assigned - Push' });
+      await expect(toggle).not.toBeChecked();
+
+      const patchRequest = page.waitForRequest(
+        req =>
+          req.url().includes('/api/v1/users/@me/notification-preferences/') &&
+          req.method() === 'PATCH',
+      );
+
+      // Click the switch's wrapping label: the visually hidden input itself
+      // never receives the hit (the track overlays it).
+      await page.locator('label', { has: toggle }).click();
+
+      const request = await patchRequest;
+      expect(request.url()).toContain(
+        '/api/v1/users/@me/notification-preferences/workRoleAssigned/push',
+      );
+      expect(request.postDataJSON()).toEqual({ enabled: true });
+      // The preferences refetch and the toggle reflects the saved value.
+      await expect(toggle).toBeChecked();
+    });
+
+    test('toggling an in-app notification off saves enabled=false', async ({ page }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, []);
+      await gotoApp(page, '/account');
+
+      const toggle = page.getByRole('switch', { name: 'Event cancelled - In app' });
+      await expect(toggle).toBeChecked();
+
+      const patchRequest = page.waitForRequest(
+        req =>
+          req.url().includes('/api/v1/users/@me/notification-preferences/') &&
+          req.method() === 'PATCH',
+      );
+
+      // Click the switch's wrapping label: the visually hidden input itself
+      // never receives the hit (the track overlays it).
+      await page.locator('label', { has: toggle }).click();
+
+      const request = await patchRequest;
+      expect(request.url()).toContain(
+        '/api/v1/users/@me/notification-preferences/eventCancelled/in_app',
+      );
+      expect(request.postDataJSON()).toEqual({ enabled: false });
+      await expect(toggle).not.toBeChecked();
     });
   });
 
@@ -85,7 +350,7 @@ test.describe('Account page', () => {
         return route.fulfill({ json: testUser });
       });
 
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       // Click Edit
       await page.getByRole('button', { name: 'Edit' }).click();
@@ -119,7 +384,7 @@ test.describe('Account page', () => {
       await mockAuthAccounts(page, [
         { provider: 'discord', providerAccountId: '123', createdAt: '2025-01-01T00:00:00.000Z' },
       ]);
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       await page.getByRole('button', { name: 'Edit' }).click();
 
@@ -136,7 +401,7 @@ test.describe('Account page', () => {
       await mockAuthAccounts(page, [
         { provider: 'discord', providerAccountId: '123', createdAt: '2025-01-01T00:00:00.000Z' },
       ]);
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       await page.getByRole('button', { name: 'Edit' }).click();
 
@@ -153,7 +418,7 @@ test.describe('Account page', () => {
       await mockAuthAccounts(page, [
         { provider: 'discord', providerAccountId: '123', createdAt: '2025-01-01T00:00:00.000Z' },
       ]);
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       await page.getByRole('button', { name: 'Edit' }).click();
       const nameInput = page.getByRole('textbox', { name: 'Name' });
@@ -179,7 +444,7 @@ test.describe('Account page', () => {
         'DELETE',
       );
 
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       // Google row should have a Disconnect button (2 accounts, can disconnect)
       const googleRow = page.locator('text=Google').locator('..').locator('..');
@@ -197,7 +462,7 @@ test.describe('Account page', () => {
       await mockAuthAccounts(page, [
         { provider: 'discord', providerAccountId: '123', createdAt: '2025-01-01T00:00:00.000Z' },
       ]);
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       await page.getByRole('button', { name: 'Delete account' }).click();
 
@@ -212,7 +477,7 @@ test.describe('Account page', () => {
       await mockAuthAccounts(page, [
         { provider: 'discord', providerAccountId: '123', createdAt: '2025-01-01T00:00:00.000Z' },
       ]);
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       await page.getByRole('button', { name: 'Delete account' }).click();
       await expect(page.getByRole('heading', { name: 'Delete account?' })).toBeVisible();
@@ -243,7 +508,7 @@ test.describe('Account page', () => {
         return route.fulfill({ json: testUser });
       });
 
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       await page.getByRole('button', { name: 'Delete account' }).click();
       await page.getByRole('button', { name: 'Delete my account' }).click();
@@ -260,11 +525,13 @@ test.describe('Account page', () => {
       await mockAuthAccounts(page, [
         { provider: 'discord', providerAccountId: '123', createdAt: '2025-01-01T00:00:00.000Z' },
       ]);
-      await page.goto('/account');
+      await gotoApp(page, '/account');
 
       await expect(page.getByRole('heading', { name: 'Account' })).toBeVisible();
       await expect(page.getByText('Regular User').nth(1)).toBeVisible();
       await expect(page.getByRole('button', { name: 'Edit' })).toBeVisible();
+      // The language preference is self-service: no permission required.
+      await expect(page.getByRole('combobox', { name: 'Language' })).toHaveValue('English (UK)');
     });
   });
 });

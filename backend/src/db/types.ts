@@ -2,6 +2,15 @@ import type { Generated, Insertable, Selectable, Updateable } from 'kysely';
 
 export type AuthProvider = 'discord' | 'google' | 'microsoft';
 
+/** First day of the week shown in calendars. */
+export type WeekStart = 'sunday' | 'monday';
+
+/** Date format used when displaying dates: year-month-day, month-day-year or day-month-year. */
+export type DateFormat = 'ymd' | 'mdy' | 'dmy';
+
+/** Time format used when displaying times: 24-hour or 12-hour clock. */
+export type TimeFormat = '24h' | '12h';
+
 export interface Users {
   id: Generated<string>;
   email: string;
@@ -13,6 +22,14 @@ export interface Users {
   is_blocked: Generated<boolean>;
   description: Generated<string>;
   state: Generated<string>;
+  /** UI language (BCP 47 tag of a supported locale, e.g. 'en-GB'). */
+  language: Generated<string>;
+  /** First day of the week shown in calendars ('sunday' or 'monday'). */
+  week_start: Generated<WeekStart>;
+  /** Date format used when displaying dates ('ymd', 'mdy' or 'dmy'). */
+  date_format: Generated<DateFormat>;
+  /** Time format used when displaying times ('24h' or '12h'). */
+  time_format: Generated<TimeFormat>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }
@@ -94,23 +111,23 @@ export interface UserOrganizations {
 }
 
 /** The purpose of a team: a plain group, an event-organizing team, or a role roster. */
-export type TeamType = 'general' | 'event_organizers' | 'role_group';
-
 export interface Teams {
   id: Generated<string>;
   name: string;
   description: Generated<string>;
-  /** The purpose of the team; see TeamType. */
-  team_type: Generated<TeamType>;
   /** Designated team leader (NULL = none). */
   team_leader_id: string | null;
-  /** For event_organizers teams: the event type they organize (NULL otherwise). */
-  event_type_id: number | null;
-  /** For role_group teams: the work role the team is the roster of (NULL otherwise). */
-  work_role_id: number | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
   organization_id: string;
+}
+
+/** Work roles assigned to a team (many-to-many). */
+export interface TeamWorkRoles {
+  id: Generated<number>;
+  team_id: string;
+  work_role_id: number;
+  created_at: Generated<Date>;
 }
 
 export interface TeamMembers {
@@ -188,15 +205,48 @@ export interface CertificationWorkRoles {
   created_at: Generated<Date>;
 }
 
+export type AbsenceType = 'sick' | 'away' | 'other';
+
+/** A personal absence period (sick leave, vacation, ...). Dates are inclusive calendar days. */
+export interface Absences {
+  id: Generated<number>;
+  user_id: string;
+  type: AbsenceType;
+  description: Generated<string>;
+  /** First day of the absence (inclusive). */
+  start_date: Date;
+  /** Last day of the absence (inclusive). */
+  end_date: Date;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
 export interface Notifications {
   id: Generated<number>;
   user_id: string;
   /** The organization this notification belongs to, if any. */
   organization_id: string | null;
-  title: string;
-  body: Generated<string>;
+  /** Key into the backend notification message catalog (see src/i18n). */
+  message_key: string;
+  /** Structured interpolation params for the message template (jsonb). */
+  params: Generated<Record<string, unknown>>;
+  /** Optional idempotency key; unique per user when non-null (job-generated notifications). */
+  dedup_key: string | null;
   is_read: Generated<boolean>;
   created_at: Generated<Date>;
+}
+
+export type NotificationChannel = 'in_app' | 'email' | 'push';
+
+export interface NotificationPreferences {
+  user_id: string;
+  /** Key into the backend notification message catalog (see src/i18n). */
+  message_key: string;
+  /** Delivery channel this preference applies to. */
+  channel: NotificationChannel;
+  enabled: boolean;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
 }
 
 export interface Calendars {
@@ -294,6 +344,21 @@ export interface EventWorkRoleAssignments {
   created_at: Generated<Date>;
 }
 
+export interface EventInfoSlots {
+  id: Generated<number>;
+  event_series_id: number;
+  /** NULL = parent (series-level) info slot; non-NULL = inherited occurrence slot. */
+  event_occurrence_id: number | null;
+  /** Which parent info slot this occurrence slot was inherited from. */
+  inherited_from_info_slot_id: number | null;
+  title: string;
+  description: Generated<string>;
+  /** The filled text; NULL = not filled yet. On parent slots it is the default copied to occurrences. */
+  value: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
 export interface EventComments {
   id: Generated<number>;
   event_series_id: number;
@@ -318,6 +383,7 @@ export interface Database {
   user_organizations: UserOrganizations;
   teams: Teams;
   team_members: TeamMembers;
+  team_work_roles: TeamWorkRoles;
   sites: Sites;
   rooms: Rooms;
   work_roles: WorkRoles;
@@ -325,7 +391,9 @@ export interface Database {
   user_work_roles: UserWorkRoles;
   user_certifications: UserCertifications;
   certification_work_roles: CertificationWorkRoles;
+  absences: Absences;
   notifications: Notifications;
+  notification_preferences: NotificationPreferences;
   calendars: Calendars;
   event_types: EventTypes;
   event_type_roles: EventTypeRoles;
@@ -334,6 +402,7 @@ export interface Database {
   event_occurrences: EventOccurrences;
   event_work_roles: EventWorkRoles;
   event_work_role_assignments: EventWorkRoleAssignments;
+  event_info_slots: EventInfoSlots;
   event_comments: EventComments;
 }
 
@@ -371,6 +440,9 @@ export type TeamUpdate = Updateable<Teams>;
 export type TeamMember = Selectable<TeamMembers>;
 export type NewTeamMember = Insertable<TeamMembers>;
 
+export type TeamWorkRole = Selectable<TeamWorkRoles>;
+export type NewTeamWorkRole = Insertable<TeamWorkRoles>;
+
 export type Site = Selectable<Sites>;
 export type NewSite = Insertable<Sites>;
 export type SiteUpdate = Updateable<Sites>;
@@ -398,6 +470,10 @@ export type UserCertificationUpdate = Updateable<UserCertifications>;
 export type CertificationWorkRole = Selectable<CertificationWorkRoles>;
 export type NewCertificationWorkRole = Insertable<CertificationWorkRoles>;
 
+export type Absence = Selectable<Absences>;
+export type NewAbsence = Insertable<Absences>;
+export type AbsenceUpdate = Updateable<Absences>;
+
 export type Notification = Selectable<Notifications>;
 export type NewNotification = Insertable<Notifications>;
 export type NotificationUpdate = Updateable<Notifications>;
@@ -421,6 +497,10 @@ export type EventWorkRoleUpdate = Updateable<EventWorkRoles>;
 
 export type EventWorkRoleAssignment = Selectable<EventWorkRoleAssignments>;
 export type NewEventWorkRoleAssignment = Insertable<EventWorkRoleAssignments>;
+
+export type EventInfoSlot = Selectable<EventInfoSlots>;
+export type NewEventInfoSlot = Insertable<EventInfoSlots>;
+export type EventInfoSlotUpdate = Updateable<EventInfoSlots>;
 
 export type EventComment = Selectable<EventComments>;
 export type NewEventComment = Insertable<EventComments>;

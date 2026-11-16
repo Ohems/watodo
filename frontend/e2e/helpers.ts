@@ -1,8 +1,30 @@
-import type { Page, Route } from '@playwright/test';
+import type { Locator, Page, Route } from '@playwright/test';
 
 // ---------------------------------------------------------------------------
 // Mock data factories
 // ---------------------------------------------------------------------------
+
+/**
+ * Picks a date (yyyy-mm-dd) in a date field (a DateField/DateTimeField
+ * button, given as a label or locator). The picker opens on the month of the
+ * field's current value (or the current month when empty), so the date must
+ * be in that displayed month. Day buttons are labelled with their full date
+ * (e.g. "10 November 2026").
+ */
+export async function pickDate(page: Page, field: string | Locator, date: string): Promise<void> {
+  const [year, month, day] = date.split('-').map(Number);
+  const locator = typeof field === 'string' ? page.getByLabel(field) : field;
+  await locator.click();
+  // The open picker's target references its dropdown via aria-controls; closed
+  // pickers keep their dropdown mounted, so scope the day button to the open one.
+  const dropdownId = await locator.getAttribute('aria-controls');
+  const dropdown = dropdownId
+    ? page.locator(`[id="${dropdownId}"]`)
+    : page.locator('[data-dates-dropdown]:visible');
+  const monthName = new Date(year, month - 1, day).toLocaleString('en-GB', { month: 'long' });
+  // exact: "5 December 2026" must not match "15 December 2026"
+  await dropdown.getByRole('button', { name: `${day} ${monthName} ${year}`, exact: true }).click();
+}
 
 export interface MockUser {
   id: string;
@@ -10,6 +32,10 @@ export interface MockUser {
   email: string;
   description: string;
   phoneNumber: string | null;
+  language: string;
+  weekStart: string;
+  dateFormat: string;
+  timeFormat: string;
   permissions: string[];
   state: 'active' | 'inactive';
   isEmployed: boolean;
@@ -26,6 +52,10 @@ export function createUser(overrides: Partial<MockUser> = {}): MockUser {
     email: 'test@example.com',
     description: '',
     phoneNumber: null,
+    language: 'en-GB',
+    weekStart: 'sunday',
+    dateFormat: 'ymd',
+    timeFormat: '24h',
     permissions: ['admin'],
     state: 'active',
     isEmployed: true,
@@ -130,6 +160,184 @@ export async function mockNotifications(
   );
 }
 
+/**
+ * The configurable notification message keys of the backend catalog (all
+ * except `welcome`), in catalog order, with their settings category:
+ * `general` notifications go to everyone, `management` ones only to
+ * event/team managers.
+ */
+export const NOTIFICATION_MESSAGE_KEYS: { key: string; category: string }[] = [
+  { key: 'upcomingEvent', category: 'general' },
+  { key: 'workRoleAssigned', category: 'general' },
+  { key: 'workRoleUnassigned', category: 'general' },
+  { key: 'newEventComment', category: 'general' },
+  { key: 'roleAssigned', category: 'general' },
+  { key: 'eventCancelled', category: 'general' },
+  { key: 'eventRescheduled', category: 'general' },
+  { key: 'unfilledCriticalSlot', category: 'management' },
+  { key: 'assignmentRemovedDueToAbsence', category: 'management' },
+];
+
+const NOTIFICATION_CHANNELS = ['in_app', 'email', 'push'] as const;
+
+export interface MockNotificationPreference {
+  messageKey: string;
+  channel: string;
+  enabled: boolean;
+  category: string;
+}
+
+/**
+ * Mocks the notification preferences endpoints (Account page). Without
+ * overrides every key x channel is returned with the channel default (in-app
+ * and email on, push off). PATCH requests update the served state, so a
+ * refetch after a toggle reflects the saved value.
+ */
+export async function mockNotificationPreferences(
+  page: Page,
+  overrides: { messageKey: string; channel: string; enabled: boolean }[] = [],
+): Promise<void> {
+  const preferences: MockNotificationPreference[] = NOTIFICATION_MESSAGE_KEYS.flatMap(
+    ({ key, category }) =>
+      NOTIFICATION_CHANNELS.map(channel => {
+        const override = overrides.find(o => o.messageKey === key && o.channel === channel);
+        return {
+          messageKey: key,
+          channel,
+          enabled: override?.enabled ?? channel !== 'push',
+          category,
+        };
+      }),
+  );
+  await page.route(
+    url => url.pathname.startsWith('/api/v1/users/@me/notification-preferences'),
+    route => {
+      const request = route.request();
+      if (request.method() === 'PATCH') {
+        const segments = new URL(request.url()).pathname.split('/');
+        const messageKey = segments.at(-2) ?? '';
+        const channel = segments.at(-1) ?? '';
+        const body = request.postDataJSON() as { enabled?: boolean };
+        const enabled = body.enabled ?? true;
+        const existing = preferences.find(
+          p => p.messageKey === messageKey && p.channel === channel,
+        );
+        if (existing) existing.enabled = enabled;
+        return route.fulfill({
+          json: { messageKey, channel, enabled, category: existing?.category ?? 'general' },
+        });
+      }
+      return route.fulfill({
+        json: { channels: [...NOTIFICATION_CHANNELS], preferences },
+      });
+    },
+  );
+}
+
+// Notification message bundles mirroring the backend catalog (the frontend
+// fetches them from GET /api/v1/locales/:lng and renders messages with them).
+const NOTIFICATION_BUNDLE_EN = {
+  welcome: {
+    title: 'Welcome to Watodo',
+    body: 'Your organisation has been set up. Explore the calendar and invite your team.',
+  },
+  upcomingEvent: {
+    title: 'Upcoming event',
+    body: '{{eventTitle}} is happening this month. Check the calendar for details.',
+  },
+  workRoleAssigned: {
+    title: 'You have been assigned a work role',
+    body: 'You are assigned to "{{role}}" for {{eventTitle}}.',
+  },
+  workRoleUnassigned: {
+    title: 'Work role assignment removed',
+    body: 'You are no longer assigned to "{{role}}" for {{eventTitle}}.',
+  },
+  newEventComment: {
+    title: 'New event comment',
+    body: 'Someone commented on {{eventTitle}}.',
+  },
+  roleAssigned: {
+    title: 'Role assigned',
+    body: 'You have been assigned the {{roleName}} role.',
+  },
+  eventCancelled: {
+    title: 'Event cancelled',
+    body: '{{eventTitle}} on {{start}} has been cancelled.',
+  },
+  eventRescheduled: {
+    title: 'Event rescheduled',
+    body: '{{eventTitle}} ({{start}}) has been rescheduled to {{newStart}} - {{newEnd}}.',
+  },
+  unfilledCriticalSlot: {
+    title: 'Critical role still unfilled',
+    body: 'Critical role(s) still unfilled for {{eventTitle}} on {{start}}: {{roles}}.',
+  },
+  assignmentRemovedDueToAbsence: {
+    title: 'Assignment removed due to absence',
+    body: '{{userName}} was removed from "{{eventTitle}}" ({{start}}).',
+  },
+};
+
+const NOTIFICATION_BUNDLE_FI = {
+  welcome: {
+    title: 'Tervetuloa Watodoon',
+    body: 'Organisaatiosi on nyt perustettu. Tutki kalenteria ja kutsu tiimisi mukaan.',
+  },
+  upcomingEvent: {
+    title: 'Tuleva tapahtuma',
+    body: '{{eventTitle}} järjestetään tässä kuussa. Katso lisätiedot kalenterista.',
+  },
+  workRoleAssigned: {
+    title: 'Sinut on määrätty työrooliin',
+    body: 'Sinut on määrätty rooliin "{{role}}" tapahtumaan {{eventTitle}}.',
+  },
+  workRoleUnassigned: {
+    title: 'Työroolimääritys poistettu',
+    body: 'Sinua ei enää ole määrätty rooliin "{{role}}" tapahtumassa {{eventTitle}}.',
+  },
+  newEventComment: {
+    title: 'Uusi tapahtumakommentti',
+    body: 'Joku kommentoi tapahtumaa {{eventTitle}}.',
+  },
+  roleAssigned: {
+    title: 'Rooli määrätty',
+    body: 'Sinulle on määrätty rooli {{roleName}}.',
+  },
+  eventCancelled: {
+    title: 'Tapahtuma peruttu',
+    body: '{{eventTitle}} ({{start}}) on peruttu.',
+  },
+  eventRescheduled: {
+    title: 'Tapahtuma siirretty',
+    body: '{{eventTitle}} ({{start}}) on siirretty aikaan {{newStart}} - {{newEnd}}.',
+  },
+  unfilledCriticalSlot: {
+    title: 'Kriittinen rooli täyttämättä',
+    body: 'Kriittinen rooli/roolit ovat edelleen täyttämättä tapahtumassa {{eventTitle}} ({{start}}): {{roles}}.',
+  },
+  assignmentRemovedDueToAbsence: {
+    title: 'Määritys poistettu poissaolon vuoksi',
+    body: '{{userName}} poistettiin tapahtumasta "{{eventTitle}}" ({{start}}).',
+  },
+};
+
+const NOTIFICATION_BUNDLES: Record<string, unknown> = {
+  'en-GB': NOTIFICATION_BUNDLE_EN,
+  'en-US': NOTIFICATION_BUNDLE_EN,
+  fi: NOTIFICATION_BUNDLE_FI,
+};
+
+/** Mocks the locale bundle endpoint (server-owned notification templates). */
+export async function mockLocaleBundles(page: Page): Promise<void> {
+  await page.route('**/api/v1/locales/*', route => {
+    const lng = new URL(route.request().url()).pathname.split('/').at(-1) ?? 'en-GB';
+    return route.fulfill({
+      json: { lng, notifications: NOTIFICATION_BUNDLES[lng] ?? NOTIFICATION_BUNDLE_EN },
+    });
+  });
+}
+
 /** Mocks the occurrences endpoint (used by Home and Calendar). */
 export async function mockOccurrences(page: Page, occurrences: unknown[] = []): Promise<void> {
   await page.route('**/api/v1/event-series/occurrences?*', route =>
@@ -150,7 +358,9 @@ export async function mockCommonApis(
   await mockCurrentUser(page, user);
   await mockOrganizations(page, orgs);
   await mockAuthProviders(page);
+  await mockLocaleBundles(page);
   await mockNotifications(page);
+  await mockNotificationPreferences(page);
   await mockOccurrences(page);
 }
 
@@ -341,7 +551,10 @@ export async function interceptMutation(
   await page.route(urlPattern, async (route: Route) => {
     const request = route.request();
     if (request.method() !== method) {
-      return route.continue();
+      // Fall back to an earlier registered handler (e.g. the GET mock for
+      // the same URL) instead of continuing to the network: route.continue()
+      // does not fall through to earlier page.route handlers.
+      return route.fallback();
     }
     let body: unknown = null;
     const postData = request.postData();
@@ -361,6 +574,15 @@ export async function interceptMutation(
 // ---------------------------------------------------------------------------
 // Navigation helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Navigates to an app route. Uses `domcontentloaded` instead of the default
+ * `load`: waiting for full load (fonts, images, ...) only slows the test
+ * down, and `waitForAppReady` already waits for a concrete element afterwards.
+ */
+export async function gotoApp(page: Page, url: string): Promise<void> {
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
+}
 
 /** Waits for the app to finish loading (spinner gone, content visible). */
 export async function waitForAppReady(page: Page): Promise<void> {

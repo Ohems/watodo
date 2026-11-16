@@ -116,9 +116,10 @@ export async function addCertificationToWorkRoleHandler(
   request: FastifyRequest<WorkRoleParams>,
   reply: FastifyReply,
 ): Promise<void> {
+  const { organizationId } = organizationParamsSchema.parse(request.params);
   const workRoleId = parseWorkRoleId(request.params.workRoleId);
   const data = certificationWorkRolePushSchema.parse(request.body);
-  await addCertificationToWorkRole(workRoleId, data.certificationId);
+  await addCertificationToWorkRole(organizationId, workRoleId, data.certificationId);
   return reply.status(200).send({ success: true });
 }
 
@@ -126,9 +127,10 @@ export async function removeCertificationFromWorkRoleHandler(
   request: FastifyRequest<WorkRoleCertParams>,
   reply: FastifyReply,
 ): Promise<void> {
+  const { organizationId } = organizationParamsSchema.parse(request.params);
   const params = certificationWorkRoleParamsSchema.parse(request.params);
   const workRoleId = parseWorkRoleId(params.workRoleId.toString());
   const certificationId = parseCertificationId(params.certificationId.toString());
-  await removeCertificationFromWorkRole(workRoleId, certificationId);
+  await removeCertificationFromWorkRole(organizationId, workRoleId, certificationId);
   return reply.status(200).send({ success: true });
 }

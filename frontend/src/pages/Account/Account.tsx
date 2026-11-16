@@ -1,4 +1,17 @@
-import { Alert, Box, Button, Group, Modal, Paper, Stack, Text, Title } from '@mantine/core';
+import {
+  Alert,
+  Box,
+  Button,
+  Center,
+  Group,
+  Loader,
+  Modal,
+  Paper,
+  Select,
+  Stack,
+  Text,
+  Title,
+} from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
@@ -12,23 +25,36 @@ import {
   useUpdateCurrentUserMutation,
 } from '../../api/index.js';
 import EditField from '../../components/EditField/EditField.js';
+import { QueryError } from '../../components/QueryState/index.js';
 import { useAppDispatch } from '../../hooks/redux.js';
+import { useFormatters } from '../../hooks/use-formatters.js';
+import { LANGUAGE_LABELS, type Language, SUPPORTED_LANGUAGES } from '../../i18n/index.js';
 import { deleteCurrentUser } from '../../store/session.js';
-import type { AuthProviderInfo, FieldErrors, UserSelfUpdate } from '../../types/index.js';
+import type {
+  DateFormat,
+  FieldErrors,
+  TimeFormat,
+  UserSelfUpdate,
+  WeekStart,
+} from '../../types/index.js';
 import { validateUserSelfUpdate } from '../../validation.js';
+import NotificationSettingsCard from './NotificationSettingsCard.js';
 
-/** Used when the provider list cannot be fetched from the API. */
-const FALLBACK_PROVIDERS: AuthProviderInfo[] = [
-  { id: 'discord', name: 'Discord', configured: false },
-  { id: 'google', name: 'Google', configured: false },
-  { id: 'microsoft', name: 'Microsoft', configured: false },
-];
+/** Week start options offered in the preferences. */
+const WEEK_START_OPTIONS: WeekStart[] = ['sunday', 'monday'];
+
+/** Date format options offered in the preferences. */
+const DATE_FORMAT_OPTIONS: DateFormat[] = ['ymd', 'mdy', 'dmy'];
+
+/** Time format options offered in the preferences. */
+const TIME_FORMAT_OPTIONS: TimeFormat[] = ['24h', '12h'];
 
 function AccountPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const dispatch = useAppDispatch();
+  const { formatDate } = useFormatters();
   const { data: currentUser } = useGetCurrentUserQuery();
-  const { data: authAccounts = [] } = useGetAuthAccountsQuery();
+  const { data: authAccounts = [], isError: authAccountsError } = useGetAuthAccountsQuery();
   const { data: providersData, isError: providersError } = useGetAuthProvidersQuery();
   const [updateCurrentUser, { isLoading: saving }] = useUpdateCurrentUserMutation();
   const [startLink] = useStartLinkMutation();
@@ -44,8 +70,15 @@ function AccountPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [languageError, setLanguageError] = useState<string | null>(null);
+  const [weekStartError, setWeekStartError] = useState<string | null>(null);
+  const [dateFormatError, setDateFormatError] = useState<string | null>(null);
+  const [timeFormatError, setTimeFormatError] = useState<string | null>(null);
 
-  const providers = providersData?.providers ?? (providersError ? FALLBACK_PROVIDERS : null);
+  // No hardcoded fallback: the provider list always comes from the API (the
+  // E2E tests mock it). A failed request is shown as an error below, not as
+  // an empty list.
+  const providers = providersData?.providers ?? null;
 
   // The backend redirects back here with ?linkError=... when connecting a
   // login method fails.
@@ -61,9 +94,7 @@ function AccountPage() {
 
   if (!currentUser) return null;
 
-  const configuredProviders = (providers ?? FALLBACK_PROVIDERS).filter(
-    provider => provider.configured,
-  );
+  const configuredProviders = (providers ?? []).filter(provider => provider.configured);
   const canDisconnect = authAccounts.length > 1;
 
   const startEditing = () => {
@@ -140,6 +171,49 @@ function AccountPage() {
       await unlinkAuthAccount(providerId).unwrap();
     } catch (error) {
       setAccountsError(getApiErrorMessage(error) || t('account.disconnectFailed'));
+    }
+  };
+
+  // The language is saved immediately (not part of the edit form) and the UI
+  // switches to it right away.
+  const handleLanguageChange = async (language: Language) => {
+    setLanguageError(null);
+    try {
+      await updateCurrentUser({ language }).unwrap();
+      await i18n.changeLanguage(language);
+    } catch (error) {
+      setLanguageError(getApiErrorMessage(error) || t('account.languageUpdateFailed'));
+    }
+  };
+
+  // The week start is saved immediately (not part of the edit form) so the
+  // calendars switch right away.
+  const handleWeekStartChange = async (weekStart: WeekStart) => {
+    setWeekStartError(null);
+    try {
+      await updateCurrentUser({ weekStart }).unwrap();
+    } catch (error) {
+      setWeekStartError(getApiErrorMessage(error) || t('account.weekStartUpdateFailed'));
+    }
+  };
+
+  // The date and time formats are saved immediately (not part of the edit
+  // form) so displayed dates and times switch right away.
+  const handleDateFormatChange = async (dateFormat: DateFormat) => {
+    setDateFormatError(null);
+    try {
+      await updateCurrentUser({ dateFormat }).unwrap();
+    } catch (error) {
+      setDateFormatError(getApiErrorMessage(error) || t('account.dateFormatUpdateFailed'));
+    }
+  };
+
+  const handleTimeFormatChange = async (timeFormat: TimeFormat) => {
+    setTimeFormatError(null);
+    try {
+      await updateCurrentUser({ timeFormat }).unwrap();
+    } catch (error) {
+      setTimeFormatError(getApiErrorMessage(error) || t('account.timeFormatUpdateFailed'));
     }
   };
 
@@ -252,6 +326,98 @@ function AccountPage() {
 
       <Paper shadow="sm" p="lg" mt="lg">
         <Title order={5} mb="md">
+          {t('account.preferences')}
+        </Title>
+        {languageError && (
+          <Alert
+            color="red"
+            variant="light"
+            mb="md"
+            withCloseButton
+            onClose={() => setLanguageError(null)}
+          >
+            {languageError}
+          </Alert>
+        )}
+        <Stack gap="md">
+          <Select
+            label={t('account.language')}
+            data={SUPPORTED_LANGUAGES.map(code => ({ value: code, label: LANGUAGE_LABELS[code] }))}
+            value={currentUser.language}
+            onChange={value => {
+              if (value) void handleLanguageChange(value as Language);
+            }}
+          />
+          {weekStartError && (
+            <Alert
+              color="red"
+              variant="light"
+              withCloseButton
+              onClose={() => setWeekStartError(null)}
+            >
+              {weekStartError}
+            </Alert>
+          )}
+          <Select
+            label={t('account.weekStart')}
+            data={WEEK_START_OPTIONS.map(option => ({
+              value: option,
+              label: t(`account.weekStart_${option}`),
+            }))}
+            value={currentUser.weekStart}
+            onChange={value => {
+              if (value) void handleWeekStartChange(value as WeekStart);
+            }}
+          />
+          {dateFormatError && (
+            <Alert
+              color="red"
+              variant="light"
+              withCloseButton
+              onClose={() => setDateFormatError(null)}
+            >
+              {dateFormatError}
+            </Alert>
+          )}
+          <Select
+            label={t('account.dateFormat')}
+            data={DATE_FORMAT_OPTIONS.map(option => ({
+              value: option,
+              label: t(`account.dateFormat_${option}`),
+            }))}
+            value={currentUser.dateFormat}
+            onChange={value => {
+              if (value) void handleDateFormatChange(value as DateFormat);
+            }}
+          />
+          {timeFormatError && (
+            <Alert
+              color="red"
+              variant="light"
+              withCloseButton
+              onClose={() => setTimeFormatError(null)}
+            >
+              {timeFormatError}
+            </Alert>
+          )}
+          <Select
+            label={t('account.timeFormat')}
+            data={TIME_FORMAT_OPTIONS.map(option => ({
+              value: option,
+              label: t(`account.timeFormat_${option}`),
+            }))}
+            value={currentUser.timeFormat}
+            onChange={value => {
+              if (value) void handleTimeFormatChange(value as TimeFormat);
+            }}
+          />
+        </Stack>
+      </Paper>
+
+      <NotificationSettingsCard />
+
+      <Paper shadow="sm" p="lg" mt="lg">
+        <Title order={5} mb="md">
           {t('account.loginMethods')}
         </Title>
 
@@ -267,7 +433,13 @@ function AccountPage() {
           </Alert>
         )}
 
-        {configuredProviders.length === 0 ? (
+        {providersError || authAccountsError ? (
+          <QueryError />
+        ) : providers === null ? (
+          <Center p="md">
+            <Loader size="sm" />
+          </Center>
+        ) : configuredProviders.length === 0 ? (
           <Text size="sm" c="dimmed">
             {t('account.noProviders')}
           </Text>
@@ -284,7 +456,7 @@ function AccountPage() {
                     {account && (
                       <Text size="xs" c="dimmed">
                         {t('account.connectedAt', {
-                          date: new Date(account.createdAt).toLocaleDateString(),
+                          date: formatDate(account.createdAt),
                         })}
                       </Text>
                     )}

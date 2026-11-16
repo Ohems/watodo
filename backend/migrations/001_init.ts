@@ -16,9 +16,28 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     is_blocked: { type: 'boolean', notNull: true, default: false },
     description: { type: 'text', notNull: true, default: '' },
     state: { type: 'text', notNull: true, default: 'active' },
+    // UI language of the user (BCP 47 tag of a supported locale).
+    language: { type: 'text', notNull: true, default: 'en-GB' },
+    // First day of the week shown in calendars.
+    week_start: { type: 'text', notNull: true, default: 'sunday' },
+    // Date format used when displaying dates.
+    date_format: { type: 'text', notNull: true, default: 'ymd' },
+    // Time format used when displaying times: 24-hour or 12-hour clock.
+    time_format: { type: 'text', notNull: true, default: '24h' },
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
+  pgm.addConstraint(
+    'users',
+    'users_week_start_check',
+    "CHECK (week_start IN ('sunday', 'monday'))",
+  );
+  pgm.addConstraint(
+    'users',
+    'users_date_format_check',
+    "CHECK (date_format IN ('ymd', 'mdy', 'dmy'))",
+  );
+  pgm.addConstraint('users', 'users_time_format_check', "CHECK (time_format IN ('24h', '12h'))");
 
   // Authentication accounts (one user can have accounts from multiple providers)
   pgm.createTable('auth_accounts', {
@@ -109,18 +128,15 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     'UNIQUE(user_id, organization_id)',
   );
 
-  // Teams. A team has a purpose (`team_type`): a plain group of people
-  // (`general`), an `event_organizers` team linked to an event type, or a
-  // `role_group` team linked to a work role. `event_type_id` / `work_role_id`
-  // get their foreign keys after the referenced tables are created below.
+  // Teams. A team is a plain group of people. One or more work roles and one
+  // or more event series can be assigned to a team via the `team_work_roles`
+  // and `event_series_teams` join tables (created below, once `work_roles`
+  // and `event_series` exist).
   pgm.createTable('teams', {
     id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
     name: { type: 'text', notNull: true },
     description: { type: 'text', notNull: true, default: '' },
-    team_type: { type: 'text', notNull: true, default: 'general' },
     team_leader_id: { type: 'uuid', references: 'users', onDelete: 'SET NULL' },
-    event_type_id: { type: 'integer' },
-    work_role_id: { type: 'integer' },
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     organization_id: {
@@ -130,11 +146,6 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
       onDelete: 'CASCADE',
     },
   });
-  pgm.addConstraint(
-    'teams',
-    'teams_team_type_check',
-    "CHECK (team_type IN ('general', 'event_organizers', 'role_group'))",
-  );
 
   // Team members: users belonging to a team. `is_manager` marks members who
   // can manage this specific team (edit it, manage its members) without
@@ -204,6 +215,25 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
   pgm.createIndex('work_roles', 'organization_id');
+
+  // Team to work roles (many-to-many: work roles assigned to a team)
+  pgm.createTable('team_work_roles', {
+    id: { type: 'serial', primaryKey: true },
+    team_id: { type: 'uuid', notNull: true, references: 'teams', onDelete: 'CASCADE' },
+    work_role_id: {
+      type: 'integer',
+      notNull: true,
+      references: 'work_roles',
+      onDelete: 'CASCADE',
+    },
+    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+  });
+  pgm.addConstraint(
+    'team_work_roles',
+    'team_work_roles_team_work_role_unique',
+    'UNIQUE(team_id, work_role_id)',
+  );
+  pgm.createIndex('team_work_roles', 'work_role_id');
 
   // Certifications (organization-scoped, e.g. "First Aid Certificate")
   pgm.createTable('certifications', {
@@ -291,20 +321,75 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
   pgm.createIndex('certification_work_roles', 'work_role_id');
   pgm.createIndex('certification_work_roles', 'certification_id');
 
-  // Notifications (per-user)
+  // Absences: a personal period during which a user is not available (e.g.
+  // sick leave or vacation). `start_date` and `end_date` are inclusive
+  // calendar days. When an absence overlaps an event occurrence the user is
+  // assigned to, the assignment is removed and the event's managers are
+  // notified.
+  pgm.createTable('absences', {
+    id: { type: 'serial', primaryKey: true },
+    user_id: { type: 'uuid', notNull: true, references: 'users', onDelete: 'CASCADE' },
+    type: { type: 'text', notNull: true },
+    description: { type: 'text', notNull: true, default: '' },
+    /** First day of the absence (inclusive). */
+    start_date: { type: 'date', notNull: true },
+    /** Last day of the absence (inclusive). */
+    end_date: { type: 'date', notNull: true },
+    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+    updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+  });
+  pgm.addConstraint('absences', 'absences_type_check', "CHECK (type IN ('sick', 'away', 'other'))");
+  pgm.addConstraint('absences', 'absences_date_range_valid', 'CHECK (end_date >= start_date)');
+  pgm.createIndex('absences', 'user_id');
+
+  // Notifications (per-user). The message is stored language-neutrally as a
+  // key into the backend message catalog plus structured params; it is
+  // rendered per recipient (users.language) at read time in the app and at
+  // send time for email/push.
   pgm.createTable('notifications', {
     id: { type: 'serial', primaryKey: true },
     user_id: { type: 'uuid', notNull: true, references: 'users', onDelete: 'CASCADE' },
     // The organization this notification belongs to, if any (null for purely
     // personal notifications).
     organization_id: { type: 'uuid', references: 'organizations', onDelete: 'SET NULL' },
-    title: { type: 'text', notNull: true },
-    body: { type: 'text', notNull: true, default: '' },
+    message_key: { type: 'text', notNull: true },
+    params: { type: 'jsonb', notNull: true, default: '{}' },
+    // Optional idempotency key for job-generated notifications (e.g. the
+    // unfilled-critical-slot alert): a non-null value may exist only once per
+    // user, so re-running the job does not duplicate the notification.
+    dedup_key: { type: 'text' },
     is_read: { type: 'boolean', notNull: true, default: false },
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
   pgm.createIndex('notifications', 'user_id');
   pgm.createIndex('notifications', 'organization_id');
+  // NULL dedup keys are distinct, so only non-null keys are deduplicated.
+  pgm.createIndex('notifications', ['user_id', 'dedup_key'], {
+    unique: true,
+    name: 'notifications_user_dedup_key_unique',
+  });
+
+  // Per-user notification preferences: one row per (user, message key,
+  // delivery channel) that the user has explicitly changed. Rows absent from
+  // this table use the channel's default (see notification-service).
+  pgm.createTable('notification_preferences', {
+    user_id: { type: 'uuid', notNull: true, references: 'users', onDelete: 'CASCADE' },
+    message_key: { type: 'text', notNull: true },
+    channel: { type: 'text', notNull: true },
+    enabled: { type: 'boolean', notNull: true, default: true },
+    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+    updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+  });
+  pgm.addConstraint(
+    'notification_preferences',
+    'notification_preferences_channel_check',
+    "CHECK (channel IN ('in_app', 'email', 'push'))",
+  );
+  pgm.addConstraint(
+    'notification_preferences',
+    'notification_preferences_user_message_channel_key',
+    'PRIMARY KEY (user_id, message_key, channel)',
+  );
 
   // Calendars
   pgm.createTable('calendars', {
@@ -331,18 +416,6 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     calendar_id: { type: 'uuid', notNull: true, references: 'calendars', onDelete: 'CASCADE' },
   });
-  // Team purpose links (the referenced tables exist from here on).
-  pgm.addConstraint(
-    'teams',
-    'teams_event_type_id_fkey',
-    'FOREIGN KEY (event_type_id) REFERENCES event_types(id) ON DELETE SET NULL',
-  );
-  pgm.addConstraint(
-    'teams',
-    'teams_work_role_id_fkey',
-    'FOREIGN KEY (work_role_id) REFERENCES work_roles(id) ON DELETE SET NULL',
-  );
-
   // Roles (organization-specific)
   pgm.createTable('roles', {
     id: { type: 'serial', primaryKey: true },
@@ -558,6 +631,47 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
   );
   pgm.createIndex('event_work_role_assignments', 'user_id');
 
+  // Event info slots: form-like text fields on an event series. Rows with
+  // `event_occurrence_id` NULL are the parent template (managed from event
+  // management); materialization/import copies them to occurrence-level rows
+  // tracked by `inherited_from_info_slot_id`. Only the occurrence copy's
+  // `value` may be edited - info slots are never added or deleted per
+  // occurrence. On parent rows `value` acts as the default copied to
+  // occurrences.
+  pgm.createTable('event_info_slots', {
+    id: { type: 'serial', primaryKey: true },
+    event_series_id: {
+      type: 'integer',
+      notNull: true,
+      references: 'event_series',
+      onDelete: 'CASCADE',
+    },
+    event_occurrence_id: {
+      type: 'integer',
+      references: 'event_occurrences',
+      onDelete: 'CASCADE',
+    },
+    inherited_from_info_slot_id: {
+      type: 'integer',
+      references: 'event_info_slots',
+      onDelete: 'SET NULL',
+    },
+    title: { type: 'text', notNull: true },
+    description: { type: 'text', notNull: true, default: '' },
+    value: { type: 'text' },
+    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+    updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+  });
+  pgm.createIndex('event_info_slots', 'event_series_id');
+  pgm.createIndex('event_info_slots', 'event_occurrence_id');
+  pgm.createIndex('event_info_slots', 'inherited_from_info_slot_id');
+  // One occurrence-level copy per parent slot (parent rows have NULL
+  // occurrence_id and are unaffected by the unique constraint).
+  pgm.createIndex('event_info_slots', ['event_occurrence_id', 'inherited_from_info_slot_id'], {
+    unique: true,
+    name: 'event_info_slots_occurrence_inherited_unique',
+  });
+
   // Event comments: comments on a whole series (`event_occurrence_id` NULL)
   // or on a single materialized occurrence of it.
   pgm.createTable('event_comments', {
@@ -585,25 +699,27 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
   pgm.createIndex('users', 'state');
   pgm.createIndex('access_tokens', 'user_id');
   pgm.createIndex('teams', 'organization_id');
-  pgm.createIndex('teams', 'event_type_id');
-  pgm.createIndex('teams', 'work_role_id');
   pgm.createIndex('teams', 'team_leader_id');
   pgm.createIndex('event_series', 'title');
 }
 
 export async function down(pgm: MigrationBuilder): Promise<void> {
   pgm.dropTable('event_comments');
+  pgm.dropTable('event_info_slots');
   pgm.dropTable('event_work_role_assignments');
   pgm.dropTable('event_work_roles');
   pgm.dropTable('event_occurrences');
   pgm.dropTable('event_series_teams');
   pgm.dropTable('event_series');
+  pgm.dropTable('team_work_roles');
   pgm.dropTable('event_type_roles');
   pgm.dropTable('user_roles');
   pgm.dropTable('role_permissions');
   pgm.dropTable('roles');
   pgm.dropTable('event_types');
   pgm.dropTable('calendars');
+  pgm.dropTable('absences');
+  pgm.dropTable('notification_preferences');
   pgm.dropTable('notifications');
   pgm.dropTable('certification_work_roles');
   pgm.dropTable('user_certifications');

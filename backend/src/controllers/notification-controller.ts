@@ -1,14 +1,25 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { getAuth } from '../middleware/auth.js';
-import { notificationUpdateSchema, tableQuerySchema } from '../schemas/index.js';
 import {
+  notificationPreferenceParamsSchema,
+  notificationPreferenceUpdateSchema,
+  notificationUpdateSchema,
+  tableQuerySchema,
+} from '../schemas/index.js';
+import {
+  listNotificationPreferences,
   listNotifications,
   markAllRead,
   updateNotification,
+  updateNotificationPreference,
 } from '../services/notification-service.js';
 
 interface NotificationParams {
   Params: { notificationId: string };
+}
+
+interface NotificationPreferenceParams {
+  Params: { messageKey: string; channel: string };
 }
 
 export async function listNotificationsHandler(
@@ -51,4 +62,37 @@ export async function markAllReadHandler(
   }
   const count = await markAllRead(auth.user.id);
   return reply.status(200).send({ updated: count });
+}
+
+/** Lists the current user's notification preferences (all keys x channels). */
+export async function listNotificationPreferencesHandler(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const auth = getAuth(request);
+  if (!auth) {
+    return reply.status(401).send({ error: 'Not authenticated!' });
+  }
+  const result = await listNotificationPreferences(auth.user.id);
+  return reply.status(200).send(result);
+}
+
+/** Sets one notification preference of the current user. */
+export async function updateNotificationPreferenceHandler(
+  request: FastifyRequest<NotificationPreferenceParams>,
+  reply: FastifyReply,
+): Promise<void> {
+  const auth = getAuth(request);
+  if (!auth) {
+    return reply.status(401).send({ error: 'Not authenticated!' });
+  }
+  const { messageKey, channel } = notificationPreferenceParamsSchema.parse(request.params);
+  const data = notificationPreferenceUpdateSchema.parse(request.body);
+  const preference = await updateNotificationPreference(
+    auth.user.id,
+    messageKey,
+    channel,
+    data.enabled,
+  );
+  return reply.status(200).send(preference);
 }

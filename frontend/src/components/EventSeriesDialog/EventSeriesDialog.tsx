@@ -18,13 +18,19 @@ import {
   useUpdateEventSeriesMutation,
 } from '../../api/index.js';
 import type {
+  BookingConflict,
   Calendar,
   EventSeries,
   EventSeriesPush,
+  FieldErrors,
   Organization,
   RecurrenceFreq,
   RecurrenceInput,
 } from '../../types/index.js';
+import { validateEventSeriesForm } from '../../validation.js';
+import { BookingConflictsAlert } from '../BookingConflictsAlert/index.js';
+import DateField from '../DateField/index.js';
+import DateTimeField from '../DateTimeField/index.js';
 
 interface EventSeriesDialogProps {
   open: boolean;
@@ -56,7 +62,12 @@ function EventSeriesDialog({
   onSaved,
 }: EventSeriesDialogProps) {
   const { t } = useTranslation();
+  // Backend error (not attributable to a single field); shown as a generic Alert.
   const [error, setError] = useState<string | null>(null);
+  // Booking conflicts reported by the save; shown as a warning, the save succeeded.
+  const [conflicts, setConflicts] = useState<BookingConflict[] | undefined>(undefined);
+  // Field-level validation errors; shown below the offending input.
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [splitEventSeries, { isLoading: savingSplit }] = useSplitEventSeriesMutation();
   const [updateEventSeries, { isLoading: savingUpdate }] = useUpdateEventSeriesMutation();
   const [createEventSeries, { isLoading: savingCreate }] = useCreateEventSeriesMutation();
@@ -82,6 +93,8 @@ function EventSeriesDialog({
   useEffect(() => {
     if (!open) return;
     setError(null);
+    setConflicts(undefined);
+    setFieldErrors({});
     if (series) {
       setTitle(series.title);
       setDescription(series.description ?? '');
@@ -102,7 +115,7 @@ function EventSeriesDialog({
     } else {
       setTitle('');
       setDescription('');
-      setCalendarId(calendars[0]?.id ?? '');
+      setCalendarId('');
       setStart(toLocalInputValue(new Date().toISOString()));
       setDurationMinutes('60');
       setIsAllDay(false);
@@ -116,7 +129,15 @@ function EventSeriesDialog({
       setUntil('');
       setCount('');
     }
-  }, [open, series, calendars]);
+  }, [open, series]);
+
+  // In create mode, default to the first calendar once the calendars have
+  // loaded. This must not reset the rest of the form (e.g. a typed title).
+  useEffect(() => {
+    if (open && !series && !calendarId && calendars.length > 0) {
+      setCalendarId(calendars[0].id);
+    }
+  }, [open, series, calendarId, calendars]);
 
   const selectedCalendar = calendars.find(calendar => calendar.id === calendarId);
   const calendarOrganization = organizations.find(
@@ -141,25 +162,28 @@ function EventSeriesDialog({
     return recurrence;
   };
 
+  // Clears the error of a field once the user edits it.
+  const clearFieldError = (field: string) => {
+    setFieldErrors(prev => {
+      if (!(field in prev)) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+
   const handleSave = async () => {
     setError(null);
-    if (!title.trim()) {
-      setError(t('events.titleRequired'));
-      return;
-    }
-    if (!calendarId) {
-      setError(t('events.calendarRequired'));
-      return;
-    }
-    if (!start) {
-      setError(t('events.startRequired'));
+    setConflicts(undefined);
+    const validationErrors = validateEventSeriesForm(
+      { title, calendarId, start, durationMinutes },
+      t,
+    );
+    if (Object.keys(validationErrors).length > 0) {
+      setFieldErrors(validationErrors);
       return;
     }
     const duration = Number.parseInt(durationMinutes, 10);
-    if (Number.isNaN(duration) || duration < 1) {
-      setError(t('events.durationInvalid'));
-      return;
-    }
 
     const payload: EventSeriesPush = {
       title: title.trim(),
@@ -174,19 +198,28 @@ function EventSeriesDialog({
     if (timezone.trim()) payload.timezone = timezone.trim();
 
     try {
+      let result: EventSeries | undefined;
       if (splitOccurrenceStart && series) {
-        await splitEventSeries({
+        result = await splitEventSeries({
           seriesId: series.id,
           occurrenceStart: splitOccurrenceStart,
           data: payload,
         }).unwrap();
       } else if (series) {
-        await updateEventSeries({ seriesId: series.id, data: payload }).unwrap();
+        result = await updateEventSeries({ seriesId: series.id, data: payload }).unwrap();
       } else {
-        await createEventSeries(payload).unwrap();
+        result = await createEventSeries(payload).unwrap();
       }
-      onSaved();
-      onClose();
+      if (result.conflicts && result.conflicts.length > 0) {
+        // The save succeeded, but the booking overlaps other events: keep the
+        // dialog open and flag the conflicts so the organizer can adjust.
+        // (onSaved/onClose are not called: callers navigate away on them, and
+        // the mutation's invalidated tags refresh the lists on return.)
+        setConflicts(result.conflicts);
+      } else {
+        onSaved();
+        onClose();
+      }
     } catch (err) {
       setError(getApiErrorMessage(err));
     }
@@ -226,10 +259,15 @@ function EventSeriesDialog({
             {error}
           </Alert>
         )}
+        <BookingConflictsAlert conflicts={conflicts} />
         <TextInput
           label={t('events.seriesTitle')}
           value={title}
-          onChange={event => setTitle(event.target.value)}
+          onChange={event => {
+            setTitle(event.target.value);
+            clearFieldError('title');
+          }}
+          error={fieldErrors.title}
           required
         />
         <Textarea
@@ -242,21 +280,32 @@ function EventSeriesDialog({
           label={t('events.calendar')}
           data={calendars.map(c => ({ value: c.id, label: c.name }))}
           value={calendarId || null}
-          onChange={value => setCalendarId(value ?? '')}
+          onChange={value => {
+            setCalendarId(value ?? '');
+            clearFieldError('calendarId');
+          }}
+          error={fieldErrors.calendarId}
           required
         />
-        <TextInput
+        <DateTimeField
           label={t('events.start')}
-          type="datetime-local"
           value={start}
-          onChange={event => setStart(event.target.value)}
+          onChange={value => {
+            setStart(value);
+            clearFieldError('start');
+          }}
+          error={fieldErrors.start}
           required
         />
         <TextInput
           label={t('events.durationMinutes')}
           type="number"
           value={durationMinutes}
-          onChange={event => setDurationMinutes(event.target.value)}
+          onChange={event => {
+            setDurationMinutes(event.target.value);
+            clearFieldError('durationMinutes');
+          }}
+          error={fieldErrors.durationMinutes}
         />
         <TextInput
           label={t('events.timezone')}
@@ -325,12 +374,7 @@ function EventSeriesDialog({
                 description={t('events.monthDaysHint')}
               />
             )}
-            <TextInput
-              label={t('events.until')}
-              type="date"
-              value={until}
-              onChange={event => setUntil(event.target.value)}
-            />
+            <DateField label={t('events.until')} value={until} onChange={setUntil} />
             <TextInput
               label={t('events.count')}
               type="number"

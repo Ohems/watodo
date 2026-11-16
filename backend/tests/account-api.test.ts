@@ -257,6 +257,123 @@ describe('Account API', () => {
       expect(emptyName.statusCode).toBe(400);
     });
 
+    it('lets a user change their UI language', async () => {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/api/v1/users/@me',
+        headers: { 'x-token': token },
+        payload: { language: 'fi' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().language).toBe('fi');
+
+      const row = await db
+        .selectFrom('users')
+        .select('language')
+        .where('id', '=', userId)
+        .executeTakeFirstOrThrow();
+      expect(row.language).toBe('fi');
+    });
+
+    it('rejects an unsupported language', async () => {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/api/v1/users/@me',
+        headers: { 'x-token': token },
+        payload: { language: 'de' },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toBe('Validation error');
+
+      const row = await db
+        .selectFrom('users')
+        .select('language')
+        .where('id', '=', userId)
+        .executeTakeFirstOrThrow();
+      expect(row.language).toBe('en-GB');
+    });
+
+    it('lets a user change their calendar week start', async () => {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/api/v1/users/@me',
+        headers: { 'x-token': token },
+        payload: { weekStart: 'monday' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().weekStart).toBe('monday');
+
+      const row = await db
+        .selectFrom('users')
+        .select('week_start')
+        .where('id', '=', userId)
+        .executeTakeFirstOrThrow();
+      expect(row.week_start).toBe('monday');
+    });
+
+    it('rejects an unsupported week start', async () => {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/api/v1/users/@me',
+        headers: { 'x-token': token },
+        payload: { weekStart: 'friday' },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toBe('Validation error');
+
+      const row = await db
+        .selectFrom('users')
+        .select('week_start')
+        .where('id', '=', userId)
+        .executeTakeFirstOrThrow();
+      expect(row.week_start).toBe('sunday');
+    });
+
+    it('lets a user change their date and time formats', async () => {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/api/v1/users/@me',
+        headers: { 'x-token': token },
+        payload: { dateFormat: 'dmy', timeFormat: '12h' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().dateFormat).toBe('dmy');
+      expect(response.json().timeFormat).toBe('12h');
+
+      const row = await db
+        .selectFrom('users')
+        .select(['date_format', 'time_format'])
+        .where('id', '=', userId)
+        .executeTakeFirstOrThrow();
+      expect(row.date_format).toBe('dmy');
+      expect(row.time_format).toBe('12h');
+    });
+
+    it('rejects unsupported date and time formats', async () => {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/api/v1/users/@me',
+        headers: { 'x-token': token },
+        payload: { dateFormat: 'ydm', timeFormat: '13h' },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toBe('Validation error');
+
+      const row = await db
+        .selectFrom('users')
+        .select(['date_format', 'time_format'])
+        .where('id', '=', userId)
+        .executeTakeFirstOrThrow();
+      expect(row.date_format).toBe('ymd');
+      expect(row.time_format).toBe('24h');
+    });
+
     it('rejects an email address that is already in use', async () => {
       const response = await app.inject({
         method: 'PATCH',
@@ -293,6 +410,10 @@ describe('Account API', () => {
       expect(body.name).toBeTruthy();
       expect(body.email).toBeTruthy();
       expect(body.phoneNumber).toBeNull();
+      expect(body.language).toBe('en-GB');
+      expect(body.weekStart).toBe('sunday');
+      expect(body.dateFormat).toBe('ymd');
+      expect(body.timeFormat).toBe('24h');
       expect(body.isEmployed).toBe(false);
       expect(body.isSuspended).toBe(false);
       expect(body.isBlocked).toBe(false);

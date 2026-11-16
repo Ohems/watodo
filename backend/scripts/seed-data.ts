@@ -19,17 +19,22 @@ import { db, disconnectDatabase } from '../src/database.js';
 import type {
   Calendar,
   Database,
+  DateFormat,
+  EventInfoSlot,
   EventSeries,
   EventWorkRole,
   NewEventSeries,
   Role,
   Room,
   Site,
-  TeamType,
+  TimeFormat,
   User,
+  WeekStart,
 } from '../src/db/types.js';
+import type { NotificationMessageKey } from '../src/i18n/messages.js';
 import { createLogger } from '../src/logger.js';
 import { PERMISSIONS, type Permission } from '../src/permissions.js';
+import { supportedLanguages } from '../src/schemas/index.js';
 import { seedPermissions } from '../src/services/permission-service.js';
 import {
   buildRruleString,
@@ -41,6 +46,15 @@ import {
 
 const logger = createLogger('seed-data');
 
+/** Calendar week start values; seeded mock users cycle through them. */
+const WEEK_STARTS: WeekStart[] = ['sunday', 'monday'];
+
+/** Date format values; seeded mock users cycle through them. */
+const DATE_FORMATS: DateFormat[] = ['ymd', 'mdy', 'dmy'];
+
+/** Time format values; seeded mock users cycle through them. */
+const TIME_FORMATS: TimeFormat[] = ['24h', '12h'];
+
 type Tx = Transaction<Database>;
 type Executor = Kysely<Database> | Transaction<Database>;
 
@@ -50,6 +64,14 @@ interface MockUserSeed {
   description: string;
   /** E.164 phone number (includes the country code); null when not set. */
   phoneNumber: string | null;
+  /** UI language; when omitted, languages cycle through the supported ones. */
+  language?: (typeof supportedLanguages)[number];
+  /** Calendar week start; when omitted, values cycle through the supported ones. */
+  weekStart?: WeekStart;
+  /** Date format; when omitted, values cycle through the supported ones. */
+  dateFormat?: DateFormat;
+  /** Time format; when omitted, values cycle through the supported ones. */
+  timeFormat?: TimeFormat;
   isEmployed: boolean;
   isSuspended: boolean;
   isBlocked: boolean;
@@ -240,6 +262,7 @@ const SUMMARY_TABLES = [
   'user_certifications',
   'certification_work_roles',
   'notifications',
+  'notification_preferences',
   'calendars',
   'event_types',
   'event_type_roles',
@@ -249,6 +272,7 @@ const SUMMARY_TABLES = [
   'event_work_roles',
   'event_work_role_assignments',
   'event_comments',
+  'absences',
 ] as const;
 
 const now = new Date();
@@ -346,7 +370,7 @@ async function createRole(
 
 async function createMockUsers(tx: Tx, seeds: MockUserSeed[]): Promise<User[]> {
   const users: User[] = [];
-  for (const seed of seeds) {
+  for (const [index, seed] of seeds.entries()) {
     const user = await tx
       .insertInto('users')
       .values({
@@ -354,6 +378,10 @@ async function createMockUsers(tx: Tx, seeds: MockUserSeed[]): Promise<User[]> {
         email: seed.email,
         description: seed.description,
         phone_number: seed.phoneNumber,
+        language: seed.language ?? supportedLanguages[index % supportedLanguages.length],
+        week_start: seed.weekStart ?? WEEK_STARTS[index % WEEK_STARTS.length],
+        date_format: seed.dateFormat ?? DATE_FORMATS[index % DATE_FORMATS.length],
+        time_format: seed.timeFormat ?? TIME_FORMATS[index % TIME_FORMATS.length],
         is_employed: seed.isEmployed,
         is_suspended: seed.isSuspended,
         is_blocked: seed.isBlocked,
@@ -384,20 +412,26 @@ async function createTeams(
 }
 
 /**
- * Sets the purpose of a team (type, leader and the linked event type or work
- * role). Called after work roles and event types exist.
+ * Sets the team leader. Called after the users exist.
  */
-async function setTeamPurpose(
-  tx: Tx,
-  teamId: string,
-  purpose: {
-    team_type: TeamType;
-    team_leader_id?: string | null;
-    event_type_id?: number | null;
-    work_role_id?: number | null;
-  },
-): Promise<void> {
-  await tx.updateTable('teams').set(purpose).where('id', '=', teamId).execute();
+async function setTeamLeader(tx: Tx, teamId: string, teamLeaderId: string | null): Promise<void> {
+  await tx
+    .updateTable('teams')
+    .set({ team_leader_id: teamLeaderId })
+    .where('id', '=', teamId)
+    .execute();
+}
+
+/**
+ * Assigns one or more work roles to a team. Called after the work roles exist.
+ */
+async function assignWorkRolesToTeam(tx: Tx, teamId: string, workRoleIds: number[]): Promise<void> {
+  for (const workRoleId of workRoleIds) {
+    await tx
+      .insertInto('team_work_roles')
+      .values({ team_id: teamId, work_role_id: workRoleId })
+      .execute();
+  }
 }
 
 async function createCalendar(tx: Tx, organizationId: string, name: string): Promise<Calendar> {
@@ -510,6 +544,30 @@ async function materializeOccurrence(
           .execute();
       }
     }
+    // Inherit parent (series-level) info slots, copying the parent value as
+    // the default. Mirrors ensureOccurrenceMaterialized in the service.
+    const parentInfoSlots = await tx
+      .selectFrom('event_info_slots')
+      .select(['id', 'title', 'description', 'value'])
+      .where('event_series_id', '=', seriesId)
+      .where('event_occurrence_id', 'is', null)
+      .execute();
+    if (parentInfoSlots.length > 0) {
+      await tx
+        .insertInto('event_info_slots')
+        .values(
+          parentInfoSlots.map(s => ({
+            event_series_id: seriesId,
+            event_occurrence_id: occ.id,
+            inherited_from_info_slot_id: s.id,
+            title: s.title,
+            description: s.description,
+            value: s.value,
+          })),
+        )
+        .onConflict(oc => oc.doNothing())
+        .execute();
+    }
     return occ.id;
   }
   const existing = await tx
@@ -554,6 +612,27 @@ async function assignUser(tx: Tx, slotId: number, userId: string): Promise<void>
     .insertInto('event_work_role_assignments')
     .values({ event_work_role_id: slotId, user_id: userId })
     .execute();
+}
+
+/** Adds a parent (series-level) info slot. Occurrence copies are inherited on materialization. */
+async function addInfoSlot(
+  tx: Tx,
+  seriesId: number,
+  title: string,
+  description: string,
+  value: string | null = null,
+): Promise<EventInfoSlot> {
+  return tx
+    .insertInto('event_info_slots')
+    .values({
+      event_series_id: seriesId,
+      event_occurrence_id: null,
+      title,
+      description,
+      value,
+    })
+    .returningAll()
+    .executeTakeFirstOrThrow();
 }
 
 async function addComment(
@@ -739,13 +818,34 @@ async function addNotification(
   tx: Tx,
   userId: string,
   organizationId: string,
-  title: string,
-  body: string,
+  key: NotificationMessageKey,
+  params: Record<string, unknown>,
   isRead: boolean,
 ): Promise<void> {
   await tx
     .insertInto('notifications')
-    .values({ user_id: userId, organization_id: organizationId, title, body, is_read: isRead })
+    .values({
+      user_id: userId,
+      organization_id: organizationId,
+      message_key: key,
+      params,
+      is_read: isRead,
+    })
+    .execute();
+}
+
+/** Inserts an absence for a user (dates are inclusive calendar days, UTC). */
+async function addAbsence(
+  tx: Tx,
+  userId: string,
+  type: 'sick' | 'away' | 'other',
+  description: string,
+  startDate: Date,
+  endDate: Date,
+): Promise<void> {
+  await tx
+    .insertInto('absences')
+    .values({ user_id: userId, type, description, start_date: startDate, end_date: endDate })
     .execute();
 }
 
@@ -755,6 +855,12 @@ interface WeeklyMeetingUsers {
   av: User;
   commenter: User;
   occurrenceCommenter: User;
+}
+
+/** Optional catalog work roles (of the same organization) linked to the slots. */
+interface WeeklyMeetingWorkRoles {
+  setupRoleId?: number;
+  coffeeRoleId?: number;
 }
 
 // Creates a weekly recurring series (Mondays 18:00-19:30 local) with
@@ -767,7 +873,8 @@ async function seedWeeklyMeeting(
   calendarId: string,
   timezone: string,
   users: WeeklyMeetingUsers,
-): Promise<void> {
+  workRoles: WeeklyMeetingWorkRoles = {},
+): Promise<EventSeries> {
   const startWall = firstWeekdayOfMonth(prevYear, prevMonth, 1);
   const start = at(
     timezone,
@@ -787,12 +894,19 @@ async function seedWeeklyMeeting(
     timezone,
   });
 
+  // Info slots (form fields) defined on the series; occurrences inherit them
+  // on materialization and fill in their own values.
+  await addInfoSlot(tx, series.id, 'Meeting topic', "What this week's meeting is about.");
+  await addInfoSlot(tx, series.id, 'Special notes', 'Anything participants should know.');
+
   const setupSlot = await addWorkRoleSlot(
     tx,
     series.id,
     null,
     'Room setup',
     'Open the venue and arrange the chairs before the meeting.',
+    false,
+    workRoles.setupRoleId ?? null,
   );
   await assignUser(tx, setupSlot.id, users.setup.id);
   const coffeeSlot = await addWorkRoleSlot(
@@ -801,6 +915,8 @@ async function seedWeeklyMeeting(
     null,
     'Coffee and tea',
     'Make sure there is coffee, tea and water for everyone.',
+    false,
+    workRoles.coffeeRoleId ?? null,
   );
   await assignUser(tx, coffeeSlot.id, users.coffee.id);
 
@@ -879,6 +995,8 @@ async function seedWeeklyMeeting(
     users.commenter.id,
     'The agenda is posted on the notice board the day before the meeting.',
   );
+
+  return series;
 }
 
 /**
@@ -1140,35 +1258,26 @@ export async function seedTestData(tx: Tx): Promise<void> {
     })
     .execute();
 
-  // Team purposes: role group teams are linked to a work role, an event
-  // organizer team is linked to an event type, and each team gets a leader.
-  await setTeamPurpose(tx, teamsOne[0].id, {
-    team_type: 'role_group',
-    team_leader_id: mockUsersOne[0].id,
-    work_role_id: workRolesOne[0].id,
-  });
-  await setTeamPurpose(tx, teamsOne[1].id, {
-    team_type: 'general',
-    team_leader_id: mockUsersOne[1].id,
-  });
-  await setTeamPurpose(tx, teamsOne[2].id, {
-    team_type: 'role_group',
-    team_leader_id: mockUsersOne[2].id,
-    work_role_id: workRolesOne[2].id,
-  });
+  // Team leaders and work role assignments: each team gets a leader, and some
+  // teams are assigned one or more work roles.
+  await setTeamLeader(tx, teamsOne[0].id, mockUsersOne[0].id);
+  await assignWorkRolesToTeam(tx, teamsOne[0].id, [workRolesOne[0].id]);
+  await setTeamLeader(tx, teamsOne[1].id, mockUsersOne[1].id);
+  await setTeamLeader(tx, teamsOne[2].id, mockUsersOne[2].id);
+  await assignWorkRolesToTeam(tx, teamsOne[2].id, [workRolesOne[2].id]);
   const eventsTeamOne = await createTeams(tx, firstOrganization.id, [
     { name: 'Events Team', description: 'Organizes the weekly meetings and other events.' },
   ]);
-  await setTeamPurpose(tx, eventsTeamOne[0].id, {
-    team_type: 'event_organizers',
-    team_leader_id: mockUsersOne[0].id,
-    event_type_id: weeklyMeetingTypeOne.id,
-  });
+  await setTeamLeader(tx, eventsTeamOne[0].id, mockUsersOne[0].id);
+  // The Events Team is assigned the Kitchen Helper work role, so its managers
+  // (including the real user) manage that work role for the series the team
+  // is connected to.
+  await assignWorkRolesToTeam(tx, eventsTeamOne[0].id, [workRolesOne[2].id]);
   await addTeamMembers(
     tx,
     eventsTeamOne[0].id,
     [mockUsersOne[1].id, realUser.id],
-    [mockUsersOne[1].id],
+    [mockUsersOne[1].id, realUser.id],
   );
 
   // --- Event series for the first organization (timezone: UTC) ---
@@ -1244,14 +1353,31 @@ export async function seedTestData(tx: Tx): Promise<void> {
 
   // A weekly recurring meeting spanning all three months, with a
   // cancelled occurrence in the current month and a rescheduled
-  // occurrence in the next month.
-  await seedWeeklyMeeting(tx, 'Weekly Community Meeting', defaultCalendarOne.id, 'UTC', {
-    setup: mockUsersOne[0],
-    coffee: mockUsersOne[2],
-    av: mockUsersOne[6],
-    commenter: mockUsersOne[1],
-    occurrenceCommenter: realUser,
-  });
+  // occurrence in the next month. The real user takes the minutes, so they
+  // show up as a participant of every upcoming occurrence on the Home page.
+  const weeklyMeetingOne = await seedWeeklyMeeting(
+    tx,
+    'Weekly Community Meeting',
+    defaultCalendarOne.id,
+    'UTC',
+    {
+      setup: mockUsersOne[0],
+      coffee: mockUsersOne[2],
+      av: mockUsersOne[6],
+      commenter: mockUsersOne[1],
+      occurrenceCommenter: realUser,
+    },
+    // Link the slots to this organization's own catalog work roles.
+    { setupRoleId: workRolesOne[0].id, coffeeRoleId: workRolesOne[2].id },
+  );
+  const minutesSlot = await addWorkRoleSlot(
+    tx,
+    weeklyMeetingOne.id,
+    null,
+    'Take minutes',
+    'Write down the meeting minutes and share them afterwards.',
+  );
+  await assignUser(tx, minutesSlot.id, realUser.id);
 
   // A daily weekday series (BYDAY as a filter) in the mornings.
   const standupStartWall = firstWeekdayOfMonth(prevYear, prevMonth, 1);
@@ -1389,6 +1515,57 @@ export async function seedTestData(tx: Tx): Promise<void> {
   );
   await assignUser(tx, webinarSlot.id, realUser.id);
 
+  // A one-off event a few days from now, connected to the Events Team (whose
+  // managers include the real user and which is assigned the Kitchen Helper
+  // work role). It has one filled slot and one unfilled critical slot linked
+  // to the managed work role, so the Home page shows the manager badge, the
+  // slot status and the "missing in your area" warning for the real user.
+  const appreciation = await createSeries(tx, {
+    title: 'Volunteer Appreciation Evening',
+    description: 'An evening to thank all volunteers. Food and drinks provided.',
+    calendar_id: communityHallCalendar.id,
+    start: new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000),
+    duration_minutes: 180,
+    timezone: 'UTC',
+  });
+  await addInfoSlot(
+    tx,
+    appreciation.id,
+    'Program notes',
+    'Order of the evening: speeches, music, dinner.',
+  );
+  await addInfoSlot(tx, appreciation.id, 'Band composition', 'Who is playing this time.');
+  await addInfoSlot(
+    tx,
+    appreciation.id,
+    'Catering notes',
+    'Dietary requirements and serving times.',
+    'Vegetarian options available.',
+  );
+  const welcomeSlot = await addWorkRoleSlot(
+    tx,
+    appreciation.id,
+    null,
+    'Welcome guests',
+    'Greet the guests at the entrance.',
+  );
+  await assignUser(tx, welcomeSlot.id, mockUsersOne[3].id);
+  await addWorkRoleSlot(
+    tx,
+    appreciation.id,
+    null,
+    'Serve food and drinks',
+    'Serve food and drinks in the community kitchen. Currently unassigned.',
+    true,
+    workRolesOne[2].id,
+  );
+  await tx
+    .updateTable('event_series')
+    .set({ site_id: sitesOne[0].id, room_id: roomsOne[1].id })
+    .where('id', '=', appreciation.id)
+    .execute();
+  await assignTeamsToSeries(tx, appreciation.id, [eventsTeamOne[0].id]);
+
   // Set site/room assignments and assign teams to event series.
   // cleanupDay: Downtown Community Center, Main Hall
   await tx
@@ -1418,39 +1595,61 @@ export async function seedTestData(tx: Tx): Promise<void> {
   await assignTeamsToSeries(tx, festivalPlanning.id, [teamsOne[1].id]);
   await assignTeamsToSeries(tx, kickoff.id, [teamsOne[0].id, teamsOne[1].id]);
 
-  // Notifications for the first organization's users.
+  // Notifications for the first organization's users. Messages are stored as
+  // catalog keys + params and rendered in each user's language.
+  await addNotification(tx, realUser.id, firstOrganization.id, 'welcome', {}, false);
   await addNotification(
     tx,
     realUser.id,
     firstOrganization.id,
-    'Welcome to Watodo',
-    'Your organization has been set up. Explore the calendar and invite your team.',
-    false,
-  );
-  await addNotification(
-    tx,
-    realUser.id,
-    firstOrganization.id,
-    'Upcoming event',
-    'Summer Festival Planning is happening this month. Check the calendar for details.',
+    'upcomingEvent',
+    { eventTitle: 'Summer Festival Planning' },
     false,
   );
   await addNotification(
     tx,
     mockUsersOne[0].id,
     firstOrganization.id,
-    'You have been assigned a work role',
-    'You are assigned to "Room setup" for the Weekly Community Meeting.',
+    'workRoleAssigned',
+    { role: 'Room setup', eventTitle: 'Weekly Community Meeting' },
     true,
   );
   await addNotification(
     tx,
     mockUsersOne[2].id,
     firstOrganization.id,
-    'New event comment',
-    'Someone commented on the Weekly Community Meeting.',
+    'newEventComment',
+    { eventTitle: 'Weekly Community Meeting' },
     false,
   );
+  await addNotification(
+    tx,
+    mockUsersOne[1].id,
+    firstOrganization.id,
+    'eventCancelled',
+    { eventTitle: 'Summer Festival', start: '2026-08-15T09:00:00.000Z' },
+    false,
+  );
+  // Notification preferences: rows exist only for values that differ from the
+  // channel default (in-app and email on, push off). Here one user disables
+  // email for cancellations and another opts into push for assignments.
+  await tx
+    .insertInto('notification_preferences')
+    .values([
+      {
+        user_id: mockUsersOne[0].id,
+        message_key: 'eventCancelled',
+        channel: 'email',
+        enabled: false,
+      },
+      {
+        user_id: mockUsersOne[1].id,
+        message_key: 'workRoleAssigned',
+        channel: 'push',
+        enabled: true,
+      },
+    ])
+    .execute();
 
   logger.info(`Seeded event series for "${firstOrganization.name}"`);
 
@@ -1639,17 +1838,10 @@ export async function seedTestData(tx: Tx): Promise<void> {
     })
     .execute();
 
-  // Team purposes for the second organization.
-  await setTeamPurpose(tx, teamsTwo[0].id, {
-    team_type: 'event_organizers',
-    team_leader_id: mockUsersTwo[0].id,
-    event_type_id: weeklyMeetingTypeTwo.id,
-  });
-  await setTeamPurpose(tx, teamsTwo[1].id, {
-    team_type: 'role_group',
-    team_leader_id: mockUsersTwo[1].id,
-    work_role_id: workRolesTwo[1].id,
-  });
+  // Team leaders and work role assignments for the second organization.
+  await setTeamLeader(tx, teamsTwo[0].id, mockUsersTwo[0].id);
+  await setTeamLeader(tx, teamsTwo[1].id, mockUsersTwo[1].id);
+  await assignWorkRolesToTeam(tx, teamsTwo[1].id, [workRolesTwo[1].id]);
 
   // --- Event series for the second organization (timezone: Europe/Helsinki) ---
 
@@ -1689,13 +1881,21 @@ export async function seedTestData(tx: Tx): Promise<void> {
   );
 
   // A weekly recurring meeting spanning all three months.
-  await seedWeeklyMeeting(tx, 'Weekly Association Meeting', mainCalendar.id, 'Europe/Helsinki', {
-    setup: mockUsersTwo[0],
-    coffee: mockUsersTwo[2],
-    av: mockUsersTwo[3],
-    commenter: mockUsersTwo[1],
-    occurrenceCommenter: mockUsersTwo[4],
-  });
+  await seedWeeklyMeeting(
+    tx,
+    'Weekly Association Meeting',
+    mainCalendar.id,
+    'Europe/Helsinki',
+    {
+      setup: mockUsersTwo[0],
+      coffee: mockUsersTwo[2],
+      av: mockUsersTwo[3],
+      commenter: mockUsersTwo[1],
+      occurrenceCommenter: mockUsersTwo[4],
+    },
+    // Link the slots to this organization's own catalog work roles.
+    { setupRoleId: workRolesTwo[0].id, coffeeRoleId: workRolesTwo[2].id },
+  );
 
   // A daily weekday series in the mornings.
   const morningRunStartWall = firstWeekdayOfMonth(prevYear, prevMonth, 1);
@@ -1765,6 +1965,8 @@ export async function seedTestData(tx: Tx): Promise<void> {
     null,
     'Organize tables and chairs',
     'Set up tables and chairs for the potluck.',
+    false,
+    workRolesTwo[0].id,
   );
   await assignUser(tx, tablesSlot.id, mockUsersTwo[4].id);
   await addWorkRoleSlot(
@@ -1773,6 +1975,8 @@ export async function seedTestData(tx: Tx): Promise<void> {
     null,
     'Dessert table',
     'Run the dessert table. Currently unassigned.',
+    false,
+    workRolesTwo[2].id,
   );
   await addComment(
     tx,
@@ -1869,30 +2073,46 @@ export async function seedTestData(tx: Tx): Promise<void> {
   // Notifications for the second organization's users.
   await addNotification(
     tx,
-    realUser.id,
-    secondOrganization.id,
-    'New organization ready',
-    'Riverside Community Association has been created. Start adding events.',
-    false,
-  );
-  await addNotification(
-    tx,
     mockUsersTwo[0].id,
     secondOrganization.id,
-    'You are now an event coordinator',
-    'You have been assigned the Event Coordinator role.',
+    'roleAssigned',
+    { roleName: 'Event Coordinator' },
     true,
   );
   await addNotification(
     tx,
     mockUsersTwo[4].id,
     secondOrganization.id,
-    'Upcoming event',
-    'Community Potluck is happening this month. Sign up for a dish.',
+    'upcomingEvent',
+    { eventTitle: 'Community Potluck' },
     false,
   );
 
   logger.info(`Seeded event series for "${secondOrganization.name}"`);
+
+  // Absences: one currently active, one upcoming and one in the past.
+  const utcDay = (offsetDays: number): Date =>
+    new Date(Date.UTC(thisYear, thisMonth, now.getUTCDate() + offsetDays));
+  // mockUsersOne[3] = Jukka Nieminen: sick right now.
+  await addAbsence(tx, mockUsersOne[3].id, 'sick', 'Flu, staying home.', utcDay(-1), utcDay(3));
+  // mockUsersOne[5] = Ville Lehtonen: away next month.
+  await addAbsence(
+    tx,
+    mockUsersOne[5].id,
+    'away',
+    'Family vacation.',
+    nextMonthStart,
+    new Date(nextMonthStart.getTime() + 6 * 24 * 60 * 60 * 1000),
+  );
+  // mockUsersTwo[2]: a past absence.
+  await addAbsence(
+    tx,
+    mockUsersTwo[2].id,
+    'other',
+    'Moved house.',
+    new Date(Date.UTC(prevYear, prevMonth, 10)),
+    new Date(Date.UTC(prevYear, prevMonth, 12)),
+  );
 
   logger.info('Test data seeded successfully:');
   for (const table of SUMMARY_TABLES) {

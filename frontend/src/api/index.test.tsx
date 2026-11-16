@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { type MockApi, mockApi } from '../test/api-mock.js';
 import { createTestStore, renderWithProviders } from '../test/test-utils.js';
 import type { User } from '../types/index.js';
-import { api, getApiErrorMessage, getLoginUrl, useGetCurrentUserQuery } from './index.js';
+import { getApiErrorMessage, getLoginUrl, useGetCurrentUserQuery, usersApi } from './index.js';
 
 const mockUser: User = {
   id: 'u1',
@@ -11,6 +11,10 @@ const mockUser: User = {
   email: 'test@example.com',
   description: '',
   phoneNumber: null,
+  language: 'en-GB',
+  weekStart: 'sunday',
+  dateFormat: 'ymd',
+  timeFormat: '24h',
   permissions: ['admin'],
   state: 'active',
   isEmployed: true,
@@ -76,7 +80,7 @@ describe('api', () => {
     expect(await screen.findByText('Test User')).toBeInTheDocument();
     expect(mock.callCount('GET', '/api/v1/users/@me')).toBe(1);
 
-    await store.dispatch(api.endpoints.updateCurrentUser.initiate({ name: 'Renamed User' }));
+    await store.dispatch(usersApi.endpoints.updateCurrentUser.initiate({ name: 'Renamed User' }));
 
     await waitFor(() => {
       expect(mock.callCount('GET', '/api/v1/users/@me')).toBe(2);
@@ -100,5 +104,14 @@ describe('api', () => {
     expect(getApiErrorMessage({ status: 503, data: {} })).toBe('Request failed: 503');
     expect(getApiErrorMessage(new Error('Network down'))).toBe('Network down');
     expect(getApiErrorMessage('plain failure')).toBe('plain failure');
+  });
+
+  it('returns a clear message when the request never reached the server', () => {
+    expect(getApiErrorMessage({ status: 'FETCH_ERROR', error: 'TypeError: fetch failed' })).toBe(
+      'The server could not be reached. Check your connection and try again later.',
+    );
+    expect(getApiErrorMessage({ status: 'TIMEOUT_ERROR' })).toBe(
+      'The server could not be reached. Check your connection and try again later.',
+    );
   });
 });

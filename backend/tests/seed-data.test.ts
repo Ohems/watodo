@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { seedTestData } from '../scripts/seed-data.js';
 import { db } from '../src/database.js';
+import { getOccurrences } from '../src/services/event-service.js';
 import { resetDatabase } from './helpers/fixtures.js';
 
 // Verifies that the data seed script creates the expected number of rows in
@@ -55,15 +56,18 @@ describe('seed-data script', () => {
       user_certifications: 6,
       certification_work_roles: 4,
       notifications: 7,
+      notification_preferences: 2,
       calendars: 4,
       event_types: 8,
       event_type_roles: 4,
-      event_series: 16,
-      event_series_teams: 7,
+      event_series: 17,
+      event_series_teams: 8,
       event_occurrences: 6,
-      event_work_roles: 37,
-      event_work_role_assignments: 32,
+      event_work_roles: 40,
+      event_work_role_assignments: 34,
+      event_info_slots: 19,
       event_comments: 10,
+      absences: 3,
     };
 
     for (const [table, expectedCount] of Object.entries(expected)) {
@@ -88,6 +92,31 @@ describe('seed-data script', () => {
     );
     expect(orphanSlots).toHaveLength(0);
 
+    // Occurrence-level info slots are inherited copies of parent info slots
+    // and reference materialized occurrences.
+    const occInfoSlots = await db
+      .selectFrom('event_info_slots')
+      .select(['id', 'event_occurrence_id', 'inherited_from_info_slot_id'])
+      .where('event_occurrence_id', 'is not', null)
+      .execute();
+    expect(occInfoSlots.length).toBeGreaterThan(0);
+    for (const slot of occInfoSlots) {
+      expect(occIds.has(slot.event_occurrence_id as number)).toBe(true);
+      expect(slot.inherited_from_info_slot_id).not.toBeNull();
+    }
+    const parentInfoSlotIds = new Set(
+      (
+        await db
+          .selectFrom('event_info_slots')
+          .select('id')
+          .where('event_occurrence_id', 'is', null)
+          .execute()
+      ).map(r => r.id),
+    );
+    for (const slot of occInfoSlots) {
+      expect(parentInfoSlotIds.has(slot.inherited_from_info_slot_id as number)).toBe(true);
+    }
+
     // At least one occurrence carries cancel/reschedule state.
     const flagged = await db
       .selectFrom('event_occurrences')
@@ -97,32 +126,22 @@ describe('seed-data script', () => {
     expect(flagged.length).toBeGreaterThan(0);
   });
 
-  it('seeds teams of every type with leaders and links', async () => {
+  it('seeds teams with leaders, work role and event series assignments', async () => {
     await db.transaction().execute(seedTestData);
 
     const teams = await db.selectFrom('teams').selectAll().execute();
-    const byType = new Map<string, number>();
-    for (const team of teams) {
-      byType.set(team.team_type, (byType.get(team.team_type) ?? 0) + 1);
-    }
-    expect(byType.get('general')).toBeGreaterThan(0);
-    expect(byType.get('event_organizers')).toBeGreaterThan(0);
-    expect(byType.get('role_group')).toBeGreaterThan(0);
 
-    // Every team has a leader, and the links match the team type.
+    // Every team has a leader.
     for (const team of teams) {
       expect(team.team_leader_id).not.toBeNull();
-      if (team.team_type === 'event_organizers') {
-        expect(team.event_type_id).not.toBeNull();
-        expect(team.work_role_id).toBeNull();
-      } else if (team.team_type === 'role_group') {
-        expect(team.work_role_id).not.toBeNull();
-        expect(team.event_type_id).toBeNull();
-      } else {
-        expect(team.event_type_id).toBeNull();
-        expect(team.work_role_id).toBeNull();
-      }
     }
+
+    // At least one team has work roles assigned, and at least one team is
+    // assigned to an event series.
+    const teamWorkRoles = await db.selectFrom('team_work_roles').selectAll().execute();
+    expect(teamWorkRoles.length).toBeGreaterThan(0);
+    const teamSeries = await db.selectFrom('event_series_teams').selectAll().execute();
+    expect(teamSeries.length).toBeGreaterThan(0);
 
     // Every team has at least one member with the manager toggle.
     const managers = await db
@@ -132,5 +151,93 @@ describe('seed-data script', () => {
       .groupBy('team_id')
       .execute();
     expect(managers.length).toBe(teams.length);
+  });
+
+  it('seeds upcoming occurrences the initial user is involved in', async () => {
+    await db.transaction().execute(seedTestData);
+
+    const realUser = await db.selectFrom('users').selectAll().executeTakeFirstOrThrow();
+    const now = new Date();
+    const in14Days = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+    const involved = await getOccurrences(
+      now,
+      in14Days,
+      undefined,
+      { scope: 'involved' },
+      realUser.id,
+    );
+
+    // The Home page "Upcoming events" list is not empty for the initial user.
+    expect(involved.length).toBeGreaterThan(0);
+
+    // At least one occurrence where the user is a participant (assigned to a
+    // slot), and at least one where they are a manager via a connected team.
+    expect(involved.some(o => o.isParticipant)).toBe(true);
+    expect(involved.some(o => o.isManager)).toBe(true);
+
+    // At least one managed occurrence flags an unfilled critical slot of a
+    // work role the user manages (the warning label on the Home page).
+    const warned = involved.find(o => o.managedUnfilledCriticalSlots.length > 0);
+    expect(warned).toBeDefined();
+    expect(warned?.workRoleSlots.some(s => s.isCritical && s.assigneeCount === 0)).toBe(true);
+  });
+
+  it('keeps organization-scoped data within its own organization', async () => {
+    await db.transaction().execute(seedTestData);
+
+    // Every event work role slot that links a catalog work role must reference
+    // a work role of the same organization as the event series (via calendar).
+    const slotRows = await db
+      .selectFrom('event_work_roles')
+      .innerJoin('event_series', 'event_series.id', 'event_work_roles.event_series_id')
+      .innerJoin('calendars', 'calendars.id', 'event_series.calendar_id')
+      .innerJoin('work_roles', 'work_roles.id', 'event_work_roles.work_role_id')
+      .select(['work_roles.organization_id as role_org', 'calendars.organization_id as series_org'])
+      .execute();
+    expect(slotRows.length).toBeGreaterThan(0);
+    for (const row of slotRows) {
+      expect(row.role_org).toBe(row.series_org);
+    }
+
+    // Team work role assignments: team and work role in the same organization.
+    const teamRoleRows = await db
+      .selectFrom('team_work_roles')
+      .innerJoin('teams', 'teams.id', 'team_work_roles.team_id')
+      .innerJoin('work_roles', 'work_roles.id', 'team_work_roles.work_role_id')
+      .select(['teams.organization_id as team_org', 'work_roles.organization_id as role_org'])
+      .execute();
+    expect(teamRoleRows.length).toBeGreaterThan(0);
+    for (const row of teamRoleRows) {
+      expect(row.role_org).toBe(row.team_org);
+    }
+
+    // Series team assignments: team and series in the same organization.
+    const seriesTeamRows = await db
+      .selectFrom('event_series_teams')
+      .innerJoin('teams', 'teams.id', 'event_series_teams.team_id')
+      .innerJoin('event_series', 'event_series.id', 'event_series_teams.event_series_id')
+      .innerJoin('calendars', 'calendars.id', 'event_series.calendar_id')
+      .select(['teams.organization_id as team_org', 'calendars.organization_id as series_org'])
+      .execute();
+    expect(seriesTeamRows.length).toBeGreaterThan(0);
+    for (const row of seriesTeamRows) {
+      expect(row.team_org).toBe(row.series_org);
+    }
+
+    // Certification work role links: certification and work role in the same
+    // organization.
+    const certRoleRows = await db
+      .selectFrom('certification_work_roles')
+      .innerJoin('work_roles', 'work_roles.id', 'certification_work_roles.work_role_id')
+      .innerJoin('certifications', 'certifications.id', 'certification_work_roles.certification_id')
+      .select([
+        'work_roles.organization_id as role_org',
+        'certifications.organization_id as cert_org',
+      ])
+      .execute();
+    expect(certRoleRows.length).toBeGreaterThan(0);
+    for (const row of certRoleRows) {
+      expect(row.cert_org).toBe(row.role_org);
+    }
   });
 });

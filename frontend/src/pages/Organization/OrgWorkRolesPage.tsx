@@ -10,13 +10,19 @@ import {
 } from '../../api/index.js';
 import DataTable, { type DataTableColumn } from '../../components/DataTable/DataTable.js';
 import { useAppSelector } from '../../hooks/redux.js';
-import { selectActiveOrganizationId } from '../../store/organization-slice.js';
+import {
+  selectActiveOrganizationId,
+  selectIsOrganizationLoaded,
+  selectOrganizationsError,
+} from '../../store/organization-slice.js';
 import type { WorkRole } from '../../types/index.js';
 
 function OrgWorkRolesPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const activeOrganizationId = useAppSelector(selectActiveOrganizationId);
+  const organizationsLoaded = useAppSelector(selectIsOrganizationLoaded);
+  const organizationsError = useAppSelector(selectOrganizationsError);
   const { data: currentUser } = useGetCurrentUserQuery();
   const canWrite =
     currentUser?.permissions?.includes('admin') === true ||
@@ -30,7 +36,11 @@ function OrgWorkRolesPage() {
   const [newName, setNewName] = useState('');
   const [newDescription, setNewDescription] = useState('');
 
-  const { data, isLoading: loading } = useGetWorkRolesQuery(
+  const {
+    data,
+    isLoading: loading,
+    isError,
+  } = useGetWorkRolesQuery(
     activeOrganizationId
       ? {
           organizationId: activeOrganizationId,
@@ -81,7 +91,8 @@ function OrgWorkRolesPage() {
         total={data?.total ?? 0}
         page={page}
         limit={limit}
-        loading={loading}
+        loading={loading || (!activeOrganizationId && !organizationsLoaded)}
+        error={isError || organizationsError}
         canAdd={canWrite}
         onAdd={() => setAddModalOpen(true)}
         onPageChange={setPage}

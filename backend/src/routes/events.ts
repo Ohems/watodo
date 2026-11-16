@@ -2,31 +2,40 @@ import type { FastifyInstance } from 'fastify';
 import {
   assignUserToOccurrenceWorkRoleHandler,
   assignUserToWorkRoleHandler,
+  bulkAssignUserToWorkRoleHandler,
   cancelOccurrenceHandler,
   createEventCommentHandler,
+  createEventInfoSlotHandler,
   createEventSeriesHandler,
   createEventWorkRoleHandler,
   createOccurrenceCommentHandler,
   createOccurrenceWorkRoleHandler,
   deleteEventCommentHandler,
+  deleteEventInfoSlotHandler,
   deleteEventSeriesHandler,
   deleteEventWorkRoleHandler,
   deleteExceptionHandler,
   deleteOccurrenceCommentHandler,
   deleteOccurrenceWorkRoleHandler,
+  getAssignmentCandidatesHandler,
   getEventSeriesHandler,
   getEventSeriesManagementHandler,
   getOccurrenceDetailByRefHandler,
   getOccurrenceDetailHandler,
   getOccurrencesHandler,
   getSeriesOccurrencesHandler,
+  getStaffingWorkloadHandler,
+  getUserEventAssignmentsHandler,
+  importParentInfoSlotsHandler,
   importParentSlotsHandler,
   listEventCommentsHandler,
+  listEventInfoSlotsHandler,
   listEventSeriesHandler,
   listEventSeriesPaginatedHandler,
   listEventWorkRolesHandler,
   listExceptionsHandler,
   listOccurrenceCommentsHandler,
+  listOccurrenceInfoSlotsHandler,
   listOccurrenceWorkRolesHandler,
   materializeOccurrenceHandler,
   rescheduleOccurrenceHandler,
@@ -34,10 +43,12 @@ import {
   unassignUserFromOccurrenceWorkRoleHandler,
   unassignUserFromWorkRoleHandler,
   updateEventCommentHandler,
+  updateEventInfoSlotHandler,
   updateEventSeriesConfigHandler,
   updateEventSeriesHandler,
   updateEventWorkRoleHandler,
   updateOccurrenceCommentHandler,
+  updateOccurrenceInfoSlotHandler,
   updateOccurrenceWorkRoleHandler,
 } from '../controllers/event-controller.js';
 import { requirePermissions } from '../middleware/auth.js';
@@ -63,6 +74,14 @@ interface CommentParams {
   Params: { seriesId: string; commentId: string };
 }
 
+interface InfoSlotParams {
+  Params: { seriesId: string; infoSlotId: string };
+}
+
+interface OccurrenceInfoSlotParams {
+  Params: { eventOccurrenceId: string; infoSlotId: string };
+}
+
 interface OccurrenceIdParams {
   Params: { eventOccurrenceId: string };
 }
@@ -83,6 +102,14 @@ interface OccurrenceRefParams {
   Params: { occurrenceRef: string };
 }
 
+interface OrgUserParams {
+  Params: { organizationId: string; userId: string };
+}
+
+interface OrgParams {
+  Params: { organizationId: string };
+}
+
 export async function eventRoutes(app: FastifyInstance): Promise<void> {
   const read = requirePermissions(PERMISSIONS.EVENTS_READ);
   const write = requirePermissions(PERMISSIONS.EVENTS_WRITE);
@@ -101,6 +128,22 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
   // Occurrences of all series within a time range (used by calendars)
   app.get('/api/v1/event-series/occurrences', { preHandler: read }, getOccurrencesHandler);
 
+  // Event occurrences a specific organization user is assigned to (with the
+  // roles), used by the org user profile page
+  app.get<OrgUserParams>(
+    '/api/v1/organizations/:organizationId/users/:userId/event-assignments',
+    { preHandler: read },
+    getUserEventAssignmentsHandler,
+  );
+
+  // Per-user staffing workload of an organization over a range (staffing page
+  // workload matrix), optionally narrowed by site/room/team
+  app.get<OrgParams>(
+    '/api/v1/organizations/:organizationId/staffing/workload',
+    { preHandler: read },
+    getStaffingWorkloadHandler,
+  );
+
   // A single occurrence by its reference (stable numeric ID, or a temporary
   // `tmp:{seriesId}:{isoStart}` key for instances not yet materialized).
   app.get<OccurrenceRefParams>(
@@ -114,6 +157,13 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
     '/api/v1/event-occurrences/:occurrenceRef/import-slots',
     { preHandler: write },
     importParentSlotsHandler,
+  );
+
+  // Import parent (series-level) info slots into a materialized occurrence
+  app.post<OccurrenceRefParams>(
+    '/api/v1/event-occurrences/:occurrenceRef/import-info-slots',
+    { preHandler: write },
+    importParentInfoSlotsHandler,
   );
 
   // --- Occurrence-scoped endpoints (occurrence page) ---
@@ -157,6 +207,19 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
     '/api/v1/event-occurrences/:eventOccurrenceId/work-roles/:workRoleId/assignments/:assignmentId',
     { preHandler: write },
     unassignUserFromOccurrenceWorkRoleHandler,
+  );
+
+  // Info slots of a materialized occurrence: list, and value-only update.
+  // Info slots cannot be created or deleted per occurrence.
+  app.get<OccurrenceIdParams>(
+    '/api/v1/event-occurrences/:eventOccurrenceId/info-slots',
+    { preHandler: read },
+    listOccurrenceInfoSlotsHandler,
+  );
+  app.patch<OccurrenceInfoSlotParams>(
+    '/api/v1/event-occurrences/:eventOccurrenceId/info-slots/:infoSlotId',
+    { preHandler: write },
+    updateOccurrenceInfoSlotHandler,
   );
   app.get<OccurrenceIdParams>(
     '/api/v1/event-occurrences/:eventOccurrenceId/comments',
@@ -275,11 +338,49 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
     deleteEventWorkRoleHandler,
   );
 
+  // Assignment candidates for a work role slot: all users with the
+  // declared-role/qualification/certification flags computed against the
+  // slot's work role (and absence flags when start/end are given).
+  app.get<WorkRoleParams & { Querystring: unknown }>(
+    '/api/v1/event-series/:seriesId/work-roles/:workRoleId/assignment-candidates',
+    { preHandler: read },
+    getAssignmentCandidatesHandler,
+  );
+
+  // Info slots (series-level form template; occurrence copies are inherited
+  // on materialization and can only have their value edited per occurrence)
+  app.get<SeriesParams>(
+    '/api/v1/event-series/:seriesId/info-slots',
+    { preHandler: read },
+    listEventInfoSlotsHandler,
+  );
+  app.post<SeriesParams>(
+    '/api/v1/event-series/:seriesId/info-slots',
+    { preHandler: write },
+    createEventInfoSlotHandler,
+  );
+  app.patch<InfoSlotParams>(
+    '/api/v1/event-series/:seriesId/info-slots/:infoSlotId',
+    { preHandler: write },
+    updateEventInfoSlotHandler,
+  );
+  app.delete<InfoSlotParams>(
+    '/api/v1/event-series/:seriesId/info-slots/:infoSlotId',
+    { preHandler: write },
+    deleteEventInfoSlotHandler,
+  );
+
   // Users assigned to work role slots
   app.post<WorkRoleParams>(
     '/api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments',
     { preHandler: write },
     assignUserToWorkRoleHandler,
+  );
+  // Bulk assign: same user to the same slot across many occurrences at once
+  app.post<WorkRoleParams>(
+    '/api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments/bulk',
+    { preHandler: write },
+    bulkAssignUserToWorkRoleHandler,
   );
   app.delete<WorkRoleAssignmentParams>(
     '/api/v1/event-series/:seriesId/work-roles/:workRoleId/assignments/:assignmentId',
