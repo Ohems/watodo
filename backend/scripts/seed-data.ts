@@ -1632,8 +1632,9 @@ export async function seedTestData(tx: Tx): Promise<void> {
     false,
   );
   // Notification preferences: rows exist only for values that differ from the
-  // channel default (in-app and email on, push off). Here one user disables
-  // email for cancellations and another opts into push for assignments.
+  // channel default (only in-app is on; email and push are opt-in). Here one
+  // user opts into email for cancellations and another into push for
+  // assignments.
   await tx
     .insertInto('notification_preferences')
     .values([
@@ -1641,7 +1642,7 @@ export async function seedTestData(tx: Tx): Promise<void> {
         user_id: mockUsersOne[0].id,
         message_key: 'eventCancelled',
         channel: 'email',
-        enabled: false,
+        enabled: true,
       },
       {
         user_id: mockUsersOne[1].id,

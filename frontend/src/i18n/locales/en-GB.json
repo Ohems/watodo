@@ -445,7 +445,8 @@
     "timeFormatUpdateFailed": "Failed to change the time format",
     "notificationSettings": {
       "title": "Notification settings",
-      "description": "Choose which notifications you receive, per type and channel. Email delivery is not available yet, but your choice is saved for when it is.",
+      "description": "Choose which notifications you receive, per type and channel. Email and push are opt-in.",
+      "emailNotConfigured": "Email delivery is not configured on this server, so you will not receive notifications by email. In-app and push notifications are unaffected.",
       "type": "Notification",
       "updateFailed": "Failed to save the notification setting",
       "pushSection": "Push notifications",

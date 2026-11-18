@@ -203,9 +203,9 @@ describe('Notifications API', () => {
       expect(keys).toContain('workRoleAssigned');
       expect(keys).toContain('unfilledCriticalSlot');
       expect(body.preferences).toHaveLength(keys.length * 3);
-      // Defaults: in-app and email on, push off.
+      // Defaults: only in-app is on; email and push are opt-in.
       for (const preference of body.preferences) {
-        expect(preference.enabled).toBe(preference.channel !== 'push');
+        expect(preference.enabled).toBe(preference.channel === 'in_app');
         expect(['general', 'management']).toContain(preference.category);
       }
       // The management category holds exactly the manager-only alerts.

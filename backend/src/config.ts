@@ -28,6 +28,26 @@ export const config = {
   vapidPublicKey: process.env.VAPID_PUBLIC_KEY ?? '',
   vapidPrivateKey: process.env.VAPID_PRIVATE_KEY ?? '',
   vapidSubject: process.env.VAPID_SUBJECT ?? 'mailto:admin@example.com',
+  // Email delivery. MAIL_PROVIDER selects the mail backend (see
+  // services/mail-providers/); empty or unknown disables email delivery.
+  // MAIL_FROM is the sender address and must be verified at the provider.
+  mailProvider: process.env.MAIL_PROVIDER ?? '',
+  mailFrom: process.env.MAIL_FROM ?? '',
+  // Public URL of the web app, used for links inside notification emails.
+  appUrl: process.env.APP_URL ?? 'http://localhost:5173',
+  // Per-provider credentials; only the selected provider's are needed.
+  resendApiKey: process.env.RESEND_API_KEY ?? '',
+  mailgunApiKey: process.env.MAILGUN_API_KEY ?? '',
+  mailgunDomain: process.env.MAILGUN_DOMAIN ?? '',
+  mailgunRegion: process.env.MAILGUN_REGION ?? 'us',
+  usesendApiKey: process.env.USESEND_API_KEY ?? '',
+  // Points at a self-hosted useSend instance instead of the cloud API.
+  usesendBaseUrl: process.env.USESEND_BASE_URL ?? 'https://api.usesend.com',
+  smtpHost: process.env.SMTP_HOST ?? '',
+  smtpPort: Number.parseInt(process.env.SMTP_PORT ?? '587', 10),
+  smtpSecure: process.env.SMTP_SECURE === 'true',
+  smtpUser: process.env.SMTP_USER ?? '',
+  smtpPass: process.env.SMTP_PASS ?? '',
 } as const;
 
 export type Config = typeof config;

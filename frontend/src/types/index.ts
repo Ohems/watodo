@@ -714,6 +714,14 @@ export interface NotificationPreferencesResponse {
   preferences: NotificationPreference[];
 }
 
+/** Response of GET /api/v1/notifications/mail-status. */
+export interface MailStatus {
+  /** Whether a mail provider is configured server-side (email delivery on). */
+  configured: boolean;
+  /** The selected mail provider id, when a valid one is set. */
+  provider: string | null;
+}
+
 // --- Push subscriptions ---
 
 /** A registered web push endpoint (browser/device) of the current user. */

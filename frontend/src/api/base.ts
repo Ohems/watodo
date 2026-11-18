@@ -106,6 +106,7 @@ export const api = createApi({
     'UserCertification',
     'Notifications',
     'NotificationPreferences',
+    'MailStatus',
     'PushVapidKey',
     'PushSubscriptions',
     'OrganizationUsers',

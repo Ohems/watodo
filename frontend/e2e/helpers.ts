@@ -189,9 +189,9 @@ export interface MockNotificationPreference {
 
 /**
  * Mocks the notification preferences endpoints (Account page). Without
- * overrides every key x channel is returned with the channel default (in-app
- * and email on, push off). PATCH requests update the served state, so a
- * refetch after a toggle reflects the saved value.
+ * overrides every key x channel is returned with the channel default (only
+ * in-app on; email and push are opt-in). PATCH requests update the served
+ * state, so a refetch after a toggle reflects the saved value.
  */
 export async function mockNotificationPreferences(
   page: Page,
@@ -204,7 +204,7 @@ export async function mockNotificationPreferences(
         return {
           messageKey: key,
           channel,
-          enabled: override?.enabled ?? channel !== 'push',
+          enabled: override?.enabled ?? channel === 'in_app',
           category,
         };
       }),
@@ -393,6 +393,22 @@ export async function mockLocaleBundles(page: Page): Promise<void> {
   });
 }
 
+/**
+ * Mocks the mail status endpoint (Account page notification settings): whether
+ * email delivery is configured server-side. Defaults to configured so the
+ * "not configured" note stays hidden unless a test overrides it.
+ */
+export async function mockMailStatus(
+  page: Page,
+  options: { configured?: boolean } = {},
+): Promise<void> {
+  const configured = options.configured ?? true;
+  await page.route(
+    url => url.pathname === '/api/v1/notifications/mail-status',
+    route => route.fulfill({ json: { configured, provider: configured ? 'resend' : null } }),
+  );
+}
+
 /** Mocks the occurrences endpoint (used by Home and Calendar). */
 export async function mockOccurrences(page: Page, occurrences: unknown[] = []): Promise<void> {
   await page.route('**/api/v1/event-series/occurrences?*', route =>
@@ -416,6 +432,7 @@ export async function mockCommonApis(
   await mockLocaleBundles(page);
   await mockNotifications(page);
   await mockNotificationPreferences(page);
+  await mockMailStatus(page);
   await mockPushApis(page);
   await mockOccurrences(page);
 }

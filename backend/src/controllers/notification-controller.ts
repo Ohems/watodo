@@ -1,4 +1,5 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { config } from '../config.js';
 import { getAuth } from '../middleware/auth.js';
 import {
   notificationPreferenceParamsSchema,
@@ -6,6 +7,10 @@ import {
   notificationUpdateSchema,
   tableQuerySchema,
 } from '../schemas/index.js';
+import {
+  getConfiguredMailProvider,
+  isSupportedMailProvider,
+} from '../services/mail-providers/index.js';
 import {
   listNotificationPreferences,
   listNotifications,
@@ -95,4 +100,23 @@ export async function updateNotificationPreferenceHandler(
     data.enabled,
   );
   return reply.status(200).send(preference);
+}
+
+/**
+ * Reports whether email delivery is configured on this server, so the account
+ * page can tell users when they will not receive notification emails.
+ */
+export async function getMailStatusHandler(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const auth = getAuth(request);
+  if (!auth) {
+    return reply.status(401).send({ error: 'Not authenticated!' });
+  }
+  const provider = getConfiguredMailProvider();
+  const selected = isSupportedMailProvider(config.mailProvider) ? config.mailProvider : null;
+  return reply
+    .status(200)
+    .send({ configured: provider !== null, provider: provider?.id ?? selected });
 }

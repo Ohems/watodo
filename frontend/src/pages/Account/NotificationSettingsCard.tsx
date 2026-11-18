@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import {
   getApiErrorMessage,
   useDeletePushSubscriptionMutation,
+  useGetMailStatusQuery,
   useGetNotificationPreferencesQuery,
   useGetPushSubscriptionsQuery,
   useGetVapidPublicKeyQuery,
@@ -173,15 +174,16 @@ function PushSection() {
 }
 
 /**
- * Notification settings card on the Account page: web push on/off for this
- * device, then one row per notification type (message key of the backend
- * catalog) and one toggle per delivery channel, grouped into "General" (sent
- * to everyone) and "Management" (sent only to event/team managers). Email
- * delivery is not implemented yet, but the toggles are saved already.
+ * Notification settings card on the Account page: a note when email delivery is
+ * not configured server-side, web push on/off for this device, then one row per
+ * notification type (message key of the backend catalog) and one toggle per
+ * delivery channel, grouped into "General" (sent to everyone) and "Management"
+ * (sent only to event/team managers). Email and push are opt-in channels.
  */
 export default function NotificationSettingsCard() {
   const { t } = useTranslation();
   const preferencesQuery = useGetNotificationPreferencesQuery();
+  const mailStatusQuery = useGetMailStatusQuery();
   const [updatePreference] = useUpdateNotificationPreferenceMutation();
   const [error, setError] = useState<string | null>(null);
 
@@ -217,6 +219,11 @@ export default function NotificationSettingsCard() {
       <Text size="sm" c="dimmed" mb="md">
         {t('account.notificationSettings.description')}
       </Text>
+      {mailStatusQuery.data && !mailStatusQuery.data.configured && (
+        <Alert color="yellow" variant="light" mb="md">
+          {t('account.notificationSettings.emailNotConfigured')}
+        </Alert>
+      )}
       <PushSection />
       {error && (
         <Alert color="red" variant="light" mb="md" withCloseButton onClose={() => setError(null)}>

@@ -54,6 +54,7 @@ interface AccountRoutes {
   preferences: NotificationPreferencesResponse;
   vapidPublicKey: string;
   pushSubscriptions: PushSubscription[];
+  mailConfigured: boolean;
 }
 
 /** Three notification types x three channels across both categories, with one stored override. */
@@ -123,6 +124,10 @@ function mockAccountRoutes(mock: MockApi, state: AccountRoutes) {
   mock.on('DELETE', '/api/v1/users/@me', () => {
     state.accountDeleted = true;
   });
+  mock.on('GET', '/api/v1/notifications/mail-status', () => ({
+    configured: state.mailConfigured,
+    provider: state.mailConfigured ? 'resend' : null,
+  }));
   mock.on('GET', '/api/v1/push/vapid-public-key', () => ({ publicKey: state.vapidPublicKey }));
   mock.on('GET', '/api/v1/users/@me/push-subscriptions', () => state.pushSubscriptions);
   mock.on('POST', '/api/v1/users/@me/push-subscriptions', () => {
@@ -170,6 +175,7 @@ describe('AccountPage', () => {
       },
       vapidPublicKey: MOCK_VAPID_PUBLIC_KEY,
       pushSubscriptions: [],
+      mailConfigured: true,
     };
     mockAccountRoutes(mock, state);
   });
@@ -576,6 +582,24 @@ describe('AccountPage', () => {
     fireEvent.click(await screen.findByRole('switch', { name: 'Event cancelled - In app' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Validation error');
+  });
+
+  it('shows a note when email delivery is not configured on the server', async () => {
+    state.mailConfigured = false;
+    renderPage();
+
+    expect(
+      await screen.findByText(/Email delivery is not configured on this server/),
+    ).toBeInTheDocument();
+  });
+
+  it('shows no email note when email delivery is configured', async () => {
+    renderPage();
+
+    await screen.findByRole('heading', { name: 'Notification settings' });
+    expect(
+      screen.queryByText(/Email delivery is not configured on this server/),
+    ).not.toBeInTheDocument();
   });
 
   it('shows a not-supported hint for push notifications when the browser lacks push support', async () => {

@@ -445,7 +445,8 @@
     "deleteFailed": "Tilin poistaminen epäonnistui",
     "notificationSettings": {
       "title": "Ilmoitusasetukset",
-      "description": "Valitse, mitä ilmoituksia saat, tyypin ja kanavan mukaan. Sähköpostitoimitusta ei ole vielä käytössä, mutta valintasi tallennetaan sen käyttöönottoa varten.",
+      "description": "Valitse, mitä ilmoituksia saat, tyypin ja kanavan mukaan. Sähköposti ja push ovat valinnaisia.",
+      "emailNotConfigured": "Sähköpostitoimitusta ei ole määritetty palvelimella, joten et saa ilmoituksia sähköpostitse. Sovelluksessa ja push-ilmoituksina saatavat ilmoitukset toimivat normaalisti.",
       "type": "Ilmoitus",
       "updateFailed": "Ilmoitusasetuksen tallennus epäonnistui",
       "pushSection": "Push-ilmoitukset",

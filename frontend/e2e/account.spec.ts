@@ -5,6 +5,7 @@ import {
   interceptMutation,
   mockAuthAccounts,
   mockCommonApis,
+  mockMailStatus,
   mockNotificationPreferences,
   mockPushApis,
   regularUser,
@@ -362,6 +363,28 @@ test.describe('Account page', () => {
       );
       expect(request.postDataJSON()).toEqual({ enabled: false });
       await expect(toggle).not.toBeChecked();
+    });
+
+    test('shows a note when email delivery is not configured on the server', async ({ page }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, []);
+      // Later registrations take precedence, so this overrides the default
+      // (configured) mail status from mockCommonApis.
+      await mockMailStatus(page, { configured: false });
+      await gotoApp(page, '/account');
+
+      await expect(page.getByText(/Email delivery is not configured on this server/)).toBeVisible();
+    });
+
+    test('shows no email note when email delivery is configured', async ({ page }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, []);
+      await gotoApp(page, '/account');
+
+      await expect(page.getByRole('heading', { name: 'Notification settings' })).toBeVisible();
+      await expect(page.getByText(/Email delivery is not configured on this server/)).toHaveCount(
+        0,
+      );
     });
 
     test('shows the push notification section in the notification settings', async ({ page }) => {
