@@ -30,6 +30,12 @@ blob-report/
 backend/prisma/migrations/*_migration.sql
 !backend/prisma/migrations/migration_lock.toml
 
+# VitePress docs site (llms.txt/llms-full.txt are generated at build time)
+.vitepress/cache/
+docs/.vitepress/cache/
+docs/public/llms.txt
+docs/public/llms-full.txt
+
 # IDE
 .idea/
 *.swp

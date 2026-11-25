@@ -11,13 +11,13 @@ Community event and responsibility management tool. Primarily aimed at organizat
 
 - **Backend**: Fastify v5, TypeScript, Kysely + node-pg-migrate, PostgreSQL, Redis
 - **Frontend**: React 19, Vite 7, TypeScript, Material-UI v7, React Router v7
-- **Tooling**: Biome (lint + format), Vitest (unit tests), Playwright (E2E tests), Node.js 24
+- **Tooling**: Biome (lint + format), Vitest (unit tests), Playwright (E2E tests), Node.js 26
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js >= 24.21.0
+- Node.js >= 26.13.1
 - Docker (for PostgreSQL and Redis)
 
 ### Setup
@@ -32,12 +32,15 @@ npm install
 # Set up environment
 cp .env.sample .env
 
-# Run database migrations
-npm run migrate -w backend
-
-# Start development servers
+# Start development servers (pending database migrations are applied
+# automatically on startup; set AUTO_MIGRATE=false to run them manually
+# with `npm run migrate -w backend`)
 npm run dev
 ```
+
+### Run with Docker
+
+A prebuilt image (`ohems/watodo` on Docker Hub, published on each release) with `docker run` or `docker compose` instructions (including the databases) is documented at <https://ohems.github.io/watodo/self-hosting/docker>.
 
 ### Scripts
 
@@ -52,6 +55,15 @@ npm run dev
 | `npm run seed:data -w backend` | Generate semi-realistic test data (fresh database only: exactly one user and one organization) |
 
 ## Documentation
+
+The documentation site is built with [VitePress](https://vitepress.dev) from the Markdown files in [`docs/`](docs/) and published to GitHub Pages at <https://ohems.github.io/watodo/> (deployed by `.github/workflows/deploy-docs.yml` on pushes to `master`; run it locally with `npm run docs:dev`).
+
+- [Self-hosting guide](https://ohems.github.io/watodo/self-hosting/) - install, configure and run Watodo yourself
+- [Organization admin guide](https://ohems.github.io/watodo/admin-guide/) - roles and permissions, teams, sites and rooms, work roles, events, staffing, notifications
+
+For AI assistants, the whole documentation is also served as Markdown following the llms.txt convention: <https://ohems.github.io/watodo/llms.txt> and <https://ohems.github.io/watodo/llms-full.txt>.
+
+Repository-internal documentation:
 
 - [Events](docs/Events.md) - Recurring event series (rrule), occurrences, exceptions, work role slots, and comments
 

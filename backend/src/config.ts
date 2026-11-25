@@ -9,6 +9,9 @@ export const config = {
   logLevel: process.env.LOG_LEVEL ?? 'info',
   logEnabled: process.env.LOG_ENABLED !== 'false',
   databaseUrl: process.env.DATABASE_URL ?? '',
+  // Pending database migrations are applied automatically at startup unless
+  // AUTO_MIGRATE is explicitly set to 'false'.
+  autoMigrate: process.env.AUTO_MIGRATE !== 'false',
   redisUrl: process.env.REDIS_URL ?? 'redis://localhost:6379',
   discordClientId: process.env.DISCORD_CLIENT_ID ?? '',
   discordClientSecret: process.env.DISCORD_CLIENT_SECRET ?? '',

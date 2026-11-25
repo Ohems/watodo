@@ -3,12 +3,18 @@ import { config } from './config.js';
 import { connectDatabase, disconnectDatabase } from './database.js';
 import { startCriticalSlotAlertJob } from './jobs/critical-slot-alerts.js';
 import { logger } from './logger.js';
+import { runMigrations } from './migrations.js';
 import { connectRedis, disconnectRedis } from './redis.js';
 
 async function main(): Promise<void> {
   logger.info(`Starting Watodo backend in ${config.nodeEnv} mode`);
 
   await connectDatabase();
+
+  if (config.autoMigrate) {
+    await runMigrations();
+  }
+
   try {
     await connectRedis();
   } catch (error) {

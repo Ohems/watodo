@@ -16,7 +16,7 @@ monorepo with two npm workspaces:
 - **Backend**: Fastify v5, TypeScript, Kysely + node-pg-migrate, PostgreSQL 17, Redis, pino, Zod v4
 - **Frontend**: React 19, Vite 7, TypeScript, Mantine v9, React Router v7, Redux Toolkit
 - **Tooling**: Biome (lint + format), Vitest (unit/component tests), Playwright (E2E tests)
-- **Runtime**: Node.js >= 24.21.0 (see `.nvmrc`)
+- **Runtime**: Node.js >= 26.13.1 (see `.nvmrc`)
 
 ## Getting Started
 
@@ -674,6 +674,9 @@ Key ones:
 
 - `DATABASE_URL` - PostgreSQL connection string (development/production only; the
   test suite uses PGlite and does not need it)
+- `AUTO_MIGRATE` - `true` by default: pending database migrations are applied
+  automatically when the backend starts (`backend/src/migrations.ts`); set to
+  `false` to run them manually with `npm run migrate -w backend`
 - `REDIS_URL` - Redis connection string
 - `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` - Discord OAuth credentials
 - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` - Google OAuth credentials
