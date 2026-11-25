@@ -1,0 +1,12 @@
+.git
+.github
+**/node_modules
+backend/dist
+frontend/dist
+frontend/build
+docs
+.env*
+coverage
+test-results
+playwright-report
+*.log

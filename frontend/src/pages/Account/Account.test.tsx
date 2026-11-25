@@ -1,5 +1,5 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getToken, setToken } from '../../api/index.js';
 import i18n from '../../i18n/index.js';
 import { type MockApi, mockApi } from '../../test/api-mock.js';
@@ -8,10 +8,15 @@ import type {
   AuthAccount,
   AuthProviderInfo,
   NotificationPreferencesResponse,
+  PushSubscription,
   User,
   UserSelfUpdate,
 } from '../../types/index.js';
 import AccountPage from './Account.js';
+
+/** A valid-looking base64url VAPID public key (65-byte P-256 point). */
+const MOCK_VAPID_PUBLIC_KEY =
+  'BNUmgNFGR-ttXNJe1Bm0SQ2-17fSZ2Zt7SZIQ0Qu3-IMNNh2nTt1iEc8-PbscygX2qpC634VoAmEta8tnFEZRF8';
 
 const mockUser: User = {
   id: 'u1',
@@ -47,6 +52,9 @@ interface AccountRoutes {
   authAccounts: AuthAccount[];
   accountDeleted: boolean;
   preferences: NotificationPreferencesResponse;
+  vapidPublicKey: string;
+  pushSubscriptions: PushSubscription[];
+  mailConfigured: boolean;
 }
 
 /** Three notification types x three channels across both categories, with one stored override. */
@@ -116,6 +124,33 @@ function mockAccountRoutes(mock: MockApi, state: AccountRoutes) {
   mock.on('DELETE', '/api/v1/users/@me', () => {
     state.accountDeleted = true;
   });
+  mock.on('GET', '/api/v1/notifications/mail-status', () => ({
+    configured: state.mailConfigured,
+    provider: state.mailConfigured ? 'resend' : null,
+  }));
+  mock.on('GET', '/api/v1/push/vapid-public-key', () => ({ publicKey: state.vapidPublicKey }));
+  mock.on('GET', '/api/v1/users/@me/push-subscriptions', () => state.pushSubscriptions);
+  mock.on('POST', '/api/v1/users/@me/push-subscriptions', () => {
+    const body = mock.lastBody('POST', '/api/v1/users/@me/push-subscriptions') as {
+      endpoint: string;
+      keys: { p256dh: string; auth: string };
+      userAgent?: string;
+    };
+    const subscription: PushSubscription = {
+      id: state.pushSubscriptions.length + 1,
+      endpoint: body.endpoint,
+      userAgent: body.userAgent ?? null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    };
+    state.pushSubscriptions = [...state.pushSubscriptions, subscription];
+    return subscription;
+  });
+  mock.on('DELETE', /\/api\/v1\/users\/@me\/push-subscriptions\/\d+$/, () => {
+    const last = mock.calls[mock.calls.length - 1];
+    const id = Number(last.url.split('/push-subscriptions/')[1]);
+    state.pushSubscriptions = state.pushSubscriptions.filter(s => s.id !== id);
+    return { success: true };
+  });
 }
 
 function renderPage(initialEntry = '/account') {
@@ -138,9 +173,49 @@ describe('AccountPage', () => {
         channels: [...mockPreferences.channels],
         preferences: mockPreferences.preferences.map(p => ({ ...p })),
       },
+      vapidPublicKey: MOCK_VAPID_PUBLIC_KEY,
+      pushSubscriptions: [],
+      mailConfigured: true,
     };
     mockAccountRoutes(mock, state);
   });
+
+  afterEach(() => {
+    // Remove the push API stubs installed by individual tests.
+    Reflect.deleteProperty(window.navigator, 'serviceWorker');
+    Reflect.deleteProperty(window, 'PushManager');
+    Reflect.deleteProperty(window, 'Notification');
+  });
+
+  /**
+   * Stubs the browser push APIs (service worker, PushManager, Notification) so
+   * isPushSupported() is true and the push section renders its switch.
+   */
+  function stubPushGlobals(options?: { permission?: string; existingEndpoint?: string | null }) {
+    const endpoint = options?.existingEndpoint ?? 'https://push.example.com/sub-1';
+    const subscription = {
+      endpoint,
+      toJSON: () => ({ endpoint, keys: { p256dh: 'p256dh-key', auth: 'auth-secret' } }),
+      unsubscribe: vi.fn().mockResolvedValue(true),
+    };
+    const pushManager = {
+      subscribe: vi.fn().mockResolvedValue(subscription),
+      getSubscription: vi.fn().mockResolvedValue(options?.existingEndpoint ? subscription : null),
+    };
+    Object.defineProperty(window.navigator, 'serviceWorker', {
+      configurable: true,
+      value: { ready: Promise.resolve({ pushManager }) },
+    });
+    Object.defineProperty(window, 'PushManager', { configurable: true, value: class {} });
+    Object.defineProperty(window, 'Notification', {
+      configurable: true,
+      value: {
+        permission: options?.permission ?? 'default',
+        requestPermission: vi.fn().mockResolvedValue(options?.permission ?? 'granted'),
+      },
+    });
+    return { pushManager, subscription };
+  }
 
   it('shows the personal information of the current user', async () => {
     renderPage();
@@ -507,6 +582,119 @@ describe('AccountPage', () => {
     fireEvent.click(await screen.findByRole('switch', { name: 'Event cancelled - In app' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Validation error');
+  });
+
+  it('shows a note when email delivery is not configured on the server', async () => {
+    state.mailConfigured = false;
+    renderPage();
+
+    expect(
+      await screen.findByText(/Email delivery is not configured on this server/),
+    ).toBeInTheDocument();
+  });
+
+  it('shows no email note when email delivery is configured', async () => {
+    renderPage();
+
+    await screen.findByRole('heading', { name: 'Notification settings' });
+    expect(
+      screen.queryByText(/Email delivery is not configured on this server/),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows a not-supported hint for push notifications when the browser lacks push support', async () => {
+    renderPage();
+
+    expect(
+      await screen.findByText(/This browser does not support push notifications/),
+    ).toBeInTheDocument();
+    // Without support the VAPID key is not even requested.
+    expect(mock.callCount('GET', '/api/v1/push/vapid-public-key')).toBe(0);
+    expect(
+      screen.queryByRole('switch', { name: 'Enable push notifications on this device' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows a not-configured hint when the server has no VAPID key', async () => {
+    stubPushGlobals();
+    state.vapidPublicKey = '';
+    renderPage();
+
+    expect(
+      await screen.findByText(/Push notifications are not configured on this server yet/),
+    ).toBeInTheDocument();
+  });
+
+  it('enables push notifications: subscribes in the browser and registers the endpoint', async () => {
+    const { pushManager } = stubPushGlobals();
+    renderPage();
+
+    const toggle = await screen.findByRole('switch', {
+      name: 'Enable push notifications on this device',
+    });
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(mock.callCount('POST', '/api/v1/users/@me/push-subscriptions')).toBe(1);
+    });
+    expect(pushManager.subscribe).toHaveBeenCalledTimes(1);
+    expect(mock.lastBody('POST', '/api/v1/users/@me/push-subscriptions')).toEqual({
+      endpoint: 'https://push.example.com/sub-1',
+      keys: { p256dh: 'p256dh-key', auth: 'auth-secret' },
+      userAgent: navigator.userAgent,
+    });
+    // After the refetch the toggle reflects the registered subscription.
+    await waitFor(() => {
+      expect(
+        screen.getByRole('switch', { name: 'Enable push notifications on this device' }),
+      ).toBeChecked();
+    });
+  });
+
+  it('disables push notifications: unsubscribes in the browser and deletes the endpoint', async () => {
+    const { pushManager, subscription } = stubPushGlobals({
+      existingEndpoint: 'https://push.example.com/sub-1',
+    });
+    state.pushSubscriptions = [
+      {
+        id: 7,
+        endpoint: 'https://push.example.com/sub-1',
+        userAgent: 'test-agent',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+    ];
+    renderPage();
+
+    const toggle = await screen.findByRole('switch', {
+      name: 'Enable push notifications on this device',
+    });
+    await waitFor(() => expect(toggle).toBeChecked());
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(mock.callCount('DELETE', /push-subscriptions/)).toBe(1);
+    });
+    expect(subscription.unsubscribe).toHaveBeenCalledTimes(1);
+    expect(pushManager.getSubscription).toHaveBeenCalled();
+    const lastDelete = mock.calls.filter(c => c.method === 'DELETE').at(-1);
+    expect(lastDelete?.url).toContain('/api/v1/users/@me/push-subscriptions/7');
+    await waitFor(() => {
+      expect(
+        screen.getByRole('switch', { name: 'Enable push notifications on this device' }),
+      ).not.toBeChecked();
+    });
+  });
+
+  it('disables the push switch and shows a hint when notification permission is denied', async () => {
+    stubPushGlobals({ permission: 'denied' });
+    renderPage();
+
+    const toggle = await screen.findByRole('switch', {
+      name: 'Enable push notifications on this device',
+    });
+    expect(toggle).toBeDisabled();
+    expect(await screen.findByText(/Notification permission was denied/)).toBeInTheDocument();
   });
 
   it('deletes the account after confirmation', async () => {

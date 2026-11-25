@@ -15,3 +15,14 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
     </BrowserRouter>
   </React.StrictMode>,
 );
+
+// Register the service worker that makes the app installable and enables web
+// push notifications. Skipped automatically in environments without support
+// (e.g. jsdom in unit tests).
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((error: unknown) => {
+      console.error('Service worker registration failed:', error);
+    });
+  });
+}

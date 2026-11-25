@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import {
+  getMailStatusHandler,
   listNotificationPreferencesHandler,
   listNotificationsHandler,
   markAllReadHandler,
@@ -43,5 +44,13 @@ export async function notificationRoutes(app: FastifyInstance): Promise<void> {
     '/api/v1/users/@me/notification-preferences/:messageKey/:channel',
     { preHandler: requirePermissions() },
     updateNotificationPreferenceHandler,
+  );
+
+  // Whether email delivery is configured server-side (shown as a note in the
+  // account notification settings when it is not).
+  app.get(
+    '/api/v1/notifications/mail-status',
+    { preHandler: requirePermissions() },
+    getMailStatusHandler,
   );
 }

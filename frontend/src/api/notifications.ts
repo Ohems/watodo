@@ -1,4 +1,5 @@
 import type {
+  MailStatus,
   Notification,
   NotificationChannel,
   NotificationPreference,
@@ -32,6 +33,10 @@ export const notificationsApi = api.injectEndpoints({
       query: () => '/api/v1/users/@me/notification-preferences',
       providesTags: ['NotificationPreferences'],
     }),
+    getMailStatus: build.query<MailStatus, void>({
+      query: () => '/api/v1/notifications/mail-status',
+      providesTags: ['MailStatus'],
+    }),
     updateNotificationPreference: build.mutation<
       NotificationPreference,
       { messageKey: string; channel: NotificationChannel; enabled: boolean }
@@ -51,5 +56,6 @@ export const {
   useMarkNotificationReadMutation,
   useMarkAllNotificationsReadMutation,
   useGetNotificationPreferencesQuery,
+  useGetMailStatusQuery,
   useUpdateNotificationPreferenceMutation,
 } = notificationsApi;

@@ -249,6 +249,20 @@ export interface NotificationPreferences {
   updated_at: Generated<Date>;
 }
 
+/** A browser/device web push endpoint registered by a user. */
+export interface PushSubscriptions {
+  id: Generated<number>;
+  user_id: string;
+  /** Push service endpoint URL; unique across all users. */
+  endpoint: string;
+  /** Client public key (PushSubscription.keys.p256dh). */
+  p256dh: string;
+  /** Client auth secret (PushSubscription.keys.auth). */
+  auth: string;
+  user_agent: string | null;
+  created_at: Generated<Date>;
+}
+
 export interface Calendars {
   id: Generated<string>;
   name: string;
@@ -394,6 +408,7 @@ export interface Database {
   absences: Absences;
   notifications: Notifications;
   notification_preferences: NotificationPreferences;
+  push_subscriptions: PushSubscriptions;
   calendars: Calendars;
   event_types: EventTypes;
   event_type_roles: EventTypeRoles;
@@ -477,6 +492,9 @@ export type AbsenceUpdate = Updateable<Absences>;
 export type Notification = Selectable<Notifications>;
 export type NewNotification = Insertable<Notifications>;
 export type NotificationUpdate = Updateable<Notifications>;
+
+export type PushSubscriptionRow = Selectable<PushSubscriptions>;
+export type NewPushSubscription = Insertable<PushSubscriptions>;
 
 export type Calendar = Selectable<Calendars>;
 export type NewCalendar = Insertable<Calendars>;

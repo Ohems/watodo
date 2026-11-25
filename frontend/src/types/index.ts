@@ -714,6 +714,34 @@ export interface NotificationPreferencesResponse {
   preferences: NotificationPreference[];
 }
 
+/** Response of GET /api/v1/notifications/mail-status. */
+export interface MailStatus {
+  /** Whether a mail provider is configured server-side (email delivery on). */
+  configured: boolean;
+  /** The selected mail provider id, when a valid one is set. */
+  provider: string | null;
+}
+
+// --- Push subscriptions ---
+
+/** A registered web push endpoint (browser/device) of the current user. */
+export interface PushSubscription {
+  id: number;
+  endpoint: string;
+  userAgent: string | null;
+  createdAt: string;
+}
+
+/** Body of POST /api/v1/users/@me/push-subscriptions (PushSubscription.toJSON()). */
+export interface PushSubscriptionPush {
+  endpoint: string;
+  keys: {
+    p256dh: string;
+    auth: string;
+  };
+  userAgent?: string;
+}
+
 // --- Paginated responses ---
 
 export interface Paginated<T> {

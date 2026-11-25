@@ -1,11 +1,13 @@
-import { expect, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 import {
   adminUser,
   gotoApp,
   interceptMutation,
   mockAuthAccounts,
   mockCommonApis,
+  mockMailStatus,
   mockNotificationPreferences,
+  mockPushApis,
   regularUser,
 } from './helpers.js';
 
@@ -15,6 +17,35 @@ const testUser = adminUser({
   description: 'A test user description',
   phoneNumber: '+358401234567',
 });
+
+/**
+ * Stubs the browser push APIs (service worker, PushManager, Notification) via
+ * an init script so the push section renders its switch in every browser and
+ * the subscribe/unsubscribe flow can run without a real push service.
+ */
+async function stubPushApis(page: Page, options: { existingEndpoint?: string } = {}) {
+  await page.addInitScript(existingEndpoint => {
+    const endpoint = existingEndpoint ?? 'https://push.example.com/e2e-sub';
+    const subscription = {
+      endpoint,
+      toJSON: () => ({ endpoint, keys: { p256dh: 'p256dh-key', auth: 'auth-secret' } }),
+      unsubscribe: () => Promise.resolve(true),
+    };
+    const pushManager = {
+      subscribe: () => Promise.resolve(subscription),
+      getSubscription: () => Promise.resolve(existingEndpoint ? subscription : null),
+    };
+    Object.defineProperty(navigator, 'serviceWorker', {
+      configurable: true,
+      value: { ready: Promise.resolve({ pushManager }), register: () => Promise.resolve() },
+    });
+    Object.defineProperty(window, 'PushManager', { configurable: true, value: class {} });
+    Object.defineProperty(window, 'Notification', {
+      configurable: true,
+      value: { permission: 'default', requestPermission: () => Promise.resolve('granted') },
+    });
+  }, options.existingEndpoint ?? null);
+}
 
 test.describe('Account page', () => {
   test.describe('data display', () => {
@@ -331,6 +362,114 @@ test.describe('Account page', () => {
         '/api/v1/users/@me/notification-preferences/eventCancelled/in_app',
       );
       expect(request.postDataJSON()).toEqual({ enabled: false });
+      await expect(toggle).not.toBeChecked();
+    });
+
+    test('shows a note when email delivery is not configured on the server', async ({ page }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, []);
+      // Later registrations take precedence, so this overrides the default
+      // (configured) mail status from mockCommonApis.
+      await mockMailStatus(page, { configured: false });
+      await gotoApp(page, '/account');
+
+      await expect(page.getByText(/Email delivery is not configured on this server/)).toBeVisible();
+    });
+
+    test('shows no email note when email delivery is configured', async ({ page }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, []);
+      await gotoApp(page, '/account');
+
+      await expect(page.getByRole('heading', { name: 'Notification settings' })).toBeVisible();
+      await expect(page.getByText(/Email delivery is not configured on this server/)).toHaveCount(
+        0,
+      );
+    });
+
+    test('shows the push notification section in the notification settings', async ({ page }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, []);
+      await gotoApp(page, '/account');
+
+      await expect(page.getByRole('heading', { name: 'Push notifications' })).toBeVisible();
+      // Depending on the browser's native push support: the enable switch or
+      // the not-supported hint.
+      const toggle = page.getByRole('switch', {
+        name: 'Enable push notifications on this device',
+      });
+      const hint = page.getByText(/does not support push notifications/);
+      await expect(toggle.or(hint)).toBeVisible();
+      if ((await toggle.count()) > 0) {
+        await expect(toggle).not.toBeChecked();
+      }
+    });
+
+    test('enabling push notifications subscribes in the browser and registers the endpoint', async ({
+      page,
+    }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, []);
+      await stubPushApis(page);
+      await gotoApp(page, '/account');
+
+      const toggle = page.getByRole('switch', {
+        name: 'Enable push notifications on this device',
+      });
+      await expect(toggle).not.toBeChecked();
+
+      const postRequest = page.waitForRequest(
+        req =>
+          req.url().includes('/api/v1/users/@me/push-subscriptions') && req.method() === 'POST',
+      );
+      // Click the switch's wrapping label: the visually hidden input itself
+      // never receives the hit (the track overlays it).
+      await page.locator('label', { has: toggle }).click();
+
+      const request = await postRequest;
+      const body = request.postDataJSON() as {
+        endpoint: string;
+        keys: { p256dh: string; auth: string };
+        userAgent?: string;
+      };
+      expect(body.endpoint).toBe('https://push.example.com/e2e-sub');
+      expect(body.keys).toEqual({ p256dh: 'p256dh-key', auth: 'auth-secret' });
+      expect(typeof body.userAgent).toBe('string');
+      // The subscriptions refetch and the toggle reflects the registration.
+      await expect(toggle).toBeChecked();
+    });
+
+    test('disabling push notifications unsubscribes in the browser and deletes the endpoint', async ({
+      page,
+    }) => {
+      await mockCommonApis(page, testUser);
+      await mockAuthAccounts(page, []);
+      await mockPushApis(page, {
+        subscriptions: [
+          {
+            id: 3,
+            endpoint: 'https://push.example.com/e2e-sub',
+            userAgent: 'e2e-agent',
+            createdAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+      });
+      await stubPushApis(page, { existingEndpoint: 'https://push.example.com/e2e-sub' });
+      await gotoApp(page, '/account');
+
+      const toggle = page.getByRole('switch', {
+        name: 'Enable push notifications on this device',
+      });
+      await expect(toggle).toBeChecked();
+
+      const deleteRequest = page.waitForRequest(
+        req =>
+          req.url().includes('/api/v1/users/@me/push-subscriptions/') && req.method() === 'DELETE',
+      );
+      await page.locator('label', { has: toggle }).click();
+
+      const request = await deleteRequest;
+      expect(request.url()).toContain('/api/v1/users/@me/push-subscriptions/3');
       await expect(toggle).not.toBeChecked();
     });
   });

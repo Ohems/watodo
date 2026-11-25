@@ -18,6 +18,10 @@ export default defineConfig({
     // own port, so they never clash with a dev server the developer may be
     // running on 5173.
     baseURL: 'http://localhost:4173',
+    // The app registers a service worker (PWA installability + push). Block it
+    // in tests so API calls stay interceptable by page.route mocks; push UI
+    // tests stub navigator.serviceWorker themselves via addInitScript.
+    serviceWorkers: 'block',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     // Emulate prefers-reduced-motion: Mantine disables its transitions under

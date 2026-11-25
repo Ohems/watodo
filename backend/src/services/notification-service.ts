@@ -11,6 +11,8 @@ import {
 } from '../i18n/messages.js';
 import { createLogger } from '../logger.js';
 import type { NotificationUpdate, TableQuery } from '../schemas/index.js';
+import { deliverEmailIfEnabled } from './email-service.js';
+import { deliverPushIfEnabled } from './push-service.js';
 
 const logger = createLogger('notification-service');
 
@@ -177,10 +179,10 @@ export const NOTIFICATION_CHANNELS = ['in_app', 'email', 'push'] as const;
 
 /**
  * The default for a channel when the user has no explicit preference row:
- * in-app and email are on, push (not yet delivered) is off.
+ * only in-app is on by default; email and push are opt-in.
  */
 export function defaultPreferenceEnabled(channel: string): boolean {
-  return channel !== 'push';
+  return channel === 'in_app';
 }
 
 export interface NotificationPreferenceResponse {
@@ -268,7 +270,7 @@ export async function updateNotificationPreference(
 /**
  * Whether the user wants the given notification type delivered in-app. The
  * notifications table is the in-app inbox, so a disabled in-app preference
- * suppresses the insert. Email/push delivery (future) checks its own channel.
+ * suppresses the insert. Email/push delivery checks its own channel preference.
  */
 async function isInAppEnabled(executor: DbOrTx, userId: string, key: string): Promise<boolean> {
   const row = await executor
@@ -321,13 +323,22 @@ async function insertNotification(
       dedup_key: dedupKey ?? null,
     })
     .returningAll();
+  let row: Notification | undefined;
   if (dedupKey) {
-    return query
+    row = await query
       .onConflict(oc => oc.columns(['user_id', 'dedup_key']).doNothing())
-      .executeTakeFirst()
-      .then(row => row ?? null);
+      .executeTakeFirst();
+  } else {
+    row = await query.executeTakeFirstOrThrow();
   }
-  return query.executeTakeFirstOrThrow();
+  if (row) {
+    // Push and email delivery ride on the in-app insert, so notifications
+    // suppressed in-app or stopped by the dedup key are not sent on those
+    // channels either.
+    await deliverPushIfEnabled(executor, userId, key, validatedParams);
+    await deliverEmailIfEnabled(executor, userId, key, validatedParams);
+  }
+  return row ?? null;
 }
 
 /**

@@ -391,6 +391,20 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     'PRIMARY KEY (user_id, message_key, channel)',
   );
 
+  // Web push subscriptions (one row per browser/device endpoint). Endpoints
+  // are unique across all users; registering the same endpoint again (e.g. the
+  // same browser after a logout) re-points it at the current user.
+  pgm.createTable('push_subscriptions', {
+    id: { type: 'serial', primaryKey: true },
+    user_id: { type: 'uuid', notNull: true, references: 'users', onDelete: 'CASCADE' },
+    endpoint: { type: 'text', notNull: true, unique: true },
+    p256dh: { type: 'text', notNull: true },
+    auth: { type: 'text', notNull: true },
+    user_agent: { type: 'text' },
+    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
+  });
+  pgm.createIndex('push_subscriptions', 'user_id');
+
   // Calendars
   pgm.createTable('calendars', {
     id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
@@ -719,6 +733,7 @@ export async function down(pgm: MigrationBuilder): Promise<void> {
   pgm.dropTable('event_types');
   pgm.dropTable('calendars');
   pgm.dropTable('absences');
+  pgm.dropTable('push_subscriptions');
   pgm.dropTable('notification_preferences');
   pgm.dropTable('notifications');
   pgm.dropTable('certification_work_roles');

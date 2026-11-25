@@ -263,6 +263,7 @@ const SUMMARY_TABLES = [
   'certification_work_roles',
   'notifications',
   'notification_preferences',
+  'push_subscriptions',
   'calendars',
   'event_types',
   'event_type_roles',
@@ -1631,8 +1632,9 @@ export async function seedTestData(tx: Tx): Promise<void> {
     false,
   );
   // Notification preferences: rows exist only for values that differ from the
-  // channel default (in-app and email on, push off). Here one user disables
-  // email for cancellations and another opts into push for assignments.
+  // channel default (only in-app is on; email and push are opt-in). Here one
+  // user opts into email for cancellations and another into push for
+  // assignments.
   await tx
     .insertInto('notification_preferences')
     .values([
@@ -1640,7 +1642,7 @@ export async function seedTestData(tx: Tx): Promise<void> {
         user_id: mockUsersOne[0].id,
         message_key: 'eventCancelled',
         channel: 'email',
-        enabled: false,
+        enabled: true,
       },
       {
         user_id: mockUsersOne[1].id,
@@ -1649,6 +1651,18 @@ export async function seedTestData(tx: Tx): Promise<void> {
         enabled: true,
       },
     ])
+    .execute();
+  // One web push subscription (browser endpoint) for the user who opted into
+  // push notifications.
+  await tx
+    .insertInto('push_subscriptions')
+    .values({
+      user_id: mockUsersOne[1].id,
+      endpoint: 'https://push.example.com/seed-subscription-1',
+      p256dh: 'seed-p256dh-key',
+      auth: 'seed-auth-secret',
+      user_agent: 'Mozilla/5.0 (seed)',
+    })
     .execute();
 
   logger.info(`Seeded event series for "${firstOrganization.name}"`);

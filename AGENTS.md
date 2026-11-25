@@ -16,7 +16,7 @@ monorepo with two npm workspaces:
 - **Backend**: Fastify v5, TypeScript, Kysely + node-pg-migrate, PostgreSQL 17, Redis, pino, Zod v4
 - **Frontend**: React 19, Vite 7, TypeScript, Mantine v9, React Router v7, Redux Toolkit
 - **Tooling**: Biome (lint + format), Vitest (unit/component tests), Playwright (E2E tests)
-- **Runtime**: Node.js >= 24.21.0 (see `.nvmrc`)
+- **Runtime**: Node.js >= 26.13.1 (see `.nvmrc`)
 
 ## Getting Started
 
@@ -169,13 +169,22 @@ backend/src/
 ├── controllers/          # Request handlers (parse input, call services, send response)
 ├── jobs/                 # Scheduled jobs started from index.ts (e.g. critical-slot-alerts)
 └── services/             # Business logic (database queries via Kysely)
-    └── auth-providers/   # OAuth provider logic, one file per provider
-        ├── index.ts      # Provider registry + lookup (SUPPORTED_PROVIDERS, getProvider)
-        ├── types.ts      # AuthProviderDefinition interface
-        ├── shared.ts     # Shared OAuth HTTP helpers (token exchange, profile fetch)
-        ├── discord.ts    # Discord OAuth provider
-        ├── google.ts     # Google OAuth provider
-        └── microsoft.ts  # Microsoft OAuth provider
+    ├── auth-providers/   # OAuth provider logic, one file per provider
+    │   ├── index.ts      # Provider registry + lookup (SUPPORTED_PROVIDERS, getProvider)
+    │   ├── types.ts      # AuthProviderDefinition interface
+    │   ├── shared.ts     # Shared OAuth HTTP helpers (token exchange, profile fetch)
+    │   ├── discord.ts    # Discord OAuth provider
+    │   ├── google.ts     # Google OAuth provider
+    │   └── microsoft.ts  # Microsoft OAuth provider
+    ├── mail-providers/   # Email delivery backends, one file per provider (selected by MAIL_PROVIDER)
+    │   ├── index.ts      # Registry + getConfiguredMailProvider() (null = email disabled)
+    │   ├── types.ts      # MailProviderDefinition interface (sendMail, isConfigured)
+    │   ├── resend.ts     # Resend HTTP API
+    │   ├── mailgun.ts    # Mailgun HTTP API
+    │   ├── usesend.ts    # useSend HTTP API (cloud or self-hosted via USESEND_BASE_URL)
+    │   └── smtp.ts       # SMTP via nodemailer (optional dependency, lazy import)
+    ├── email-service.ts  # deliverEmailIfEnabled: renders + sends notification emails
+    └── push-service.ts   # deliverPushIfEnabled: web push delivery via web-push
 ```
 
 `backend/scripts/` holds one-off CLI scripts run with tsx (e.g. `seed-permissions.ts`,
@@ -224,6 +233,11 @@ run via `npm run seed:permissions`, and `seed-data.ts`, run via `npm run seed:da
 - `DELETE /api/v1/users/@me/auth-accounts/:provider` - Disconnect a login method (auth required)
 - `GET /api/v1/users/@me/notification-preferences` - List the current user's notification preferences: every configurable catalog message key (all except `welcome`) crossed with every channel (`in_app`/`email`/`push`), stored rows or channel defaults, each entry carrying its settings `category` (`general` = sent to everyone, `management` = sent only to event/team managers; see `notificationMessageKeyCategories` in `src/i18n/messages.ts`) (auth required)
 - `PATCH /api/v1/users/@me/notification-preferences/:messageKey/:channel` - Set one preference, body `{ enabled }` (auth required)
+- `GET /api/v1/notifications/mail-status` - Whether email delivery is configured server-side (`{ configured, provider }`); the Account notification settings show a note when it is not (auth required)
+- `GET /api/v1/push/vapid-public-key` - The configured VAPID public key the browser needs for `pushManager.subscribe()` (auth required)
+- `GET /api/v1/users/@me/push-subscriptions` - List the current user's web push subscriptions (browser/device endpoints) (auth required)
+- `POST /api/v1/users/@me/push-subscriptions` - Register a push subscription, body = `PushSubscription.toJSON()` (`{ endpoint, keys: { p256dh, auth }, userAgent? }`); the endpoint is unique across users, re-registering re-points it at the current user (auth required)
+- `DELETE /api/v1/users/@me/push-subscriptions/:subscriptionId` - Delete one of the current user's push subscriptions (auth required)
 - `GET /api/v1/users/:userId` - Get user with permissions (`user-management:read`)
 - `PATCH /api/v1/users/:userId` - Update user (`user-management:write`)
 - `DELETE /api/v1/users/:userId` - Delete user (`user-management:write`)
@@ -342,7 +356,8 @@ Team-scoped routes (get/update team, members) also accept users who have the man
 
 ```
 frontend/src/
-├── main.tsx              # Entry point (Redux Provider + Router)
+├── main.tsx              # Entry point (Redux Provider + Router); also registers the service worker
+├── push.ts               # Web push helpers (subscribe/unsubscribe via the service worker)
 ├── App.tsx               # Route definitions
 ├── api/
 │   └── index.ts          # RTK Query api (createApi): queries, mutations, cache tags
@@ -384,6 +399,12 @@ frontend/src/
 
 ### Key patterns
 
+- **PWA / web push**: `frontend/public/manifest.webmanifest` + the icons in
+  `public/favicons/` make the app installable; `public/sw.js` (a static
+  passthrough fetch plus `push`/`notificationclick` handlers, registered in
+  `main.tsx`) enables installability and web push. Playwright runs with
+  `serviceWorkers: 'block'` so `page.route` mocks are not bypassed by the
+  worker; push UI tests stub the browser push APIs via `page.addInitScript`.
 - **State management**: Redux Toolkit. The store holds the RTK Query api reducer
   (with `api.middleware`) and the organization slice. Use `useAppDispatch` and
   `useAppSelector` from `hooks/redux.ts` (typed wrappers).
@@ -440,9 +461,15 @@ frontend/src/
   email/push delivery renders it server-side with `renderNotificationMessage`
   in the recipient's `users.language`. Per-user delivery toggles live in
   `notification_preferences` (one row per user + message key + channel; absent
-  rows use the channel default: in-app and email on, push off). The in-app
-  channel is enforced when the notification row is inserted; email/push are
-  configured but not delivered yet.
+  rows use the channel default: only in-app is on, email and push are opt-in).
+  The in-app channel is enforced when the notification row is inserted. Push
+  delivery (`web-push`, VAPID keys from `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`/
+  `VAPID_SUBJECT`) and email delivery (mail provider selected by `MAIL_PROVIDER`,
+  see `services/mail-providers/`) both happen right after the row insert via
+  `deliverPushIfEnabled`/`deliverEmailIfEnabled`, so they are gated by the in-app
+  insert and its dedup key; delivery errors are logged, never thrown. Push
+  endpoints answering 404/410 are removed from `push_subscriptions` (one row per
+  browser/device endpoint, endpoint unique across users).
   Events can be assigned to a site (optionally reserving the whole site)
   and/or a specific room within a site. Booking conflict detection: every
   write that can change a booking (series create/update, config update, split,
@@ -637,15 +664,27 @@ problem.
 
 ## Environment Variables
 
-See `.env.sample` for all variables. Key ones:
+See `.env.sample` for all variables. Sample env files set the standard
+configuration (server, logging, databases, URLs, job tuning) but keep
+optional-feature credentials (OAuth providers, VAPID push keys) commented out
+with the expected format in the comment, so a fresh copy disables those
+features. (`backend/.env.test` is the exception: it is committed on purpose
+and uses placeholder values, since the test suite needs no real credentials.)
+Key ones:
 
 - `DATABASE_URL` - PostgreSQL connection string (development/production only; the
   test suite uses PGlite and does not need it)
+- `AUTO_MIGRATE` - `true` by default: pending database migrations are applied
+  automatically when the backend starts (`backend/src/migrations.ts`); set to
+  `false` to run them manually with `npm run migrate -w backend`
 - `REDIS_URL` - Redis connection string
 - `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` - Discord OAuth credentials
 - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` - Google OAuth credentials
 - `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` - Microsoft OAuth credentials
 - `BASE_URL` - Public URL of the backend (used for OAuth redirect)
+- `APP_URL` - Public URL of the web app (used for links inside notification emails)
+- `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` - Web push (VAPID) keys, generate once with `npx web-push generate-vapid-keys`; empty keys disable push delivery. Production must be served over HTTPS, and iOS requires the installed PWA (iOS 16.4+)
+- `MAIL_PROVIDER` / `MAIL_FROM` - Email delivery backend (`resend` | `mailgun` | `usesend` | `smtp`) and sender address; unset `MAIL_PROVIDER` disables email delivery. Per-provider credentials: `RESEND_API_KEY`; `MAILGUN_API_KEY` / `MAILGUN_DOMAIN` / `MAILGUN_REGION`; `USESEND_API_KEY` / `USESEND_BASE_URL` (self-hosted useSend); `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` / `SMTP_USER` / `SMTP_PASS` (needs the optional `nodemailer` dependency)
 - `PORT` / `HOST` - Server bind address (default: 3000 / 0.0.0.0)
 - `NODE_ENV` - Environment (development / production / test)
 - `LOG_ENABLED` - Set to `false` to disable all logging (default: `true`)
